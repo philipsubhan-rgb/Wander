@@ -13,11 +13,14 @@ const USER_AGENT = "TripPlannerApp/1.0 (contact@tripplanner.app)";
 
 async function tryWikipedia(term: string): Promise<string | null> {
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
     const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(term)}`;
     const res = await fetch(url, {
       headers: { "User-Agent": USER_AGENT },
-      signal: AbortSignal.timeout(5000),
+      signal: controller.signal,
     });
+    clearTimeout(timer);
     if (!res.ok) return null;
     const data = (await res.json()) as {
       originalimage?: { source: string };
