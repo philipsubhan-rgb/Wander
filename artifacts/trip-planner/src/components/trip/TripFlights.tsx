@@ -146,20 +146,22 @@ function AirportInput({ value, onChange, placeholder }: { value: string; onChang
 
 // ─── Flight search panel (external booking site deep-links) ──────────────────
 function FlightSearchPanel({
-  origin, destination, date,
+  origin, destination, date, airline = '', carrierCode = '',
 }: {
   origin: string; destination: string; date: string;
+  airline?: string; carrierCode?: string;
 }) {
   const canLink = origin.length === 3 && destination.length === 3 && date.length === 10;
 
-  // Kayak: /flights/JFK-LAX/2026-09-10
+  // Kayak: /flights/JFK-LAX/2026-09-10?airline=LH
   const kayakUrl = canLink
-    ? `https://www.kayak.com/flights/${origin.toUpperCase()}-${destination.toUpperCase()}/${date}`
+    ? `https://www.kayak.com/flights/${origin.toUpperCase()}-${destination.toUpperCase()}/${date}${carrierCode ? `?airline=${carrierCode}` : ''}`
     : null;
 
-  // Google Flights: simple query string works as a deep-link into the search
+  // Google Flights: append airline name to query when available
+  const airlineQuery = airline ? `+${encodeURIComponent(airline)}` : '';
   const googleUrl = canLink
-    ? `https://www.google.com/travel/flights/search?q=Flights+from+${origin.toUpperCase()}+to+${destination.toUpperCase()}+on+${date}`
+    ? `https://www.google.com/travel/flights/search?q=Flights+from+${origin.toUpperCase()}+to+${destination.toUpperCase()}+on+${date}${airlineQuery}`
     : null;
 
   // Skyscanner: /transport/flights/org/dst/YYMMDD/
@@ -369,6 +371,10 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
   const depAirport = form.watch('departureAirport');
   const arrAirport = form.watch('arrivalAirport');
   const depDatetime = form.watch('departureDatetime');
+  const airline = form.watch('airline');
+  const flightNumber = form.watch('flightNumber');
+  // Extract 2-letter IATA carrier code from the flight number (e.g. "LH 441" → "LH")
+  const carrierCode = flightNumber?.match(/^([A-Z]{2})/i)?.[1]?.toUpperCase() ?? '';
 
   // Keep search date in sync with the datetime field
   useEffect(() => {
@@ -488,6 +494,8 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
             origin={depAirport}
             destination={arrAirport}
             date={searchDate}
+            airline={airline}
+            carrierCode={carrierCode}
           />
         </div>
 
