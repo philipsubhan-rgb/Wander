@@ -530,15 +530,10 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
           </FormItem>
         )} />
 
-        {/* ── Flight picker: auto-appears once From + To + Date are set ── */}
-        <FlightPicker
-          origin={depAirport}
-          destination={arrAirport}
-          date={searchDate}
-          onSelect={handleSelectFlight}
-        />
+        {/* ── Flight picker: hidden until live flight data is available ── */}
+        {/* <FlightPicker origin={depAirport} destination={arrAirport} date={searchDate} onSelect={handleSelectFlight} /> */}
 
-        {/* Arrival date — auto-filled by picker, or set manually */}
+        {/* Arrival date */}
         <FormField control={form.control} name="arrivalDatetime" render={({ field }) => (
           <FormItem>
             <FormLabel>Arrival Date</FormLabel>
