@@ -160,6 +160,7 @@ function FlightPicker({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [keyMissing, setKeyMissing] = useState(false);
+  const [planRestricted, setPlanRestricted] = useState(false);
   const [selected, setSelected] = useState('');
 
   const ready = origin.length === 3 && destination.length === 3 && date.length === 10;
@@ -170,12 +171,14 @@ function FlightPicker({
       setSelected('');
       setError(null);
       setKeyMissing(false);
+      setPlanRestricted(false);
       return;
     }
     let cancelled = false;
     setLoading(true);
     setError(null);
     setKeyMissing(false);
+    setPlanRestricted(false);
     setFlights(null);
     setSelected('');
 
@@ -186,6 +189,7 @@ function FlightPicker({
       .catch(err => {
         if (cancelled) return;
         if (err?.error === 'AVIATIONSTACK_KEY_MISSING') setKeyMissing(true);
+        else if (err?.error === 'AVIATIONSTACK_PLAN_RESTRICTED') setPlanRestricted(true);
         else setError(err?.detail ?? err?.error ?? 'Could not load flights');
       })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -223,6 +227,15 @@ function FlightPicker({
               aviationstack.com
             </a>{' '}
             as the Replit Secret <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">AVIATIONSTACK_API_KEY</code>.
+          </p>
+        </div>
+      )}
+
+      {planRestricted && (
+        <div className="rounded-md border border-muted bg-muted/40 p-3 text-xs space-y-1">
+          <p className="font-semibold text-foreground">Live flight search requires a paid AviationStack plan</p>
+          <p className="text-muted-foreground leading-relaxed">
+            Enter your flight details manually below — airline, flight number, and departure/arrival times.
           </p>
         </div>
       )}

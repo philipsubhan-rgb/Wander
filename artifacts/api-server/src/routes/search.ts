@@ -44,6 +44,10 @@ router.get('/search/flights', requireAuth, async (req, res): Promise<void> => {
       res.status(503).json({ error: 'AVIATIONSTACK_KEY_MISSING' });
       return;
     }
+    if (err.message === 'AVIATIONSTACK_PLAN_RESTRICTED') {
+      res.status(402).json({ error: 'AVIATIONSTACK_PLAN_RESTRICTED' });
+      return;
+    }
     console.error('Flight search error:', err.message);
     res.status(502).json({ error: 'Flight search failed', detail: err.message });
   }

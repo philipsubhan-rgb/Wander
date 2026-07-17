@@ -49,7 +49,11 @@ export async function getScheduledFlights(
   };
 
   if (json.error) {
-    throw new Error(json.error.message ?? json.error.code ?? 'AviationStack API error');
+    const code = json.error.code ?? '';
+    if (code === 'function_access_restricted' || res.status === 403) {
+      throw new Error('AVIATIONSTACK_PLAN_RESTRICTED');
+    }
+    throw new Error(json.error.message ?? code ?? 'AviationStack API error');
   }
 
   const flights: ScheduledFlight[] = (json.data ?? [])
