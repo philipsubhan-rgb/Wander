@@ -15,12 +15,17 @@ import { format, parseISO } from 'date-fns';
 
 const API_BASE = `${import.meta.env.BASE_URL}api`;
 
+const DEFAULT_CHECKIN_TIME  = '15:00';
+const DEFAULT_CHECKOUT_TIME = '11:00';
+
 const accommSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   address: z.string().min(1, 'Address is required'),
   phone: z.string().optional(),
-  checkIn: z.string().min(1, 'Check-in is required'),
-  checkOut: z.string().min(1, 'Check-out is required'),
+  checkInDate:  z.string().min(1, 'Check-in date is required'),
+  checkInTime:  z.string().min(1, 'Check-in time is required'),
+  checkOutDate: z.string().min(1, 'Check-out date is required'),
+  checkOutTime: z.string().min(1, 'Check-out time is required'),
   type: z.enum(['hotel', 'airbnb', 'hostel', 'resort', 'other']).optional(),
   confirmationCode: z.string().optional(),
 });
@@ -240,24 +245,43 @@ function AccommForm({ tripId, stay, onSuccess }: { tripId: number, stay?: any, o
   const createStay = useCreateAccommodation();
   const updateStay = useUpdateAccommodation();
   
+  // Parse an ISO datetime string into { date: 'YYYY-MM-DD', time: 'HH:MM' }
+  const splitDateTime = (iso: string, defaultTime: string) => {
+    const local = iso.slice(0, 16); // 'YYYY-MM-DDTHH:MM'
+    if (local.length >= 16) return { date: local.slice(0, 10), time: local.slice(11, 16) };
+    return { date: '', time: defaultTime };
+  };
+
   const form = useForm<z.infer<typeof accommSchema>>({
     resolver: zodResolver(accommSchema),
-    defaultValues: stay ? {
-      ...stay,
-      phone: stay.phone ?? '',
-      checkIn: stay.checkIn.slice(0, 16),
-      checkOut: stay.checkOut.slice(0, 16),
-    } : {
-      name: '', address: '', phone: '', checkIn: '', checkOut: '', type: 'hotel', confirmationCode: ''
+    defaultValues: stay ? (() => {
+      const ci = splitDateTime(stay.checkIn,  DEFAULT_CHECKIN_TIME);
+      const co = splitDateTime(stay.checkOut, DEFAULT_CHECKOUT_TIME);
+      return {
+        ...stay,
+        phone: stay.phone ?? '',
+        checkInDate:  ci.date,
+        checkInTime:  ci.time,
+        checkOutDate: co.date,
+        checkOutTime: co.time,
+      };
+    })() : {
+      name: '', address: '', phone: '',
+      checkInDate: '', checkInTime: DEFAULT_CHECKIN_TIME,
+      checkOutDate: '', checkOutTime: DEFAULT_CHECKOUT_TIME,
+      type: 'hotel', confirmationCode: '',
     },
   });
 
   const onSubmit = (values: z.infer<typeof accommSchema>) => {
     const payload = {
-      ...values,
+      name: values.name,
+      address: values.address,
       phone: values.phone || undefined,
-      checkIn: new Date(values.checkIn).toISOString(),
-      checkOut: new Date(values.checkOut).toISOString(),
+      type: values.type,
+      confirmationCode: values.confirmationCode || undefined,
+      checkIn:  new Date(`${values.checkInDate}T${values.checkInTime}`).toISOString(),
+      checkOut: new Date(`${values.checkOutDate}T${values.checkOutTime}`).toISOString(),
     };
 
     if (stay) {
@@ -280,7 +304,7 @@ function AccommForm({ tripId, stay, onSuccess }: { tripId: number, stay?: any, o
   };
 
   const isPending = createStay.isPending || updateStay.isPending;
-  const checkIn = form.watch('checkIn');
+  const checkInDate = form.watch('checkInDate');
 
   return (
     <Form {...form}>
@@ -316,13 +340,42 @@ function AccommForm({ tripId, stay, onSuccess }: { tripId: number, stay?: any, o
           <FormItem><FormLabel>Phone</FormLabel><FormControl><Input type="tel" placeholder="+1 212 555 0100" {...field} /></FormControl><FormMessage /></FormItem>
         )} />
 
-        <div className="grid grid-cols-2 gap-4">
-          <FormField control={form.control} name="checkIn" render={({ field }) => (
-            <FormItem><FormLabel>Check-in</FormLabel><FormControl><Input type="datetime-local" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="checkOut" render={({ field }) => (
-            <FormItem><FormLabel>Check-out</FormLabel><FormControl><Input type="datetime-local" min={checkIn || undefined} {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
+        {/* Check-in: date + time (defaults to 3:00 PM) */}
+        <div>
+          <p className="text-sm font-medium mb-1.5">Check-in</p>
+          <div className="grid grid-cols-2 gap-2">
+            <FormField control={form.control} name="checkInDate" render={({ field }) => (
+              <FormItem>
+                <FormControl><Input type="date" {...field} /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="checkInTime" render={({ field }) => (
+              <FormItem>
+                <FormControl><Input type="time" {...field} /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+          </div>
+        </div>
+
+        {/* Check-out: date + time (defaults to 11:00 AM) */}
+        <div>
+          <p className="text-sm font-medium mb-1.5">Check-out</p>
+          <div className="grid grid-cols-2 gap-2">
+            <FormField control={form.control} name="checkOutDate" render={({ field }) => (
+              <FormItem>
+                <FormControl><Input type="date" min={checkInDate || undefined} {...field} /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="checkOutTime" render={({ field }) => (
+              <FormItem>
+                <FormControl><Input type="time" {...field} /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <FormField control={form.control} name="type" render={({ field }) => (
