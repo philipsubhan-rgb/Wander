@@ -20,12 +20,12 @@ const API_BASE = `${import.meta.env.BASE_URL}api`;
 const DEFAULT_CHECKIN_TIME  = '15:00';
 const DEFAULT_CHECKOUT_TIME = '11:00';
 
-const STAY_GRADIENTS: Record<string, string> = {
-  hotel:  'from-amber-500 to-orange-600',
-  airbnb: 'from-rose-400 to-pink-600',
-  hostel: 'from-sky-400 to-blue-600',
-  resort: 'from-teal-400 to-emerald-600',
-  other:  'from-slate-400 to-slate-600',
+const STAY_GRADIENTS: Record<string, [string, string]> = {
+  hotel:  ['#f59e0b', '#ea580c'],
+  airbnb: ['#fb7185', '#db2777'],
+  hostel: ['#38bdf8', '#2563eb'],
+  resort: ['#2dd4bf', '#059669'],
+  other:  ['#94a3b8', '#475569'],
 };
 
 const accommSchema = z.object({
@@ -192,7 +192,7 @@ function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tr
     }
   };
 
-  const gradient = STAY_GRADIENTS[stay.type ?? 'other'] ?? STAY_GRADIENTS.other;
+  const [gradFrom, gradTo] = STAY_GRADIENTS[stay.type ?? 'other'] ?? STAY_GRADIENTS.other;
   const hasMap = stay.lat != null && stay.lon != null;
 
   return (
@@ -206,7 +206,10 @@ function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tr
             className="h-full w-full object-cover"
           />
         ) : (
-          <div className={`h-full w-full bg-gradient-to-br ${gradient} flex items-center justify-center`}>
+          <div
+            style={{ background: `linear-gradient(to bottom right, ${gradFrom}, ${gradTo})` }}
+            className="h-full w-full flex items-center justify-center"
+          >
             <Home className="h-12 w-12 text-white/50" />
           </div>
         )}

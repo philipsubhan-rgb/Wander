@@ -17,14 +17,14 @@ import { fetchWikiImage } from '@/lib/wiki-image';
 
 const API_BASE = `${import.meta.env.BASE_URL}api`;
 
-const ACTIVITY_GRADIENTS: Record<string, string> = {
-  sightseeing: 'from-blue-400 to-indigo-600',
-  dining:      'from-orange-400 to-red-600',
-  adventure:   'from-green-400 to-emerald-600',
-  culture:     'from-purple-400 to-violet-600',
-  relaxation:  'from-teal-400 to-cyan-600',
-  transport:   'from-slate-400 to-gray-600',
-  other:       'from-stone-400 to-stone-600',
+const ACTIVITY_GRADIENTS: Record<string, [string, string]> = {
+  sightseeing: ['#60a5fa', '#4f46e5'],
+  dining:      ['#fb923c', '#dc2626'],
+  adventure:   ['#4ade80', '#059669'],
+  culture:     ['#c084fc', '#7c3aed'],
+  relaxation:  ['#2dd4bf', '#0891b2'],
+  transport:   ['#94a3b8', '#4b5563'],
+  other:       ['#a8a29e', '#78716c'],
 };
 
 const activitySchema = z.object({
@@ -196,7 +196,7 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
     }
   };
 
-  const gradient = ACTIVITY_GRADIENTS[activity.type ?? 'other'] ?? ACTIVITY_GRADIENTS.other;
+  const [gradFrom, gradTo] = ACTIVITY_GRADIENTS[activity.type ?? 'other'] ?? ACTIVITY_GRADIENTS.other;
   const hasMap = activity.lat != null && activity.lon != null;
 
   return (
@@ -210,7 +210,10 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
             className="h-full w-full object-cover"
           />
         ) : (
-          <div className={`h-full w-full bg-gradient-to-br ${gradient} flex items-center justify-center`}>
+          <div
+            style={{ background: `linear-gradient(to bottom right, ${gradFrom}, ${gradTo})` }}
+            className="h-full w-full flex items-center justify-center"
+          >
             <Compass className="h-10 w-10 text-white/50" />
           </div>
         )}
