@@ -124,7 +124,7 @@ function HotelNameInput({
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export function TripAccommodations({ tripId, editMode }: { tripId: number, editMode?: boolean }) {
+export function TripAccommodations({ tripId, editMode, tripStartDate, tripEndDate }: { tripId: number, editMode?: boolean, tripStartDate?: string, tripEndDate?: string }) {
   const { data: stays, isLoading } = useListAccommodations(tripId, { query: { enabled: !!tripId } });
   const [isAddOpen, setIsAddOpen] = useState(false);
 
@@ -140,7 +140,7 @@ export function TripAccommodations({ tripId, editMode }: { tripId: number, editM
             </DialogTrigger>
             <DialogContent>
               <DialogHeader><DialogTitle>Add Accommodation</DialogTitle></DialogHeader>
-              <AccommForm tripId={tripId} onSuccess={() => setIsAddOpen(false)} />
+              <AccommForm tripId={tripId} tripStartDate={tripStartDate} tripEndDate={tripEndDate} onSuccess={() => setIsAddOpen(false)} />
             </DialogContent>
           </Dialog>
         </div>
@@ -154,7 +154,7 @@ export function TripAccommodations({ tripId, editMode }: { tripId: number, editM
       ) : (
         <div className="grid md:grid-cols-2 gap-6">
           {stays.map(stay => (
-            <AccommCard key={stay.id} tripId={tripId} stay={stay} editMode={editMode} />
+            <AccommCard key={stay.id} tripId={tripId} stay={stay} editMode={editMode} tripStartDate={tripStartDate} tripEndDate={tripEndDate} />
           ))}
         </div>
       )}
@@ -164,7 +164,7 @@ export function TripAccommodations({ tripId, editMode }: { tripId: number, editM
 
 // ── Card ──────────────────────────────────────────────────────────────────────
 
-function AccommCard({ tripId, stay, editMode }: { tripId: number, stay: any, editMode?: boolean }) {
+function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tripId: number, stay: any, editMode?: boolean, tripStartDate?: string, tripEndDate?: string }) {
   const queryClient = useQueryClient();
   const deleteStay = useDeleteAccommodation();
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -191,7 +191,7 @@ function AccommCard({ tripId, stay, editMode }: { tripId: number, stay: any, edi
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader><DialogTitle>Edit Stay</DialogTitle></DialogHeader>
-                <AccommForm tripId={tripId} stay={stay} onSuccess={() => setIsEditOpen(false)} />
+                <AccommForm tripId={tripId} stay={stay} tripStartDate={tripStartDate} tripEndDate={tripEndDate} onSuccess={() => setIsEditOpen(false)} />
               </DialogContent>
             </Dialog>
             <Button variant="ghost" size="icon" onClick={handleDelete} className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive">
@@ -240,7 +240,7 @@ function AccommCard({ tripId, stay, editMode }: { tripId: number, stay: any, edi
 
 // ── Form ──────────────────────────────────────────────────────────────────────
 
-function AccommForm({ tripId, stay, onSuccess }: { tripId: number, stay?: any, onSuccess: () => void }) {
+function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { tripId: number, stay?: any, tripStartDate?: string, tripEndDate?: string, onSuccess: () => void }) {
   const queryClient = useQueryClient();
   const createStay = useCreateAccommodation();
   const updateStay = useUpdateAccommodation();
@@ -346,7 +346,7 @@ function AccommForm({ tripId, stay, onSuccess }: { tripId: number, stay?: any, o
           <div className="grid grid-cols-2 gap-2">
             <FormField control={form.control} name="checkInDate" render={({ field }) => (
               <FormItem>
-                <FormControl><Input type="date" {...field} /></FormControl>
+                <FormControl><Input type="date" min={tripStartDate} max={tripEndDate} {...field} /></FormControl>
                 <FormMessage />
               </FormItem>
             )} />
@@ -365,7 +365,7 @@ function AccommForm({ tripId, stay, onSuccess }: { tripId: number, stay?: any, o
           <div className="grid grid-cols-2 gap-2">
             <FormField control={form.control} name="checkOutDate" render={({ field }) => (
               <FormItem>
-                <FormControl><Input type="date" min={checkInDate || undefined} {...field} /></FormControl>
+                <FormControl><Input type="date" min={checkInDate || tripStartDate} max={tripEndDate} {...field} /></FormControl>
                 <FormMessage />
               </FormItem>
             )} />

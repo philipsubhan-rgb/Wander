@@ -22,7 +22,7 @@ const activitySchema = z.object({
   type: z.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
 });
 
-export function TripActivities({ tripId, editMode }: { tripId: number, editMode?: boolean }) {
+export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate }: { tripId: number, editMode?: boolean, tripStartDate?: string, tripEndDate?: string }) {
   const { data: activities, isLoading } = useListActivities(tripId, { query: { enabled: !!tripId } });
   const [isAddOpen, setIsAddOpen] = useState(false);
 
@@ -40,7 +40,7 @@ export function TripActivities({ tripId, editMode }: { tripId: number, editMode?
             </DialogTrigger>
             <DialogContent>
               <DialogHeader><DialogTitle>Add Activity</DialogTitle></DialogHeader>
-              <ActivityForm tripId={tripId} onSuccess={() => setIsAddOpen(false)} />
+              <ActivityForm tripId={tripId} tripStartDate={tripStartDate} tripEndDate={tripEndDate} onSuccess={() => setIsAddOpen(false)} />
             </DialogContent>
           </Dialog>
         </div>
@@ -54,7 +54,7 @@ export function TripActivities({ tripId, editMode }: { tripId: number, editMode?
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {sortedActivities.map(activity => (
-            <ActivityCard key={activity.id} tripId={tripId} activity={activity} editMode={editMode} />
+            <ActivityCard key={activity.id} tripId={tripId} activity={activity} editMode={editMode} tripStartDate={tripStartDate} tripEndDate={tripEndDate} />
           ))}
         </div>
       )}
@@ -62,7 +62,7 @@ export function TripActivities({ tripId, editMode }: { tripId: number, editMode?
   );
 }
 
-function ActivityCard({ tripId, activity, editMode }: { tripId: number, activity: any, editMode?: boolean }) {
+function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate }: { tripId: number, activity: any, editMode?: boolean, tripStartDate?: string, tripEndDate?: string }) {
   const queryClient = useQueryClient();
   const deleteActivity = useDeleteActivity();
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -89,7 +89,7 @@ function ActivityCard({ tripId, activity, editMode }: { tripId: number, activity
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader><DialogTitle>Edit Activity</DialogTitle></DialogHeader>
-                <ActivityForm tripId={tripId} activity={activity} onSuccess={() => setIsEditOpen(false)} />
+                <ActivityForm tripId={tripId} activity={activity} tripStartDate={tripStartDate} tripEndDate={tripEndDate} onSuccess={() => setIsEditOpen(false)} />
               </DialogContent>
             </Dialog>
             <Button variant="ghost" size="icon" onClick={handleDelete} className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive">
@@ -135,7 +135,7 @@ function ActivityCard({ tripId, activity, editMode }: { tripId: number, activity
   );
 }
 
-function ActivityForm({ tripId, activity, onSuccess }: { tripId: number, activity?: any, onSuccess: () => void }) {
+function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, onSuccess }: { tripId: number, activity?: any, tripStartDate?: string, tripEndDate?: string, onSuccess: () => void }) {
   const queryClient = useQueryClient();
   const createActivity = useCreateActivity();
   const updateActivity = useUpdateActivity();
@@ -179,7 +179,7 @@ function ActivityForm({ tripId, activity, onSuccess }: { tripId: number, activit
         )} />
         <div className="grid grid-cols-2 gap-4">
           <FormField control={form.control} name="date" render={({ field }) => (
-            <FormItem><FormLabel>Date</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
+            <FormItem><FormLabel>Date</FormLabel><FormControl><Input type="date" min={tripStartDate} max={tripEndDate} {...field} /></FormControl><FormMessage /></FormItem>
           )} />
           <FormField control={form.control} name="time" render={({ field }) => (
             <FormItem><FormLabel>Time</FormLabel><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>

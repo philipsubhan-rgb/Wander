@@ -285,7 +285,7 @@ const flightSchema = z.object({
 });
 
 // ─── Trip flights list ────────────────────────────────────────────────────────
-export function TripFlights({ tripId, editMode }: { tripId: number; editMode?: boolean }) {
+export function TripFlights({ tripId, editMode, tripStartDate, tripEndDate }: { tripId: number; editMode?: boolean; tripStartDate?: string; tripEndDate?: string }) {
   const { data: flights, isLoading } = useListFlights(tripId, { query: { enabled: !!tripId } });
   const [isAddOpen, setIsAddOpen] = useState(false);
 
@@ -301,7 +301,7 @@ export function TripFlights({ tripId, editMode }: { tripId: number; editMode?: b
             </DialogTrigger>
             <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
               <DialogHeader><DialogTitle>Add Flight</DialogTitle></DialogHeader>
-              <FlightForm tripId={tripId} onSuccess={() => setIsAddOpen(false)} />
+              <FlightForm tripId={tripId} tripStartDate={tripStartDate} onSuccess={() => setIsAddOpen(false)} />
             </DialogContent>
           </Dialog>
         </div>
@@ -315,7 +315,7 @@ export function TripFlights({ tripId, editMode }: { tripId: number; editMode?: b
       ) : (
         <div className="grid gap-4">
           {flights.map(flight => (
-            <FlightCard key={flight.id} tripId={tripId} flight={flight} editMode={editMode} />
+            <FlightCard key={flight.id} tripId={tripId} flight={flight} editMode={editMode} tripStartDate={tripStartDate} />
           ))}
         </div>
       )}
@@ -324,7 +324,7 @@ export function TripFlights({ tripId, editMode }: { tripId: number; editMode?: b
 }
 
 // ─── Flight card ──────────────────────────────────────────────────────────────
-function FlightCard({ tripId, flight, editMode }: { tripId: number; flight: any; editMode?: boolean }) {
+function FlightCard({ tripId, flight, editMode, tripStartDate }: { tripId: number; flight: any; editMode?: boolean; tripStartDate?: string }) {
   const queryClient = useQueryClient();
   const deleteFlight = useDeleteFlight();
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -354,7 +354,7 @@ function FlightCard({ tripId, flight, editMode }: { tripId: number; flight: any;
               </DialogTrigger>
               <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
                 <DialogHeader><DialogTitle>Edit Flight</DialogTitle></DialogHeader>
-                <FlightForm tripId={tripId} flight={flight} onSuccess={() => setIsEditOpen(false)} />
+                <FlightForm tripId={tripId} flight={flight} tripStartDate={tripStartDate} onSuccess={() => setIsEditOpen(false)} />
               </DialogContent>
             </Dialog>
             <Button variant="ghost" size="icon" onClick={handleDelete}
@@ -411,7 +411,7 @@ function FlightCard({ tripId, flight, editMode }: { tripId: number; flight: any;
 }
 
 // ─── Flight form ──────────────────────────────────────────────────────────────
-function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: any; onSuccess: () => void }) {
+function FlightForm({ tripId, flight, tripStartDate, onSuccess }: { tripId: number; flight?: any; tripStartDate?: string; onSuccess: () => void }) {
   const queryClient = useQueryClient();
   const createFlight = useCreateFlight();
   const updateFlight = useUpdateFlight();
@@ -525,7 +525,7 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
         <FormField control={form.control} name="departureDatetime" render={({ field }) => (
           <FormItem>
             <FormLabel>Departure Date</FormLabel>
-            <FormControl><Input type="datetime-local" {...field} /></FormControl>
+            <FormControl><Input type="datetime-local" min={tripStartDate ? `${tripStartDate}T00:00` : undefined} {...field} /></FormControl>
             <FormMessage />
           </FormItem>
         )} />
@@ -533,11 +533,11 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
         {/* ── Flight picker: hidden until live flight data is available ── */}
         {/* <FlightPicker origin={depAirport} destination={arrAirport} date={searchDate} onSelect={handleSelectFlight} /> */}
 
-        {/* Arrival date */}
+        {/* Arrival date — no earlier than departure */}
         <FormField control={form.control} name="arrivalDatetime" render={({ field }) => (
           <FormItem>
             <FormLabel>Arrival Date</FormLabel>
-            <FormControl><Input type="datetime-local" {...field} /></FormControl>
+            <FormControl><Input type="datetime-local" min={depDatetime || (tripStartDate ? `${tripStartDate}T00:00` : undefined)} {...field} /></FormControl>
             <FormMessage />
           </FormItem>
         )} />
