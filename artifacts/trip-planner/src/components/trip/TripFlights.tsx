@@ -422,12 +422,18 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
   const depDatetime = form.watch('departureDatetime');
   const searchDate = depDatetime?.slice(0, 10) ?? '';
 
-  // When a flight is picked from the dropdown, fill all related fields
+  // When a flight is picked from the dropdown, fill all related fields atomically
   const handleSelectFlight = (f: ScheduledFlight) => {
-    form.setValue('airline', f.airline, { shouldDirty: true });
-    form.setValue('flightNumber', f.flightNumber, { shouldDirty: true });
-    form.setValue('departureDatetime', f.departureTime.slice(0, 16), { shouldDirty: true });
-    form.setValue('arrivalDatetime', f.arrivalTime.slice(0, 16), { shouldDirty: true });
+    form.reset(
+      {
+        ...form.getValues(),
+        airline: f.airline,
+        flightNumber: f.flightNumber,
+        departureDatetime: f.departureTime.slice(0, 16),
+        arrivalDatetime: f.arrivalTime.slice(0, 16),
+      },
+      { keepDirty: true, keepIsSubmitted: true, keepTouched: true, keepErrors: false },
+    );
   };
 
   const onSubmit = (values: z.infer<typeof flightSchema>) => {
@@ -523,7 +529,7 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
         <FormField control={form.control} name="arrivalDatetime" render={({ field }) => (
           <FormItem>
             <FormLabel>Arrival Date</FormLabel>
-            <FormControl><Input type="datetime-local" min={depDatetime || undefined} {...field} /></FormControl>
+            <FormControl><Input type="datetime-local" {...field} /></FormControl>
             <FormMessage />
           </FormItem>
         )} />
