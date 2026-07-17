@@ -1,18 +1,291 @@
-import { useListFlights, useCreateFlight, useUpdateFlight, useDeleteFlight, getListFlightsQueryKey } from '@workspace/api-client-react';
-import { useState } from 'react';
+import {
+  useListFlights, useCreateFlight, useUpdateFlight, useDeleteFlight, getListFlightsQueryKey,
+} from '@workspace/api-client-react';
+import { useState, useRef, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plane, PlaneTakeoff, PlaneLanding, Plus, Trash2, Pencil } from 'lucide-react';
+import {
+  Plane, PlaneTakeoff, Plus, Trash2, Pencil, Loader2, Search,
+  Clock, ArrowRight, AlertCircle, CheckCircle2,
+} from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+type AirlineSuggestion = { code: string; name: string };
+type AirportSuggestion = { iata: string; name: string; city: string; country: string };
+type FlightOffer = {
+  id: string; airline: string; carrierCode: string; flightNumber: string;
+  stops: number; totalDuration: string; price: string | null; currency: string;
+  departureAirport: string; arrivalAirport: string;
+  departureTime: string; arrivalTime: string;
+};
+
+// ─── Base URL for API (mirrors the pattern used by the generated client) ──────
+const API_BASE = '/api';
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw err;
+  }
+  return res.json();
+}
+
+// ─── Autocomplete hook ────────────────────────────────────────────────────────
+function useAutocomplete<T>(endpoint: string, query: string, minLen = 1) {
+  const [results, setResults] = useState<T[]>([]);
+  const [loading, setLoading] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (query.length < minLen) { setResults([]); return; }
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const data = await fetchJson<T[]>(`${API_BASE}${endpoint}?q=${encodeURIComponent(query)}`);
+        setResults(data);
+      } catch { setResults([]); }
+      finally { setLoading(false); }
+    }, 200);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [query, endpoint, minLen]);
+
+  return { results, loading };
+}
+
+// ─── Autocomplete input component ─────────────────────────────────────────────
+function AutocompleteInput<T extends Record<string, string>>({
+  value, onChange, placeholder, endpoint, renderItem, getLabel, minLen = 1,
+}: {
+  value: string; onChange: (val: string) => void; placeholder?: string;
+  endpoint: string; renderItem: (item: T) => React.ReactNode;
+  getLabel: (item: T) => string; minLen?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const { results, loading } = useAutocomplete<T>(endpoint, value, minLen);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div className="relative">
+        <Input
+          value={value}
+          onChange={e => { onChange(e.target.value); setOpen(true); }}
+          onFocus={() => { if (value.length >= minLen) setOpen(true); }}
+          placeholder={placeholder}
+          className="uppercase"
+          autoComplete="off"
+        />
+        {loading && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />}
+      </div>
+      {open && results.length > 0 && (
+        <div className="absolute z-50 mt-1 w-full rounded-lg border bg-popover shadow-md overflow-hidden">
+          {results.map((item, i) => (
+            <button
+              key={i} type="button"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors"
+              onMouseDown={e => { e.preventDefault(); onChange(getLabel(item)); setOpen(false); }}
+            >
+              {renderItem(item)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Airline input ────────────────────────────────────────────────────────────
+function AirlineInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <AutocompleteInput<AirlineSuggestion>
+      value={value} onChange={onChange}
+      placeholder="e.g. Lufthansa"
+      endpoint="/search/airlines"
+      minLen={1}
+      getLabel={a => a.name}
+      renderItem={a => (
+        <span className="flex items-center gap-2 normal-case">
+          <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">{a.code}</span>
+          <span>{a.name}</span>
+        </span>
+      )}
+    />
+  );
+}
+
+// ─── Airport input ────────────────────────────────────────────────────────────
+function AirportInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <AutocompleteInput<AirportSuggestion>
+      value={value} onChange={onChange}
+      placeholder={placeholder ?? 'e.g. JFK or New York'}
+      endpoint="/search/airports"
+      minLen={2}
+      getLabel={a => a.iata}
+      renderItem={a => (
+        <span className="flex items-center gap-2 normal-case">
+          <span className="font-mono font-bold text-primary w-10 shrink-0">{a.iata}</span>
+          <span className="truncate text-muted-foreground">{a.city}, {a.country} — {a.name}</span>
+        </span>
+      )}
+    />
+  );
+}
+
+// ─── Flight search panel ───────────────────────────────────────────────────────
+function formatDuration(iso: string) {
+  // PT2H30M → 2h 30m
+  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
+  if (!m) return iso;
+  const h = m[1] ? `${m[1]}h ` : '';
+  const min = m[2] ? `${m[2]}m` : '';
+  return `${h}${min}`.trim();
+}
+
+function FlightSearchPanel({
+  origin, destination, date, onSelect,
+}: {
+  origin: string; destination: string; date: string;
+  onSelect: (offer: FlightOffer) => void;
+}) {
+  const [flights, setFlights] = useState<FlightOffer[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [credsMissing, setCredsMissing] = useState(false);
+
+  const canSearch = origin.length === 3 && destination.length === 3 && date.length === 10;
+
+  const handleSearch = async () => {
+    setLoading(true); setError(null); setCredsMissing(false); setFlights(null);
+    try {
+      const data = await fetchJson<FlightOffer[]>(
+        `${API_BASE}/search/flights?origin=${origin}&destination=${destination}&date=${date}`
+      );
+      setFlights(data);
+    } catch (e: any) {
+      if (e?.error === 'AMADEUS_CREDENTIALS_MISSING') {
+        setCredsMissing(true);
+      } else {
+        setError(e?.detail ?? e?.error ?? 'Flight search failed');
+      }
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="mt-2 space-y-3">
+      <Button
+        type="button" variant="outline" size="sm"
+        onClick={handleSearch}
+        disabled={!canSearch || loading}
+        className="w-full gap-2"
+      >
+        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+        {loading ? 'Searching flights…' : `Search flights ${origin} → ${destination}`}
+      </Button>
+
+      {!canSearch && (
+        <p className="text-xs text-muted-foreground text-center">
+          Enter 3-letter airport codes and a departure date to search flights
+        </p>
+      )}
+
+      {credsMissing && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-4 text-sm space-y-2">
+          <div className="flex items-center gap-2 font-medium text-amber-800 dark:text-amber-400">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            Amadeus API credentials required
+          </div>
+          <p className="text-amber-700 dark:text-amber-500 text-xs leading-relaxed">
+            Live flight search uses the free Amadeus API. Create an account at{' '}
+            <a href="https://developers.amadeus.com" target="_blank" rel="noopener noreferrer" className="underline font-medium">
+              developers.amadeus.com
+            </a>
+            , create a test app, and add <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">AMADEUS_CLIENT_ID</code> and{' '}
+            <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">AMADEUS_CLIENT_SECRET</code> as Secrets in your Replit project.
+          </p>
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 shrink-0" /> {error}
+        </div>
+      )}
+
+      {flights && flights.length === 0 && (
+        <p className="text-center text-sm text-muted-foreground py-4">No flights found for this route and date.</p>
+      )}
+
+      {flights && flights.length > 0 && (
+        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+          <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{flights.length} flights found — click to use</p>
+          {flights.map(f => (
+            <button
+              key={f.id} type="button"
+              onClick={() => onSelect(f)}
+              className="w-full text-left rounded-lg border p-3 hover:border-primary hover:bg-primary/5 transition-all group"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded shrink-0">{f.flightNumber}</span>
+                  <span className="text-sm font-medium truncate">{f.airline}</span>
+                </div>
+                {f.price && (
+                  <span className="text-sm font-bold text-primary shrink-0">{f.currency} {f.price}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 mt-2 text-sm">
+                <div className="text-center">
+                  <div className="font-bold">{format(parseISO(f.departureTime), 'HH:mm')}</div>
+                  <div className="text-xs text-muted-foreground">{f.departureAirport}</div>
+                </div>
+                <div className="flex-1 flex flex-col items-center gap-0.5">
+                  <div className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock className="h-3 w-3" />{formatDuration(f.totalDuration)}
+                  </div>
+                  <div className="w-full flex items-center gap-1">
+                    <div className="h-px flex-1 bg-border" />
+                    <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                    <div className="h-px flex-1 bg-border" />
+                  </div>
+                  {f.stops > 0 && (
+                    <div className="text-xs text-amber-600">{f.stops} stop{f.stops > 1 ? 's' : ''}</div>
+                  )}
+                </div>
+                <div className="text-center">
+                  <div className="font-bold">{format(parseISO(f.arrivalTime), 'HH:mm')}</div>
+                  <div className="text-xs text-muted-foreground">{f.arrivalAirport}</div>
+                </div>
+                <CheckCircle2 className="h-4 w-4 text-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Schema ───────────────────────────────────────────────────────────────────
 const flightSchema = z.object({
   flightNumber: z.string().min(1, 'Flight number is required'),
   airline: z.string().min(1, 'Airline is required'),
@@ -24,11 +297,12 @@ const flightSchema = z.object({
   direction: z.enum(['outbound', 'return', 'connecting']).optional(),
 });
 
-export function TripFlights({ tripId, editMode }: { tripId: number, editMode?: boolean }) {
+// ─── Flight list ──────────────────────────────────────────────────────────────
+export function TripFlights({ tripId, editMode }: { tripId: number; editMode?: boolean }) {
   const { data: flights, isLoading } = useListFlights(tripId, { query: { enabled: !!tripId } });
   const [isAddOpen, setIsAddOpen] = useState(false);
 
-  if (isLoading) return <div>Loading flights...</div>;
+  if (isLoading) return <div>Loading flights…</div>;
 
   return (
     <div className="space-y-6">
@@ -38,7 +312,7 @@ export function TripFlights({ tripId, editMode }: { tripId: number, editMode?: b
             <DialogTrigger asChild>
               <Button><Plus className="h-4 w-4 mr-2" /> Add Flight</Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
               <DialogHeader><DialogTitle>Add Flight</DialogTitle></DialogHeader>
               <FlightForm tripId={tripId} onSuccess={() => setIsAddOpen(false)} />
             </DialogContent>
@@ -47,10 +321,10 @@ export function TripFlights({ tripId, editMode }: { tripId: number, editMode?: b
       )}
 
       {(!flights || flights.length === 0) ? (
-         <div className="text-center py-12 bg-muted/50 rounded-xl border border-dashed">
-           <Plane className="h-10 w-10 text-muted-foreground mx-auto mb-4" />
-           <p className="text-lg font-medium">No flights added</p>
-         </div>
+        <div className="text-center py-12 bg-muted/50 rounded-xl border border-dashed">
+          <Plane className="h-10 w-10 text-muted-foreground mx-auto mb-4" />
+          <p className="text-lg font-medium">No flights added</p>
+        </div>
       ) : (
         <div className="grid gap-4">
           {flights.map(flight => (
@@ -62,7 +336,8 @@ export function TripFlights({ tripId, editMode }: { tripId: number, editMode?: b
   );
 }
 
-function FlightCard({ tripId, flight, editMode }: { tripId: number, flight: any, editMode?: boolean }) {
+// ─── Flight card ──────────────────────────────────────────────────────────────
+function FlightCard({ tripId, flight, editMode }: { tripId: number; flight: any; editMode?: boolean }) {
   const queryClient = useQueryClient();
   const deleteFlight = useDeleteFlight();
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -73,7 +348,8 @@ function FlightCard({ tripId, flight, editMode }: { tripId: number, flight: any,
         onSuccess: () => {
           toast.success('Flight deleted');
           queryClient.invalidateQueries({ queryKey: getListFlightsQueryKey(tripId) });
-        }
+        },
+        onError: () => toast.error('Failed to delete flight'),
       });
     }
   };
@@ -85,14 +361,17 @@ function FlightCard({ tripId, flight, editMode }: { tripId: number, flight: any,
           <>
             <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
               <DialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"><Pencil className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Pencil className="h-4 w-4" />
+                </Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
                 <DialogHeader><DialogTitle>Edit Flight</DialogTitle></DialogHeader>
                 <FlightForm tripId={tripId} flight={flight} onSuccess={() => setIsEditOpen(false)} />
               </DialogContent>
             </Dialog>
-            <Button variant="ghost" size="icon" onClick={handleDelete} className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive">
+            <Button variant="ghost" size="icon" onClick={handleDelete}
+              className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive">
               <Trash2 className="h-4 w-4" />
             </Button>
           </>
@@ -122,13 +401,13 @@ function FlightCard({ tripId, flight, editMode }: { tripId: number, flight: any,
               <p className="text-lg text-primary">{flight.departureAirport}</p>
               <p className="text-xs text-muted-foreground">{format(parseISO(flight.departureDatetime), 'MMM d, yyyy')}</p>
             </div>
-            
+
             <div className="flex flex-col items-center px-4 flex-1">
               <span className="text-xs text-muted-foreground mb-1 uppercase">{flight.direction || 'flight'}</span>
               <div className="w-full flex items-center relative">
-                <div className="h-px bg-border flex-1"></div>
+                <div className="h-px bg-border flex-1" />
                 <PlaneTakeoff className="h-4 w-4 text-muted-foreground mx-2" />
-                <div className="h-px bg-border flex-1"></div>
+                <div className="h-px bg-border flex-1" />
               </div>
             </div>
 
@@ -144,22 +423,46 @@ function FlightCard({ tripId, flight, editMode }: { tripId: number, flight: any,
   );
 }
 
-function FlightForm({ tripId, flight, onSuccess }: { tripId: number, flight?: any, onSuccess: () => void }) {
+// ─── Flight form ──────────────────────────────────────────────────────────────
+function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: any; onSuccess: () => void }) {
   const queryClient = useQueryClient();
   const createFlight = useCreateFlight();
   const updateFlight = useUpdateFlight();
-  
+
+  // Extract date-only for flight search (YYYY-MM-DD)
+  const [searchDate, setSearchDate] = useState(
+    flight?.departureDatetime ? flight.departureDatetime.slice(0, 10) : ''
+  );
+
   const form = useForm<z.infer<typeof flightSchema>>({
     resolver: zodResolver(flightSchema),
-    defaultValues: flight ? {
-      ...flight,
-      departureDatetime: flight.departureDatetime.slice(0, 16),
-      arrivalDatetime: flight.arrivalDatetime.slice(0, 16),
-    } : {
-      flightNumber: '', airline: '', departureAirport: '', arrivalAirport: '',
-      departureDatetime: '', arrivalDatetime: '', confirmationCode: '', direction: 'outbound'
-    },
+    defaultValues: flight
+      ? {
+          ...flight,
+          departureDatetime: flight.departureDatetime.slice(0, 16),
+          arrivalDatetime: flight.arrivalDatetime.slice(0, 16),
+        }
+      : { flightNumber: '', airline: '', departureAirport: '', arrivalAirport: '', departureDatetime: '', arrivalDatetime: '', confirmationCode: '', direction: 'outbound' },
   });
+
+  const depAirport = form.watch('departureAirport');
+  const arrAirport = form.watch('arrivalAirport');
+  const depDatetime = form.watch('departureDatetime');
+
+  // Keep search date in sync with the datetime field
+  useEffect(() => {
+    if (depDatetime && depDatetime.length >= 10) setSearchDate(depDatetime.slice(0, 10));
+  }, [depDatetime]);
+
+  const handleSelectOffer = (offer: FlightOffer) => {
+    form.setValue('airline', offer.airline);
+    form.setValue('flightNumber', offer.flightNumber);
+    form.setValue('departureAirport', offer.departureAirport);
+    form.setValue('arrivalAirport', offer.arrivalAirport);
+    form.setValue('departureDatetime', offer.departureTime.slice(0, 16));
+    form.setValue('arrivalDatetime', offer.arrivalTime.slice(0, 16));
+    toast.success('Flight details filled in — review and save');
+  };
 
   const onSubmit = (values: z.infer<typeof flightSchema>) => {
     const payload = {
@@ -174,7 +477,8 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number, flight?: an
           toast.success('Flight updated');
           queryClient.invalidateQueries({ queryKey: getListFlightsQueryKey(tripId) });
           onSuccess();
-        }
+        },
+        onError: () => toast.error('Failed to update flight'),
       });
     } else {
       createFlight.mutate({ tripId, data: payload }, {
@@ -182,7 +486,8 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number, flight?: an
           toast.success('Flight added');
           queryClient.invalidateQueries({ queryKey: getListFlightsQueryKey(tripId) });
           onSuccess();
-        }
+        },
+        onError: () => toast.error('Failed to add flight'),
       });
     }
   };
@@ -191,38 +496,75 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number, flight?: an
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-4">
-        <div className="grid grid-cols-2 gap-4">
-          <FormField control={form.control} name="airline" render={({ field }) => (
-            <FormItem><FormLabel>Airline</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="flightNumber" render={({ field }) => (
-            <FormItem><FormLabel>Flight Number</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-2">
+        {/* Airline */}
+        <FormField control={form.control} name="airline" render={({ field }) => (
+          <FormItem>
+            <FormLabel>Airline</FormLabel>
+            <FormControl>
+              <AirlineInput value={field.value} onChange={field.onChange} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )} />
+
+        {/* Flight number */}
+        <FormField control={form.control} name="flightNumber" render={({ field }) => (
+          <FormItem>
+            <FormLabel>Flight Number</FormLabel>
+            <FormControl><Input {...field} placeholder="e.g. LH 441" /></FormControl>
+            <FormMessage />
+          </FormItem>
+        )} />
+
+        {/* Airports */}
         <div className="grid grid-cols-2 gap-4">
           <FormField control={form.control} name="departureAirport" render={({ field }) => (
-            <FormItem><FormLabel>From (Code)</FormLabel><FormControl><Input {...field} maxLength={3} className="uppercase" /></FormControl><FormMessage /></FormItem>
+            <FormItem>
+              <FormLabel>From</FormLabel>
+              <FormControl>
+                <AirportInput value={field.value} onChange={field.onChange} placeholder="City or code" />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
           )} />
           <FormField control={form.control} name="arrivalAirport" render={({ field }) => (
-            <FormItem><FormLabel>To (Code)</FormLabel><FormControl><Input {...field} maxLength={3} className="uppercase" /></FormControl><FormMessage /></FormItem>
+            <FormItem>
+              <FormLabel>To</FormLabel>
+              <FormControl>
+                <AirportInput value={field.value} onChange={field.onChange} placeholder="City or code" />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
           )} />
         </div>
+
+        {/* Datetimes */}
         <div className="grid grid-cols-2 gap-4">
           <FormField control={form.control} name="departureDatetime" render={({ field }) => (
-            <FormItem><FormLabel>Departure Time</FormLabel><FormControl><Input type="datetime-local" {...field} /></FormControl><FormMessage /></FormItem>
+            <FormItem>
+              <FormLabel>Departure</FormLabel>
+              <FormControl><Input type="datetime-local" {...field} /></FormControl>
+              <FormMessage />
+            </FormItem>
           )} />
           <FormField control={form.control} name="arrivalDatetime" render={({ field }) => (
-            <FormItem><FormLabel>Arrival Time</FormLabel><FormControl><Input type="datetime-local" {...field} /></FormControl><FormMessage /></FormItem>
+            <FormItem>
+              <FormLabel>Arrival</FormLabel>
+              <FormControl><Input type="datetime-local" {...field} /></FormControl>
+              <FormMessage />
+            </FormItem>
           )} />
         </div>
+
+        {/* Confirmation + direction */}
         <div className="grid grid-cols-2 gap-4">
           <FormField control={form.control} name="confirmationCode" render={({ field }) => (
             <FormItem><FormLabel>Confirmation Code</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
           )} />
           <FormField control={form.control} name="direction" render={({ field }) => (
             <FormItem><FormLabel>Direction</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
+              <Select onValueChange={field.onChange} value={field.value}>
                 <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                 <SelectContent>
                   <SelectItem value="outbound">Outbound</SelectItem>
@@ -233,8 +575,25 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number, flight?: an
             <FormMessage /></FormItem>
           )} />
         </div>
-        <div className="flex justify-end pt-4">
-          <Button type="submit" disabled={isPending}>{isPending ? 'Saving...' : 'Save Flight'}</Button>
+
+        {/* Live flight search */}
+        <div className="border-t pt-4">
+          <p className="text-sm font-medium text-foreground mb-1">Search available flights</p>
+          <p className="text-xs text-muted-foreground mb-3">
+            Enter airport codes and a departure date above, then search for real-time options to auto-fill the form.
+          </p>
+          <FlightSearchPanel
+            origin={depAirport}
+            destination={arrAirport}
+            date={searchDate}
+            onSelect={handleSelectOffer}
+          />
+        </div>
+
+        <div className="flex justify-end pt-2">
+          <Button type="submit" disabled={isPending}>
+            {isPending ? 'Saving…' : 'Save Flight'}
+          </Button>
         </div>
       </form>
     </Form>

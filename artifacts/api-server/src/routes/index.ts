@@ -9,6 +9,7 @@ import activitiesRouter from "./activities";
 import itineraryRouter from "./itinerary";
 import packingRouter from "./packing";
 import notesRouter from "./notes";
+import searchRouter from "./search";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(activitiesRouter);
 router.use(itineraryRouter);
 router.use(packingRouter);
 router.use(notesRouter);
+router.use(searchRouter);
 
 export default router;
