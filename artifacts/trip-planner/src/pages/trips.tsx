@@ -225,6 +225,8 @@ function NewTripForm({ onSuccess }: { onSuccess: () => void }) {
     });
   };
 
+  const startDate = form.watch('startDate');
+
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-4">
@@ -275,7 +277,7 @@ function NewTripForm({ onSuccess }: { onSuccess: () => void }) {
               <FormItem>
                 <FormLabel>End Date</FormLabel>
                 <FormControl>
-                  <Input type="date" {...field} />
+                  <Input type="date" min={startDate || undefined} {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>

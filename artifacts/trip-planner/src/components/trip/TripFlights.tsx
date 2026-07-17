@@ -453,7 +453,7 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
           <FormField control={form.control} name="arrivalDatetime" render={({ field }) => (
             <FormItem>
               <FormLabel>Arrival</FormLabel>
-              <FormControl><Input type="datetime-local" {...field} /></FormControl>
+              <FormControl><Input type="datetime-local" min={depDatetime || undefined} {...field} /></FormControl>
               <FormMessage />
             </FormItem>
           )} />

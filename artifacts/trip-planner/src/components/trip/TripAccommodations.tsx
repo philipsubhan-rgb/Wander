@@ -171,6 +171,7 @@ function AccommForm({ tripId, stay, onSuccess }: { tripId: number, stay?: any, o
   };
 
   const isPending = createStay.isPending || updateStay.isPending;
+  const checkIn = form.watch('checkIn');
 
   return (
     <Form {...form}>
@@ -186,7 +187,7 @@ function AccommForm({ tripId, stay, onSuccess }: { tripId: number, stay?: any, o
             <FormItem><FormLabel>Check-in</FormLabel><FormControl><Input type="datetime-local" {...field} /></FormControl><FormMessage /></FormItem>
           )} />
           <FormField control={form.control} name="checkOut" render={({ field }) => (
-            <FormItem><FormLabel>Check-out</FormLabel><FormControl><Input type="datetime-local" {...field} /></FormControl><FormMessage /></FormItem>
+            <FormItem><FormLabel>Check-out</FormLabel><FormControl><Input type="datetime-local" min={checkIn || undefined} {...field} /></FormControl><FormMessage /></FormItem>
           )} />
         </div>
         <div className="grid grid-cols-2 gap-4">

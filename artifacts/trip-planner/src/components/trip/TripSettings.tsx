@@ -97,6 +97,8 @@ export function TripSettings({ trip }: { trip: any }) {
     });
   };
 
+  const startDate = form.watch('startDate');
+
   // filter users not already in trip
   const availableUsers = users?.filter(u => !participants?.some(p => p.id === u.id));
 
@@ -118,7 +120,7 @@ export function TripSettings({ trip }: { trip: any }) {
                   <FormItem><FormLabel>Start Date</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
                 )} />
                 <FormField control={form.control} name="endDate" render={({ field }) => (
-                  <FormItem><FormLabel>End Date</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
+                  <FormItem><FormLabel>End Date</FormLabel><FormControl><Input type="date" min={startDate || undefined} {...field} /></FormControl><FormMessage /></FormItem>
                 )} />
               </div>
               <FormField control={form.control} name="status" render={({ field }) => (
