@@ -584,7 +584,7 @@ function FlightForm({ tripId, flight, tripStartDate, onSuccess }: { tripId: numb
           )} />
           <FormField control={form.control} name="confirmationCode" render={({ field }) => (
             <FormItem>
-              <FormLabel>Confirmation Code</FormLabel>
+              <FormLabel>Confirmation Code <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
               <FormControl><Input {...field} /></FormControl>
               <FormMessage />
             </FormItem>

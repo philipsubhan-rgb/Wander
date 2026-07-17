@@ -456,7 +456,7 @@ function CarRentalForm({ tripId, rental, tripStartDate, tripEndDate, tripDestina
             </FormItem>
           )} />
           <FormField control={form.control} name="confirmationCode" render={({ field }) => (
-            <FormItem><FormLabel>Confirmation Code</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+            <FormItem><FormLabel>Confirmation Code <span className="text-muted-foreground font-normal">(optional)</span></FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
           )} />
         </div>
 
