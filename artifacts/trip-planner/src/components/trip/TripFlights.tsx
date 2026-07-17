@@ -12,16 +12,23 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import {
-  Plane, PlaneTakeoff, Plus, Trash2, Pencil, Loader2, Search,
-} from 'lucide-react';
+import { Plane, PlaneTakeoff, Plus, Trash2, Pencil, Loader2 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type AirlineSuggestion = { code: string; name: string };
 type AirportSuggestion = { iata: string; name: string; city: string; country: string };
+type ScheduledFlight = {
+  flightNumber: string;
+  airline: string;
+  carrierCode: string;
+  departureAirport: string;
+  arrivalAirport: string;
+  departureTime: string; // ISO 8601
+  arrivalTime: string;   // ISO 8601
+};
 
-// ─── Base URL for API (mirrors the pattern used by the generated client) ──────
+// ─── API helpers ──────────────────────────────────────────────────────────────
 const API_BASE = '/api';
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -33,7 +40,6 @@ async function fetchJson<T>(url: string): Promise<T> {
   return res.json();
 }
 
-// ─── Autocomplete hook ────────────────────────────────────────────────────────
 function useAutocomplete<T>(endpoint: string, query: string, minLen = 1) {
   const [results, setResults] = useState<T[]>([]);
   const [loading, setLoading] = useState(false);
@@ -56,7 +62,7 @@ function useAutocomplete<T>(endpoint: string, query: string, minLen = 1) {
   return { results, loading };
 }
 
-// ─── Autocomplete input component ─────────────────────────────────────────────
+// ─── Autocomplete input ───────────────────────────────────────────────────────
 function AutocompleteInput<T extends Record<string, string>>({
   value, onChange, placeholder, endpoint, renderItem, getLabel, minLen = 1,
 }: {
@@ -84,7 +90,6 @@ function AutocompleteInput<T extends Record<string, string>>({
           onChange={e => { onChange(e.target.value); setOpen(true); }}
           onFocus={() => { if (value.length >= minLen) setOpen(true); }}
           placeholder={placeholder}
-          className="uppercase"
           autoComplete="off"
         />
         {loading && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />}
@@ -116,7 +121,7 @@ function AirlineInput({ value, onChange }: { value: string; onChange: (v: string
       minLen={1}
       getLabel={a => a.name}
       renderItem={a => (
-        <span className="flex items-center gap-2 normal-case">
+        <span className="flex items-center gap-2">
           <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">{a.code}</span>
           <span>{a.name}</span>
         </span>
@@ -135,7 +140,7 @@ function AirportInput({ value, onChange, placeholder }: { value: string; onChang
       minLen={2}
       getLabel={a => a.iata}
       renderItem={a => (
-        <span className="flex items-center gap-2 normal-case">
+        <span className="flex items-center gap-2">
           <span className="font-mono font-bold text-primary w-10 shrink-0">{a.iata}</span>
           <span className="truncate text-muted-foreground">{a.city}, {a.country} — {a.name}</span>
         </span>
@@ -144,65 +149,111 @@ function AirportInput({ value, onChange, placeholder }: { value: string; onChang
   );
 }
 
-// ─── Flight search panel (external booking site deep-links) ──────────────────
-function FlightSearchPanel({
-  origin, destination, date, airline = '', carrierCode = '',
+// ─── Flight picker ────────────────────────────────────────────────────────────
+function FlightPicker({
+  origin, destination, date, onSelect,
 }: {
   origin: string; destination: string; date: string;
-  airline?: string; carrierCode?: string;
+  onSelect: (flight: ScheduledFlight) => void;
 }) {
-  const canLink = origin.length === 3 && destination.length === 3 && date.length === 10;
+  const [flights, setFlights] = useState<ScheduledFlight[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [keyMissing, setKeyMissing] = useState(false);
+  const [selected, setSelected] = useState('');
 
-  // Kayak: /flights/JFK-LAX/2026-09-10?airline=LH
-  const kayakUrl = canLink
-    ? `https://www.kayak.com/flights/${origin.toUpperCase()}-${destination.toUpperCase()}/${date}${carrierCode ? `?airline=${carrierCode}` : ''}`
-    : null;
+  const ready = origin.length === 3 && destination.length === 3 && date.length === 10;
 
-  // Google Flights: append airline name to query when available
-  const airlineQuery = airline ? `+${encodeURIComponent(airline)}` : '';
-  const googleUrl = canLink
-    ? `https://www.google.com/travel/flights/search?q=Flights+from+${origin.toUpperCase()}+to+${destination.toUpperCase()}+on+${date}${airlineQuery}`
-    : null;
+  useEffect(() => {
+    if (!ready) {
+      setFlights(null);
+      setSelected('');
+      setError(null);
+      setKeyMissing(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setKeyMissing(false);
+    setFlights(null);
+    setSelected('');
 
-  // Skyscanner: /transport/flights/org/dst/YYMMDD/
-  const skyscannerDate = canLink ? date.replace(/-/g, '').slice(2) : null; // YYMMDD
-  const skyscannerUrl = canLink
-    ? `https://www.skyscanner.com/transport/flights/${origin.toLowerCase()}/${destination.toLowerCase()}/${skyscannerDate}/`
-    : null;
+    fetchJson<ScheduledFlight[]>(
+      `${API_BASE}/search/flights?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&date=${encodeURIComponent(date)}`
+    )
+      .then(data => { if (!cancelled) setFlights(data); })
+      .catch(err => {
+        if (cancelled) return;
+        if (err?.error === 'AVIATIONSTACK_KEY_MISSING') setKeyMissing(true);
+        else setError(err?.detail ?? err?.error ?? 'Could not load flights');
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
 
-  const sites = [
-    { name: 'Google Flights', url: googleUrl, color: 'hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/30' },
-    { name: 'Kayak', url: kayakUrl, color: 'hover:border-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/30' },
-    { name: 'Skyscanner', url: skyscannerUrl, color: 'hover:border-sky-500 hover:bg-sky-50 dark:hover:bg-sky-950/30' },
-  ];
+    return () => { cancelled = true; };
+  }, [origin, destination, date, ready]);
+
+  const handleChange = (flightNumber: string) => {
+    setSelected(flightNumber);
+    const f = flights?.find(f => f.flightNumber === flightNumber);
+    if (f) onSelect(f);
+  };
+
+  if (!ready) return null;
 
   return (
-    <div className="space-y-2">
-      {!canLink && (
-        <p className="text-xs text-muted-foreground text-center py-1">
-          Enter 3-letter airport codes and a departure date above to search for flights
-        </p>
+    <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+      <p className="text-sm font-medium">
+        Available flights · {origin} → {destination} · {date}
+      </p>
+
+      {loading && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground py-1">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading available flights…
+        </div>
       )}
-      <div className="grid grid-cols-3 gap-2">
-        {sites.map(({ name, url, color }) => (
-          <a
-            key={name}
-            href={url ?? '#'}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={!url ? (e) => e.preventDefault() : undefined}
-            className={`flex flex-col items-center justify-center gap-1 rounded-lg border p-3 text-center text-sm font-medium transition-all
-              ${url ? `cursor-pointer ${color}` : 'opacity-40 cursor-not-allowed bg-muted/30'}`}
-          >
-            <Search className="h-4 w-4 text-muted-foreground" />
-            {name}
-          </a>
-        ))}
-      </div>
-      {canLink && (
-        <p className="text-xs text-muted-foreground text-center">
-          Opens a new tab — find your flight, then enter the details above
-        </p>
+
+      {keyMissing && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-3 text-xs space-y-1">
+          <p className="font-semibold text-amber-800 dark:text-amber-400">Flight data not configured</p>
+          <p className="text-amber-700 dark:text-amber-500 leading-relaxed">
+            Add a free API key from{' '}
+            <a href="https://aviationstack.com" target="_blank" rel="noopener noreferrer" className="underline font-medium">
+              aviationstack.com
+            </a>{' '}
+            as the Replit Secret <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">AVIATIONSTACK_API_KEY</code>.
+          </p>
+        </div>
+      )}
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {flights && flights.length === 0 && (
+        <p className="text-sm text-muted-foreground">No scheduled flights found for this route and date.</p>
+      )}
+
+      {flights && flights.length > 0 && (
+        <Select value={selected} onValueChange={handleChange}>
+          <SelectTrigger className="bg-background">
+            <SelectValue placeholder="Select a flight to fill times automatically…" />
+          </SelectTrigger>
+          <SelectContent>
+            {flights.map(f => (
+              <SelectItem key={f.flightNumber} value={f.flightNumber}>
+                <span className="flex items-center gap-3">
+                  <span className="font-mono font-semibold text-primary">{f.flightNumber}</span>
+                  <span className="text-muted-foreground">{f.airline}</span>
+                  <span className="font-medium">
+                    {format(parseISO(f.departureTime), 'HH:mm')}
+                    {' → '}
+                    {format(parseISO(f.arrivalTime), 'HH:mm')}
+                  </span>
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       )}
     </div>
   );
@@ -220,7 +271,7 @@ const flightSchema = z.object({
   direction: z.enum(['outbound', 'return', 'connecting']).optional(),
 });
 
-// ─── Flight list ──────────────────────────────────────────────────────────────
+// ─── Trip flights list ────────────────────────────────────────────────────────
 export function TripFlights({ tripId, editMode }: { tripId: number; editMode?: boolean }) {
   const { data: flights, isLoading } = useListFlights(tripId, { query: { enabled: !!tripId } });
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -327,7 +378,7 @@ function FlightCard({ tripId, flight, editMode }: { tripId: number; flight: any;
 
             <div className="flex flex-col items-center px-4 flex-1">
               <span className="text-xs text-muted-foreground mb-1 uppercase">{flight.direction || 'flight'}</span>
-              <div className="w-full flex items-center relative">
+              <div className="w-full flex items-center">
                 <div className="h-px bg-border flex-1" />
                 <PlaneTakeoff className="h-4 w-4 text-muted-foreground mx-2" />
                 <div className="h-px bg-border flex-1" />
@@ -352,11 +403,6 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
   const createFlight = useCreateFlight();
   const updateFlight = useUpdateFlight();
 
-  // Extract date-only for flight search (YYYY-MM-DD)
-  const [searchDate, setSearchDate] = useState(
-    flight?.departureDatetime ? flight.departureDatetime.slice(0, 10) : ''
-  );
-
   const form = useForm<z.infer<typeof flightSchema>>({
     resolver: zodResolver(flightSchema),
     defaultValues: flight
@@ -365,21 +411,24 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
           departureDatetime: flight.departureDatetime.slice(0, 16),
           arrivalDatetime: flight.arrivalDatetime.slice(0, 16),
         }
-      : { flightNumber: '', airline: '', departureAirport: '', arrivalAirport: '', departureDatetime: '', arrivalDatetime: '', confirmationCode: '', direction: 'outbound' },
+      : {
+          flightNumber: '', airline: '', departureAirport: '', arrivalAirport: '',
+          departureDatetime: '', arrivalDatetime: '', confirmationCode: '', direction: 'outbound',
+        },
   });
 
   const depAirport = form.watch('departureAirport');
   const arrAirport = form.watch('arrivalAirport');
   const depDatetime = form.watch('departureDatetime');
-  const airline = form.watch('airline');
-  const flightNumber = form.watch('flightNumber');
-  // Extract 2-letter IATA carrier code from the flight number (e.g. "LH 441" → "LH")
-  const carrierCode = flightNumber?.match(/^([A-Z]{2})/i)?.[1]?.toUpperCase() ?? '';
+  const searchDate = depDatetime?.slice(0, 10) ?? '';
 
-  // Keep search date in sync with the datetime field
-  useEffect(() => {
-    if (depDatetime && depDatetime.length >= 10) setSearchDate(depDatetime.slice(0, 10));
-  }, [depDatetime]);
+  // When a flight is picked from the dropdown, fill all related fields
+  const handleSelectFlight = (f: ScheduledFlight) => {
+    form.setValue('airline', f.airline, { shouldDirty: true });
+    form.setValue('flightNumber', f.flightNumber, { shouldDirty: true });
+    form.setValue('departureDatetime', f.departureTime.slice(0, 16), { shouldDirty: true });
+    form.setValue('arrivalDatetime', f.arrivalTime.slice(0, 16), { shouldDirty: true });
+  };
 
   const onSubmit = (values: z.infer<typeof flightSchema>) => {
     const payload = {
@@ -414,13 +463,19 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-2">
-        {/* Airline */}
-        <FormField control={form.control} name="airline" render={({ field }) => (
+
+        {/* Direction */}
+        <FormField control={form.control} name="direction" render={({ field }) => (
           <FormItem>
-            <FormLabel>Airline</FormLabel>
-            <FormControl>
-              <AirlineInput value={field.value} onChange={field.onChange} />
-            </FormControl>
+            <FormLabel>Direction</FormLabel>
+            <Select onValueChange={field.onChange} value={field.value}>
+              <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+              <SelectContent>
+                <SelectItem value="outbound">Outbound</SelectItem>
+                <SelectItem value="return">Return</SelectItem>
+                <SelectItem value="connecting">Connecting</SelectItem>
+              </SelectContent>
+            </Select>
             <FormMessage />
           </FormItem>
         )} />
@@ -447,66 +502,60 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
           )} />
         </div>
 
-        {/* Datetimes */}
-        <div className="grid grid-cols-2 gap-4">
-          <FormField control={form.control} name="departureDatetime" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Departure</FormLabel>
-              <FormControl><Input type="datetime-local" {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="arrivalDatetime" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Arrival</FormLabel>
-              <FormControl><Input type="datetime-local" min={depDatetime || undefined} {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
-        </div>
-
-        {/* Confirmation + direction */}
-        <div className="grid grid-cols-2 gap-4">
-          <FormField control={form.control} name="confirmationCode" render={({ field }) => (
-            <FormItem><FormLabel>Confirmation Code</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="direction" render={({ field }) => (
-            <FormItem><FormLabel>Direction</FormLabel>
-              <Select onValueChange={field.onChange} value={field.value}>
-                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value="outbound">Outbound</SelectItem>
-                  <SelectItem value="return">Return</SelectItem>
-                  <SelectItem value="connecting">Connecting</SelectItem>
-                </SelectContent>
-              </Select>
-            <FormMessage /></FormItem>
-          )} />
-        </div>
-
-        {/* Live flight search */}
-        <div className="border-t pt-4">
-          <p className="text-sm font-medium text-foreground mb-1">Search available flights</p>
-          <p className="text-xs text-muted-foreground mb-3">
-            Enter airport codes and a departure date above, then search for real-time options to auto-fill the form.
-          </p>
-          <FlightSearchPanel
-            origin={depAirport}
-            destination={arrAirport}
-            date={searchDate}
-            airline={airline}
-            carrierCode={carrierCode}
-          />
-        </div>
-
-        {/* Flight number */}
-        <FormField control={form.control} name="flightNumber" render={({ field }) => (
+        {/* Departure date — drives the flight picker */}
+        <FormField control={form.control} name="departureDatetime" render={({ field }) => (
           <FormItem>
-            <FormLabel>Flight Number</FormLabel>
-            <FormControl><Input {...field} placeholder="e.g. LH 441" /></FormControl>
+            <FormLabel>Departure Date</FormLabel>
+            <FormControl><Input type="datetime-local" {...field} /></FormControl>
             <FormMessage />
           </FormItem>
         )} />
+
+        {/* ── Flight picker: auto-appears once From + To + Date are set ── */}
+        <FlightPicker
+          origin={depAirport}
+          destination={arrAirport}
+          date={searchDate}
+          onSelect={handleSelectFlight}
+        />
+
+        {/* Arrival date — auto-filled by picker, or set manually */}
+        <FormField control={form.control} name="arrivalDatetime" render={({ field }) => (
+          <FormItem>
+            <FormLabel>Arrival Date</FormLabel>
+            <FormControl><Input type="datetime-local" min={depDatetime || undefined} {...field} /></FormControl>
+            <FormMessage />
+          </FormItem>
+        )} />
+
+        {/* Airline — auto-filled by picker */}
+        <FormField control={form.control} name="airline" render={({ field }) => (
+          <FormItem>
+            <FormLabel>Airline</FormLabel>
+            <FormControl>
+              <AirlineInput value={field.value} onChange={field.onChange} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )} />
+
+        {/* Flight number + Confirmation code */}
+        <div className="grid grid-cols-2 gap-4">
+          <FormField control={form.control} name="flightNumber" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Flight Number</FormLabel>
+              <FormControl><Input {...field} placeholder="e.g. LH441" /></FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+          <FormField control={form.control} name="confirmationCode" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Confirmation Code</FormLabel>
+              <FormControl><Input {...field} /></FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+        </div>
 
         <div className="flex justify-end pt-2">
           <Button type="submit" disabled={isPending}>

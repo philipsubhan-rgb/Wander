@@ -2,7 +2,7 @@ import { Router, type IRouter } from 'express';
 import { requireAuth } from '../middlewares/auth';
 import { searchAirlines } from '../data/airlines';
 import { searchAirports } from '../data/airports';
-import { searchFlights } from '../lib/amadeus';
+import { getScheduledFlights } from '../lib/aviationstack';
 
 const router: IRouter = Router();
 
@@ -18,7 +18,7 @@ router.get('/search/airports', requireAuth, (req, res): void => {
   res.json(searchAirports(q, 10));
 });
 
-// GET /api/search/flights?origin=JFK&destination=LAX&date=2026-09-10
+// GET /api/search/flights?origin=JFK&destination=NRT&date=2026-09-10
 router.get('/search/flights', requireAuth, async (req, res): Promise<void> => {
   const { origin, destination, date } = req.query;
 
@@ -27,28 +27,21 @@ router.get('/search/flights', requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  if (
-    !process.env.AMADEUS_CLIENT_ID ||
-    !process.env.AMADEUS_CLIENT_SECRET
-  ) {
-    res.status(503).json({
-      error: 'AMADEUS_CREDENTIALS_MISSING',
-      message:
-        'Flight search requires Amadeus API credentials. Get a free key at https://developers.amadeus.com and set AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET.',
-    });
+  if (!process.env.AVIATIONSTACK_API_KEY) {
+    res.status(503).json({ error: 'AVIATIONSTACK_KEY_MISSING' });
     return;
   }
 
   try {
-    const flights = await searchFlights(
+    const flights = await getScheduledFlights(
       String(origin),
       String(destination),
       String(date)
     );
     res.json(flights);
   } catch (err: any) {
-    if (err.message === 'AMADEUS_CREDENTIALS_MISSING') {
-      res.status(503).json({ error: 'AMADEUS_CREDENTIALS_MISSING' });
+    if (err.message === 'AVIATIONSTACK_KEY_MISSING') {
+      res.status(503).json({ error: 'AVIATIONSTACK_KEY_MISSING' });
       return;
     }
     console.error('Flight search error:', err.message);
