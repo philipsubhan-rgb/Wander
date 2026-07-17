@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, sql } from "drizzle-orm";
-import { db, tripsTable, tripParticipantsTable, usersTable, flightsTable, accommodationsTable, activitiesTable, itineraryDaysTable, packingItemsTable } from "@workspace/db";
+import { db, tripsTable, tripParticipantsTable, usersTable, flightsTable, accommodationsTable, activitiesTable, itineraryDaysTable, packingItemsTable, carRentalsTable } from "@workspace/db";
 import {
   CreateTripBody,
   UpdateTripBody,
@@ -224,11 +224,12 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
   }
   const { tripId } = params.data;
 
-  const [flights, accommodations, activities, itinerary] = await Promise.all([
+  const [flights, accommodations, activities, itinerary, carRentals] = await Promise.all([
     db.select().from(flightsTable).where(eq(flightsTable.tripId, tripId)),
     db.select().from(accommodationsTable).where(eq(accommodationsTable.tripId, tripId)),
     db.select().from(activitiesTable).where(eq(activitiesTable.tripId, tripId)),
     db.select().from(itineraryDaysTable).where(eq(itineraryDaysTable.tripId, tripId)),
+    db.select().from(carRentalsTable).where(eq(carRentalsTable.tripId, tripId)),
   ]);
 
   const events = [
@@ -241,7 +242,8 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
       location: f.departureAirport,
       time: f.departureDatetime.length > 10 ? f.departureDatetime.substring(11, 16) : null,
       imageUrl: null as string | null,
-      carrierCode: f.flightNumber?.match(/^([A-Z0-9]{2,3})\d/)?.[1] ?? null,
+      carrierCode: f.flightNumber?.toUpperCase().match(/^([A-Z0-9]{2,3})\s*\d/)?.[1] ?? null,
+      confirmationCode: f.confirmationCode ?? null,
     })),
     ...accommodations.map(a => ({
       id: a.id,
@@ -253,6 +255,7 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
       time: null,
       imageUrl: a.imageUrl ?? null,
       carrierCode: null as string | null,
+      confirmationCode: a.confirmationCode ?? null,
     })),
     ...activities.map(a => ({
       id: a.id,
@@ -264,6 +267,19 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
       time: a.time ?? null,
       imageUrl: a.imageUrl ?? null,
       carrierCode: null as string | null,
+      confirmationCode: null as string | null,
+    })),
+    ...carRentals.map(r => ({
+      id: r.id,
+      type: "car_rental" as const,
+      date: r.pickupDatetime.substring(0, 10),
+      title: `${r.company} pick-up`,
+      description: r.notes ?? null,
+      location: r.pickupLocation,
+      time: r.pickupDatetime.length > 10 ? r.pickupDatetime.substring(11, 16) : null,
+      imageUrl: null as string | null,
+      carrierCode: null as string | null,
+      confirmationCode: r.confirmationCode ?? null,
     })),
     ...itinerary.map(d => ({
       id: d.id,
@@ -275,6 +291,7 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
       time: null,
       imageUrl: null as string | null,
       carrierCode: null as string | null,
+      confirmationCode: null as string | null,
     })),
   ];
 

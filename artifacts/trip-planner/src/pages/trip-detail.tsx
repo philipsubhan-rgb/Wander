@@ -193,7 +193,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
 
           <div className="mt-10">
             <TabsContent value="overview" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripOverview tripId={tripId} /></TabsContent>
-            <TabsContent value="itinerary" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripItinerary tripId={tripId} editMode={editMode} /></TabsContent>
+            <TabsContent value="itinerary" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripItinerary tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} tripDestination={trip.destination} tripCoverImage={trip.coverImage} /></TabsContent>
             <TabsContent value="flights" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripFlights tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} /></TabsContent>
             <TabsContent value="accommodations" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripAccommodations tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} /></TabsContent>
             <TabsContent value="activities" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripActivities tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} tripDestination={trip.destination} /></TabsContent>
