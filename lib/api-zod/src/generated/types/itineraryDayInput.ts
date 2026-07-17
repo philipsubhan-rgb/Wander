@@ -11,4 +11,6 @@ export interface ItineraryDayInput {
   title: string;
   description?: string;
   notes?: string;
+  startTime?: string;
+  endTime?: string;
 }

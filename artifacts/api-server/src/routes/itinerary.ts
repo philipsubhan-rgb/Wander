@@ -17,7 +17,7 @@ router.get("/trips/:tripId/itinerary", requireAuth, async (req, res): Promise<vo
   const params = ListItineraryDaysParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const items = await db.select().from(itineraryDaysTable).where(eq(itineraryDaysTable.tripId, params.data.tripId)).orderBy(itineraryDaysTable.date);
-  res.json(items.map(d => ({ ...d, description: d.description ?? null, notes: d.notes ?? null })));
+  res.json(items.map(d => ({ ...d, description: d.description ?? null, notes: d.notes ?? null, startTime: d.startTime ?? null, endTime: d.endTime ?? null })));
 });
 
 router.post("/trips/:tripId/itinerary", requireAdmin, async (req, res): Promise<void> => {

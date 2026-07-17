@@ -15,4 +15,8 @@ export interface ItineraryDay {
   description?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  startTime?: string | null;
+  /** @nullable */
+  endTime?: string | null;
 }

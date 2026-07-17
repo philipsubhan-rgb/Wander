@@ -599,7 +599,9 @@ export const ListItineraryDaysResponseItem = zod.object({
   "date": zod.string(),
   "title": zod.string(),
   "description": zod.string().nullish(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "startTime": zod.string().nullish(),
+  "endTime": zod.string().nullish()
 })
 export const ListItineraryDaysResponse = zod.array(ListItineraryDaysResponseItem)
 
@@ -612,7 +614,9 @@ export const CreateItineraryDayBody = zod.object({
   "date": zod.string(),
   "title": zod.string(),
   "description": zod.string().optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "startTime": zod.string().optional(),
+  "endTime": zod.string().optional()
 })
 
 export const CreateItineraryDayResponse = zod.object({
@@ -621,7 +625,9 @@ export const CreateItineraryDayResponse = zod.object({
   "date": zod.string(),
   "title": zod.string(),
   "description": zod.string().nullish(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "startTime": zod.string().nullish(),
+  "endTime": zod.string().nullish()
 })
 
 
@@ -634,7 +640,9 @@ export const UpdateItineraryDayBody = zod.object({
   "date": zod.string().optional(),
   "title": zod.string().optional(),
   "description": zod.string().optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "startTime": zod.string().optional(),
+  "endTime": zod.string().optional()
 })
 
 export const UpdateItineraryDayResponse = zod.object({
@@ -643,7 +651,9 @@ export const UpdateItineraryDayResponse = zod.object({
   "date": zod.string(),
   "title": zod.string(),
   "description": zod.string().nullish(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "startTime": zod.string().nullish(),
+  "endTime": zod.string().nullish()
 })
 
 

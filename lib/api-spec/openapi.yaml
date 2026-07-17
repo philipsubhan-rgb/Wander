@@ -1490,6 +1490,10 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
+        startTime:
+          type: ["string", "null"]
+        endTime:
+          type: ["string", "null"]
 
     ItineraryDayInput:
       type: object
@@ -1503,6 +1507,10 @@ components:
           type: string
         notes:
           type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
 
     ItineraryDayUpdate:
       type: object
@@ -1514,6 +1522,10 @@ components:
         description:
           type: string
         notes:
+          type: string
+        startTime:
+          type: string
+        endTime:
           type: string
 
     PackingItem:

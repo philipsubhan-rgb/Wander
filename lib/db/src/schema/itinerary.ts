@@ -10,6 +10,8 @@ export const itineraryDaysTable = pgTable("itinerary_days", {
   title: text("title").notNull(),
   description: text("description"),
   notes: text("notes"),
+  startTime: text("start_time"),
+  endTime: text("end_time"),
 });
 
 export const insertItineraryDaySchema = createInsertSchema(itineraryDaysTable).omit({ id: true });

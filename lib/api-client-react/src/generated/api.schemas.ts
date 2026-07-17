@@ -406,6 +406,10 @@ export interface ItineraryDay {
   description?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  startTime?: string | null;
+  /** @nullable */
+  endTime?: string | null;
 }
 
 export interface ItineraryDayInput {
@@ -413,6 +417,8 @@ export interface ItineraryDayInput {
   title: string;
   description?: string;
   notes?: string;
+  startTime?: string;
+  endTime?: string;
 }
 
 export interface ItineraryDayUpdate {
@@ -420,6 +426,8 @@ export interface ItineraryDayUpdate {
   title?: string;
   description?: string;
   notes?: string;
+  startTime?: string;
+  endTime?: string;
 }
 
 export interface PackingItem {
