@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, pgEnum, doublePrecision } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { tripsTable } from "./trips";
@@ -13,6 +13,9 @@ export const activitiesTable = pgTable("activities", {
   date: text("date").notNull(),
   time: text("time"),
   location: text("location"),
+  lat: doublePrecision("lat"),
+  lon: doublePrecision("lon"),
+  imageUrl: text("image_url"),
   type: activityTypeEnum("type").notNull().default("other"),
   notes: text("notes"),
 });

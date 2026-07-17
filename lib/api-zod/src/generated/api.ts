@@ -435,6 +435,9 @@ export const ListAccommodationsResponseItem = zod.object({
   "checkIn": zod.string(),
   "checkOut": zod.string(),
   "type": zod.enum(['hotel', 'airbnb', 'hostel', 'resort', 'other']).optional(),
+  "lat": zod.number().nullish(),
+  "lon": zod.number().nullish(),
+  "imageUrl": zod.string().nullish(),
   "confirmationCode": zod.string().nullish(),
   "phone": zod.string().nullish(),
   "notes": zod.string().nullish()
@@ -452,6 +455,9 @@ export const CreateAccommodationBody = zod.object({
   "checkIn": zod.string(),
   "checkOut": zod.string(),
   "type": zod.enum(['hotel', 'airbnb', 'hostel', 'resort', 'other']).optional(),
+  "lat": zod.number().optional(),
+  "lon": zod.number().optional(),
+  "imageUrl": zod.string().optional(),
   "confirmationCode": zod.string().optional(),
   "phone": zod.string().optional(),
   "notes": zod.string().optional()
@@ -465,6 +471,9 @@ export const CreateAccommodationResponse = zod.object({
   "checkIn": zod.string(),
   "checkOut": zod.string(),
   "type": zod.enum(['hotel', 'airbnb', 'hostel', 'resort', 'other']).optional(),
+  "lat": zod.number().nullish(),
+  "lon": zod.number().nullish(),
+  "imageUrl": zod.string().nullish(),
   "confirmationCode": zod.string().nullish(),
   "phone": zod.string().nullish(),
   "notes": zod.string().nullish()
@@ -482,6 +491,9 @@ export const UpdateAccommodationBody = zod.object({
   "checkIn": zod.string().optional(),
   "checkOut": zod.string().optional(),
   "type": zod.enum(['hotel', 'airbnb', 'hostel', 'resort', 'other']).optional(),
+  "lat": zod.number().optional(),
+  "lon": zod.number().optional(),
+  "imageUrl": zod.string().optional(),
   "confirmationCode": zod.string().optional(),
   "phone": zod.string().optional(),
   "notes": zod.string().optional()
@@ -495,6 +507,9 @@ export const UpdateAccommodationResponse = zod.object({
   "checkIn": zod.string(),
   "checkOut": zod.string(),
   "type": zod.enum(['hotel', 'airbnb', 'hostel', 'resort', 'other']).optional(),
+  "lat": zod.number().nullish(),
+  "lon": zod.number().nullish(),
+  "imageUrl": zod.string().nullish(),
   "confirmationCode": zod.string().nullish(),
   "phone": zod.string().nullish(),
   "notes": zod.string().nullish()
@@ -523,6 +538,9 @@ export const ListActivitiesResponseItem = zod.object({
   "date": zod.string(),
   "time": zod.string().nullish(),
   "location": zod.string().nullish(),
+  "lat": zod.number().nullish(),
+  "lon": zod.number().nullish(),
+  "imageUrl": zod.string().nullish(),
   "type": zod.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
   "notes": zod.string().nullish()
 })
@@ -539,6 +557,9 @@ export const CreateActivityBody = zod.object({
   "date": zod.string(),
   "time": zod.string().optional(),
   "location": zod.string().optional(),
+  "lat": zod.number().optional(),
+  "lon": zod.number().optional(),
+  "imageUrl": zod.string().optional(),
   "type": zod.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
   "notes": zod.string().optional()
 })
@@ -551,6 +572,9 @@ export const CreateActivityResponse = zod.object({
   "date": zod.string(),
   "time": zod.string().nullish(),
   "location": zod.string().nullish(),
+  "lat": zod.number().nullish(),
+  "lon": zod.number().nullish(),
+  "imageUrl": zod.string().nullish(),
   "type": zod.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
   "notes": zod.string().nullish()
 })
@@ -567,6 +591,9 @@ export const UpdateActivityBody = zod.object({
   "date": zod.string().optional(),
   "time": zod.string().optional(),
   "location": zod.string().optional(),
+  "lat": zod.number().optional(),
+  "lon": zod.number().optional(),
+  "imageUrl": zod.string().optional(),
   "type": zod.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
   "notes": zod.string().optional()
 })
@@ -579,6 +606,9 @@ export const UpdateActivityResponse = zod.object({
   "date": zod.string(),
   "time": zod.string().nullish(),
   "location": zod.string().nullish(),
+  "lat": zod.number().nullish(),
+  "lon": zod.number().nullish(),
+  "imageUrl": zod.string().nullish(),
   "type": zod.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
   "notes": zod.string().nullish()
 })

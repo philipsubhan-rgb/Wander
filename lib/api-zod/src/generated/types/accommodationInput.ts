@@ -13,6 +13,9 @@ export interface AccommodationInput {
   checkIn: string;
   checkOut: string;
   type?: AccommodationInputType;
+  lat?: number;
+  lon?: number;
+  imageUrl?: string;
   confirmationCode?: string;
   phone?: string;
   notes?: string;

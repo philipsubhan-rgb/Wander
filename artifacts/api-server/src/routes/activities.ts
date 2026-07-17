@@ -17,7 +17,7 @@ router.get("/trips/:tripId/activities", requireAuth, async (req, res): Promise<v
   const params = ListActivitiesParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const items = await db.select().from(activitiesTable).where(eq(activitiesTable.tripId, params.data.tripId)).orderBy(activitiesTable.date, activitiesTable.time);
-  res.json(items.map(a => ({ ...a, description: a.description ?? null, time: a.time ?? null, location: a.location ?? null, notes: a.notes ?? null })));
+  res.json(items.map(a => ({ ...a, description: a.description ?? null, time: a.time ?? null, location: a.location ?? null, lat: a.lat ?? null, lon: a.lon ?? null, imageUrl: a.imageUrl ?? null, notes: a.notes ?? null })));
 });
 
 router.post("/trips/:tripId/activities", requireAdmin, async (req, res): Promise<void> => {
@@ -26,7 +26,7 @@ router.post("/trips/:tripId/activities", requireAdmin, async (req, res): Promise
   const parsed = CreateActivityBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [item] = await db.insert(activitiesTable).values({ ...parsed.data, tripId: params.data.tripId }).returning();
-  res.status(201).json({ ...item, description: item.description ?? null, time: item.time ?? null, location: item.location ?? null, notes: item.notes ?? null });
+  res.status(201).json({ ...item, description: item.description ?? null, time: item.time ?? null, location: item.location ?? null, lat: item.lat ?? null, lon: item.lon ?? null, imageUrl: item.imageUrl ?? null, notes: item.notes ?? null });
 });
 
 router.patch("/trips/:tripId/activities/:activityId", requireAdmin, async (req, res): Promise<void> => {
@@ -36,7 +36,7 @@ router.patch("/trips/:tripId/activities/:activityId", requireAdmin, async (req, 
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [item] = await db.update(activitiesTable).set(parsed.data).where(and(eq(activitiesTable.id, params.data.activityId), eq(activitiesTable.tripId, params.data.tripId))).returning();
   if (!item) { res.status(404).json({ error: "Activity not found" }); return; }
-  res.json({ ...item, description: item.description ?? null, time: item.time ?? null, location: item.location ?? null, notes: item.notes ?? null });
+  res.json({ ...item, description: item.description ?? null, time: item.time ?? null, location: item.location ?? null, lat: item.lat ?? null, lon: item.lon ?? null, imageUrl: item.imageUrl ?? null, notes: item.notes ?? null });
 });
 
 router.delete("/trips/:tripId/activities/:activityId", requireAdmin, async (req, res): Promise<void> => {

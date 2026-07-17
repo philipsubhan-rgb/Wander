@@ -13,6 +13,9 @@ export interface ActivityUpdate {
   date?: string;
   time?: string;
   location?: string;
+  lat?: number;
+  lon?: number;
+  imageUrl?: string;
   type?: ActivityUpdateType;
   notes?: string;
 }

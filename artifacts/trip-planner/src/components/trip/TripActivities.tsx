@@ -12,23 +12,51 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Compass, MapPin, Clock, Plus, Trash2, Pencil, CalendarDays } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+import { MiniMap } from './MiniMap';
+import { fetchWikiImage } from '@/lib/wiki-image';
 
 const API_BASE = `${import.meta.env.BASE_URL}api`;
+
+const ACTIVITY_GRADIENTS: Record<string, string> = {
+  sightseeing: 'from-blue-400 to-indigo-600',
+  dining:      'from-orange-400 to-red-600',
+  adventure:   'from-green-400 to-emerald-600',
+  culture:     'from-purple-400 to-violet-600',
+  relaxation:  'from-teal-400 to-cyan-600',
+  transport:   'from-slate-400 to-gray-600',
+  other:       'from-stone-400 to-stone-600',
+};
+
+const activitySchema = z.object({
+  title: z.string().min(1, 'Title is required'),
+  description: z.string().optional(),
+  date: z.string().min(1, 'Date is required'),
+  time: z.string().optional(),
+  location: z.string().optional(),
+  lat: z.number().optional(),
+  lon: z.number().optional(),
+  imageUrl: z.string().optional(),
+  type: z.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
+});
 
 // ── Location autocomplete ─────────────────────────────────────────────────────
 
 interface PlaceSuggestion {
   name: string;
   address: string;
+  lat: number;
+  lon: number;
 }
 
 function LocationInput({
   value,
   onChange,
+  onSelect,
   near,
 }: {
   value: string;
   onChange: (v: string) => void;
+  onSelect?: (s: PlaceSuggestion) => void;
   near?: string;
 }) {
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
@@ -90,9 +118,9 @@ function LocationInput({
               className="px-3 py-2.5 cursor-pointer hover:bg-accent text-sm"
               onMouseDown={e => {
                 e.preventDefault();
-                // Use full "Name, Address" string so the saved value is descriptive
                 const label = s.address ? `${s.name}, ${s.address}` : s.name;
                 onChange(label);
+                onSelect?.(s);
                 setOpen(false);
               }}
             >
@@ -108,14 +136,7 @@ function LocationInput({
   );
 }
 
-const activitySchema = z.object({
-  title: z.string().min(1, 'Title is required'),
-  description: z.string().optional(),
-  date: z.string().min(1, 'Date is required'),
-  time: z.string().optional(),
-  location: z.string().optional(),
-  type: z.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
-});
+// ── Main export ───────────────────────────────────────────────────────────────
 
 export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate, tripDestination }: { tripId: number, editMode?: boolean, tripStartDate?: string, tripEndDate?: string, tripDestination?: string }) {
   const { data: activities, isLoading } = useListActivities(tripId, { query: { enabled: !!tripId } });
@@ -157,6 +178,8 @@ export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate, t
   );
 }
 
+// ── Card ──────────────────────────────────────────────────────────────────────
+
 function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, tripDestination }: { tripId: number, activity: any, editMode?: boolean, tripStartDate?: string, tripEndDate?: string, tripDestination?: string }) {
   const queryClient = useQueryClient();
   const deleteActivity = useDeleteActivity();
@@ -173,41 +196,66 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
     }
   };
 
+  const gradient = ACTIVITY_GRADIENTS[activity.type ?? 'other'] ?? ACTIVITY_GRADIENTS.other;
+  const hasMap = activity.lat != null && activity.lon != null;
+
   return (
-    <div className="bg-card border rounded-xl p-5 shadow-sm relative group hover:border-primary/50 transition-colors">
-      <div className="absolute top-3 right-3 flex gap-2">
+    <div className="bg-card border rounded-xl shadow-sm overflow-hidden relative group hover:border-primary/50 transition-colors">
+      {/* ── Image / gradient header ── */}
+      <div className="relative h-36">
+        {activity.imageUrl ? (
+          <img
+            src={activity.imageUrl}
+            alt={activity.title}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className={`h-full w-full bg-gradient-to-br ${gradient} flex items-center justify-center`}>
+            <Compass className="h-10 w-10 text-white/50" />
+          </div>
+        )}
+        {/* Edit / delete overlay */}
         {editMode && (
-          <>
+          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
               <DialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"><Pencil className="h-4 w-4" /></Button>
+                <Button variant="secondary" size="icon" className="h-8 w-8 bg-white/90 hover:bg-white text-foreground shadow">
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader><DialogTitle>Edit Activity</DialogTitle></DialogHeader>
                 <ActivityForm tripId={tripId} activity={activity} tripStartDate={tripStartDate} tripEndDate={tripEndDate} tripDestination={tripDestination} onSuccess={() => setIsEditOpen(false)} />
               </DialogContent>
             </Dialog>
-            <Button variant="ghost" size="icon" onClick={handleDelete} className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive">
-              <Trash2 className="h-4 w-4" />
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={handleDelete}
+              className="h-8 w-8 bg-white/90 hover:bg-white text-destructive hover:text-destructive shadow"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
             </Button>
-          </>
+          </div>
         )}
+        {/* Type badge */}
+        <span className="absolute bottom-2 left-3 text-xs font-semibold text-white uppercase tracking-wider drop-shadow">
+          {activity.type}
+        </span>
       </div>
 
-      <div className="space-y-4">
-        <div className="pr-12">
-          <h3 className="font-serif text-lg font-semibold leading-tight mb-1">{activity.title}</h3>
-          <span className="text-xs font-medium bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full uppercase tracking-wider">{activity.type}</span>
-        </div>
+      {/* ── Card body ── */}
+      <div className="p-4 space-y-3">
+        <h3 className="font-serif text-lg font-semibold leading-tight">{activity.title}</h3>
 
-        <div className="space-y-2 text-sm text-muted-foreground">
+        <div className="space-y-1.5 text-sm text-muted-foreground">
           <div className="flex items-center gap-2 text-foreground font-medium">
-            <CalendarDays className="h-4 w-4 text-primary" />
+            <CalendarDays className="h-4 w-4 text-primary shrink-0" />
             <span>{format(parseISO(activity.date), 'MMM d, yyyy')}</span>
             {activity.time && (
               <>
-                <span className="text-muted-foreground">•</span>
-                <Clock className="h-4 w-4 text-primary ml-1" />
+                <span className="text-muted-foreground">·</span>
+                <Clock className="h-4 w-4 text-primary shrink-0" />
                 <span>{activity.time}</span>
               </>
             )}
@@ -219,47 +267,47 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
             </div>
           )}
         </div>
-        
+
         {activity.description && (
-          <p className="text-sm text-muted-foreground border-t pt-3 line-clamp-3">
+          <p className="text-sm text-muted-foreground border-t pt-3 line-clamp-2">
             {activity.description}
           </p>
         )}
       </div>
+
+      {/* ── Mini map ── */}
+      {hasMap && <MiniMap lat={activity.lat} lon={activity.lon} label={activity.location ?? activity.title} />}
     </div>
   );
 }
+
+// ── Form ──────────────────────────────────────────────────────────────────────
 
 function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, tripDestination, onSuccess }: { tripId: number, activity?: any, tripStartDate?: string, tripEndDate?: string, tripDestination?: string, onSuccess: () => void }) {
   const queryClient = useQueryClient();
   const createActivity = useCreateActivity();
   const updateActivity = useUpdateActivity();
-  
+
   const form = useForm<z.infer<typeof activitySchema>>({
     resolver: zodResolver(activitySchema),
     defaultValues: activity ? {
       ...activity,
+      lat: activity.lat ?? undefined,
+      lon: activity.lon ?? undefined,
+      imageUrl: activity.imageUrl ?? undefined,
     } : {
-      title: '', description: '', date: '', time: '', location: '', type: 'sightseeing'
+      title: '', description: '', date: '', time: '', location: '', type: 'sightseeing' as const,
     },
   });
 
   const onSubmit = (values: z.infer<typeof activitySchema>) => {
     if (activity) {
       updateActivity.mutate({ tripId, activityId: activity.id, data: values }, {
-        onSuccess: () => {
-          toast.success('Updated');
-          queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) });
-          onSuccess();
-        }
+        onSuccess: () => { toast.success('Updated'); queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) }); onSuccess(); }
       });
     } else {
       createActivity.mutate({ tripId, data: values }, {
-        onSuccess: () => {
-          toast.success('Added');
-          queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) });
-          onSuccess();
-        }
+        onSuccess: () => { toast.success('Added'); queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) }); onSuccess(); }
       });
     }
   };
@@ -284,7 +332,19 @@ function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, tripDestin
           <FormItem>
             <FormLabel>Location</FormLabel>
             <FormControl>
-              <LocationInput value={field.value ?? ''} onChange={field.onChange} near={tripDestination} />
+              <LocationInput
+                value={field.value ?? ''}
+                onChange={field.onChange}
+                near={tripDestination}
+                onSelect={s => {
+                  field.onChange(`${s.name}, ${s.address}`);
+                  form.setValue('lat', s.lat);
+                  form.setValue('lon', s.lon);
+                  fetchWikiImage(s.name).then(url => {
+                    if (url) form.setValue('imageUrl', url);
+                  });
+                }}
+              />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -306,7 +366,7 @@ function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, tripDestin
           <FormMessage /></FormItem>
         )} />
         <FormField control={form.control} name="description" render={({ field }) => (
-          <FormItem><FormLabel>Notes/Description</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+          <FormItem><FormLabel>Notes / Description</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
         )} />
         <div className="flex justify-end pt-4">
           <Button type="submit" disabled={isPending}>{isPending ? 'Saving...' : 'Save Activity'}</Button>

@@ -12,16 +12,29 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Home, MapPin, Calendar, Plus, Trash2, Pencil, Phone } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+import { MiniMap } from './MiniMap';
+import { fetchWikiImage } from '@/lib/wiki-image';
 
 const API_BASE = `${import.meta.env.BASE_URL}api`;
 
 const DEFAULT_CHECKIN_TIME  = '15:00';
 const DEFAULT_CHECKOUT_TIME = '11:00';
 
+const STAY_GRADIENTS: Record<string, string> = {
+  hotel:  'from-amber-500 to-orange-600',
+  airbnb: 'from-rose-400 to-pink-600',
+  hostel: 'from-sky-400 to-blue-600',
+  resort: 'from-teal-400 to-emerald-600',
+  other:  'from-slate-400 to-slate-600',
+};
+
 const accommSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   address: z.string().min(1, 'Address is required'),
   phone: z.string().optional(),
+  lat: z.number().optional(),
+  lon: z.number().optional(),
+  imageUrl: z.string().optional(),
   checkInDate:  z.string().min(1, 'Check-in date is required'),
   checkInTime:  z.string().min(1, 'Check-in time is required'),
   checkOutDate: z.string().min(1, 'Check-out date is required'),
@@ -36,6 +49,8 @@ interface HotelSuggestion {
   name: string;
   address: string;
   phone: string | null;
+  lat: number;
+  lon: number;
 }
 
 function HotelNameInput({
@@ -74,7 +89,6 @@ function HotelNameInput({
     }, 400);
   }, [value]);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
@@ -95,9 +109,7 @@ function HotelNameInput({
           autoComplete="off"
         />
         {loading && (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-            …
-          </span>
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">…</span>
         )}
       </div>
       {open && suggestions.length > 0 && (
@@ -138,7 +150,7 @@ export function TripAccommodations({ tripId, editMode, tripStartDate, tripEndDat
             <DialogTrigger asChild>
               <Button><Plus className="h-4 w-4 mr-2" /> Add Stay</Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-h-[90vh] overflow-y-auto">
               <DialogHeader><DialogTitle>Add Accommodation</DialogTitle></DialogHeader>
               <AccommForm tripId={tripId} tripStartDate={tripStartDate} tripEndDate={tripEndDate} onSuccess={() => setIsAddOpen(false)} />
             </DialogContent>
@@ -180,60 +192,83 @@ function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tr
     }
   };
 
+  const gradient = STAY_GRADIENTS[stay.type ?? 'other'] ?? STAY_GRADIENTS.other;
+  const hasMap = stay.lat != null && stay.lon != null;
+
   return (
-    <div className="bg-card border rounded-xl p-6 shadow-sm relative group">
-      <div className="absolute top-4 right-4 flex gap-2">
+    <div className="bg-card border rounded-xl shadow-sm overflow-hidden relative group">
+      {/* ── Image / gradient header ── */}
+      <div className="relative h-40">
+        {stay.imageUrl ? (
+          <img
+            src={stay.imageUrl}
+            alt={stay.name}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className={`h-full w-full bg-gradient-to-br ${gradient} flex items-center justify-center`}>
+            <Home className="h-12 w-12 text-white/50" />
+          </div>
+        )}
+        {/* Edit / delete overlay */}
         {editMode && (
-          <>
+          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
               <DialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"><Pencil className="h-4 w-4" /></Button>
+                <Button variant="secondary" size="icon" className="h-8 w-8 bg-white/90 hover:bg-white text-foreground shadow">
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="max-h-[90vh] overflow-y-auto">
                 <DialogHeader><DialogTitle>Edit Stay</DialogTitle></DialogHeader>
                 <AccommForm tripId={tripId} stay={stay} tripStartDate={tripStartDate} tripEndDate={tripEndDate} onSuccess={() => setIsEditOpen(false)} />
               </DialogContent>
             </Dialog>
-            <Button variant="ghost" size="icon" onClick={handleDelete} className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive">
-              <Trash2 className="h-4 w-4" />
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={handleDelete}
+              className="h-8 w-8 bg-white/90 hover:bg-white text-destructive hover:text-destructive shadow"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
             </Button>
-          </>
+          </div>
         )}
+        {/* Type badge */}
+        <span className="absolute bottom-2 left-3 text-xs font-semibold text-white uppercase tracking-wider drop-shadow">
+          {stay.type}
+        </span>
       </div>
 
-      <div className="flex items-start gap-4">
-        <div className="h-12 w-12 bg-primary/10 rounded-xl flex items-center justify-center shrink-0">
-          <Home className="h-6 w-6 text-primary" />
-        </div>
-        <div className="space-y-3 pt-1">
-          <div>
-            <h3 className="font-serif text-xl font-semibold leading-none">{stay.name}</h3>
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider mt-1 block">{stay.type}</span>
+      {/* ── Card body ── */}
+      <div className="p-5 space-y-3">
+        <h3 className="font-serif text-xl font-semibold leading-tight">{stay.name}</h3>
+
+        <div className="space-y-2 text-sm text-muted-foreground">
+          <div className="flex items-start gap-2">
+            <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
+            <span>{stay.address}</span>
           </div>
-          
-          <div className="space-y-2 text-sm text-muted-foreground">
-            <div className="flex items-start gap-2">
-              <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
-              <span>{stay.address}</span>
-            </div>
-            {stay.phone && (
-              <div className="flex items-center gap-2">
-                <Phone className="h-4 w-4 shrink-0" />
-                <a href={`tel:${stay.phone}`} className="hover:text-foreground transition-colors">{stay.phone}</a>
-              </div>
-            )}
+          {stay.phone && (
             <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 shrink-0" />
-              <span>{format(parseISO(stay.checkIn), 'MMM d')} - {format(parseISO(stay.checkOut), 'MMM d')}</span>
+              <Phone className="h-4 w-4 shrink-0" />
+              <a href={`tel:${stay.phone}`} className="hover:text-foreground transition-colors">{stay.phone}</a>
             </div>
-            {stay.confirmationCode && (
-              <div className="bg-muted p-2 rounded text-xs font-mono inline-block">
-                Code: {stay.confirmationCode}
-              </div>
-            )}
+          )}
+          <div className="flex items-center gap-2">
+            <Calendar className="h-4 w-4 shrink-0" />
+            <span>{format(parseISO(stay.checkIn), 'MMM d')} – {format(parseISO(stay.checkOut), 'MMM d')}</span>
           </div>
+          {stay.confirmationCode && (
+            <div className="bg-muted px-2 py-1.5 rounded text-xs font-mono inline-block">
+              Code: {stay.confirmationCode}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* ── Mini map ── */}
+      {hasMap && <MiniMap lat={stay.lat} lon={stay.lon} label={stay.name} />}
     </div>
   );
 }
@@ -244,10 +279,9 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
   const queryClient = useQueryClient();
   const createStay = useCreateAccommodation();
   const updateStay = useUpdateAccommodation();
-  
-  // Parse an ISO datetime string into { date: 'YYYY-MM-DD', time: 'HH:MM' }
+
   const splitDateTime = (iso: string, defaultTime: string) => {
-    const local = iso.slice(0, 16); // 'YYYY-MM-DDTHH:MM'
+    const local = iso.slice(0, 16);
     if (local.length >= 16) return { date: local.slice(0, 10), time: local.slice(11, 16) };
     return { date: '', time: defaultTime };
   };
@@ -260,6 +294,9 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
       return {
         ...stay,
         phone: stay.phone ?? '',
+        lat: stay.lat ?? undefined,
+        lon: stay.lon ?? undefined,
+        imageUrl: stay.imageUrl ?? undefined,
         checkInDate:  ci.date,
         checkInTime:  ci.time,
         checkOutDate: co.date,
@@ -269,7 +306,7 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
       name: '', address: '', phone: '',
       checkInDate: '', checkInTime: DEFAULT_CHECKIN_TIME,
       checkOutDate: '', checkOutTime: DEFAULT_CHECKOUT_TIME,
-      type: 'hotel', confirmationCode: '',
+      type: 'hotel' as const, confirmationCode: '',
     },
   });
 
@@ -280,25 +317,20 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
       phone: values.phone || undefined,
       type: values.type,
       confirmationCode: values.confirmationCode || undefined,
+      lat: values.lat,
+      lon: values.lon,
+      imageUrl: values.imageUrl || undefined,
       checkIn:  new Date(`${values.checkInDate}T${values.checkInTime}`).toISOString(),
       checkOut: new Date(`${values.checkOutDate}T${values.checkOutTime}`).toISOString(),
     };
 
     if (stay) {
       updateStay.mutate({ tripId, accommodationId: stay.id, data: payload }, {
-        onSuccess: () => {
-          toast.success('Updated');
-          queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) });
-          onSuccess();
-        }
+        onSuccess: () => { toast.success('Updated'); queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) }); onSuccess(); }
       });
     } else {
       createStay.mutate({ tripId, data: payload }, {
-        onSuccess: () => {
-          toast.success('Added');
-          queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) });
-          onSuccess();
-        }
+        onSuccess: () => { toast.success('Added'); queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) }); onSuccess(); }
       });
     }
   };
@@ -310,7 +342,6 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-4">
 
-        {/* Hotel name with autocomplete */}
         <FormField control={form.control} name="name" render={({ field }) => (
           <FormItem>
             <FormLabel>Hotel / Property Name</FormLabel>
@@ -319,11 +350,14 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
                 value={field.value}
                 onChange={field.onChange}
                 onSelect={s => {
-                  form.reset({
-                    ...form.getValues(),
-                    name: s.name,
-                    address: s.address,
-                    phone: s.phone ?? '',
+                  form.setValue('name', s.name);
+                  form.setValue('address', s.address);
+                  form.setValue('phone', s.phone ?? '');
+                  form.setValue('lat', s.lat);
+                  form.setValue('lon', s.lon);
+                  // Fetch Wikipedia image in background
+                  fetchWikiImage(s.name).then(url => {
+                    if (url) form.setValue('imageUrl', url);
                   });
                 }}
               />
@@ -340,43 +374,32 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
           <FormItem><FormLabel>Phone</FormLabel><FormControl><Input type="tel" placeholder="+1 212 555 0100" {...field} /></FormControl><FormMessage /></FormItem>
         )} />
 
-        {/* Check-in: date + time (defaults to 3:00 PM) */}
+        {/* Check-in */}
         <div>
           <p className="text-sm font-medium mb-1.5">Check-in</p>
           <div className="grid grid-cols-2 gap-2">
             <FormField control={form.control} name="checkInDate" render={({ field }) => (
-              <FormItem>
-                <FormControl><Input type="date" min={tripStartDate} max={tripEndDate} {...field} /></FormControl>
-                <FormMessage />
-              </FormItem>
+              <FormItem><FormControl><Input type="date" min={tripStartDate} max={tripEndDate} {...field} /></FormControl><FormMessage /></FormItem>
             )} />
             <FormField control={form.control} name="checkInTime" render={({ field }) => (
-              <FormItem>
-                <FormControl><Input type="time" {...field} /></FormControl>
-                <FormMessage />
-              </FormItem>
+              <FormItem><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
             )} />
           </div>
         </div>
 
-        {/* Check-out: date + time (defaults to 11:00 AM) */}
+        {/* Check-out */}
         <div>
           <p className="text-sm font-medium mb-1.5">Check-out</p>
           <div className="grid grid-cols-2 gap-2">
             <FormField control={form.control} name="checkOutDate" render={({ field }) => (
-              <FormItem>
-                <FormControl><Input type="date" min={checkInDate || tripStartDate} max={tripEndDate} {...field} /></FormControl>
-                <FormMessage />
-              </FormItem>
+              <FormItem><FormControl><Input type="date" min={checkInDate || tripStartDate} max={tripEndDate} {...field} /></FormControl><FormMessage /></FormItem>
             )} />
             <FormField control={form.control} name="checkOutTime" render={({ field }) => (
-              <FormItem>
-                <FormControl><Input type="time" {...field} /></FormControl>
-                <FormMessage />
-              </FormItem>
+              <FormItem><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
             )} />
           </div>
         </div>
+
         <div className="grid grid-cols-2 gap-4">
           <FormField control={form.control} name="type" render={({ field }) => (
             <FormItem><FormLabel>Type</FormLabel>
@@ -396,6 +419,7 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
             <FormItem><FormLabel>Confirmation Code</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
           )} />
         </div>
+
         <div className="flex justify-end pt-4">
           <Button type="submit" disabled={isPending}>{isPending ? 'Saving...' : 'Save Stay'}</Button>
         </div>

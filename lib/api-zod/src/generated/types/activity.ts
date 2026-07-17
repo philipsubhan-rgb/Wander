@@ -18,6 +18,12 @@ export interface Activity {
   time?: string | null;
   /** @nullable */
   location?: string | null;
+  /** @nullable */
+  lat?: number | null;
+  /** @nullable */
+  lon?: number | null;
+  /** @nullable */
+  imageUrl?: string | null;
   type?: ActivityType;
   /** @nullable */
   notes?: string | null;

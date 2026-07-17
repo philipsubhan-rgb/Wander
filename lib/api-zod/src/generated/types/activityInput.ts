@@ -13,6 +13,9 @@ export interface ActivityInput {
   date: string;
   time?: string;
   location?: string;
+  lat?: number;
+  lon?: number;
+  imageUrl?: string;
   type?: ActivityInputType;
   notes?: string;
 }

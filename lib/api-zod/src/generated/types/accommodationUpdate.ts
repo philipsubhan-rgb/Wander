@@ -13,6 +13,9 @@ export interface AccommodationUpdate {
   checkIn?: string;
   checkOut?: string;
   type?: AccommodationUpdateType;
+  lat?: number;
+  lon?: number;
+  imageUrl?: string;
   confirmationCode?: string;
   phone?: string;
   notes?: string;

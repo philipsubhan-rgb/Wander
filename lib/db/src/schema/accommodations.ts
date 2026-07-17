@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, pgEnum, doublePrecision } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { tripsTable } from "./trips";
@@ -13,6 +13,9 @@ export const accommodationsTable = pgTable("accommodations", {
   checkIn: text("check_in").notNull(),
   checkOut: text("check_out").notNull(),
   type: accommodationTypeEnum("type").notNull().default("hotel"),
+  lat: doublePrecision("lat"),
+  lon: doublePrecision("lon"),
+  imageUrl: text("image_url"),
   confirmationCode: text("confirmation_code"),
   phone: text("phone"),
   notes: text("notes"),

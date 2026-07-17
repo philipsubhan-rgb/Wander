@@ -1367,6 +1367,12 @@ components:
         type:
           type: string
           enum: [hotel, airbnb, hostel, resort, other]
+        lat:
+          type: ["number", "null"]
+        lon:
+          type: ["number", "null"]
+        imageUrl:
+          type: ["string", "null"]
         confirmationCode:
           type: ["string", "null"]
         phone:
@@ -1389,6 +1395,12 @@ components:
         type:
           type: string
           enum: [hotel, airbnb, hostel, resort, other]
+        lat:
+          type: number
+        lon:
+          type: number
+        imageUrl:
+          type: string
         confirmationCode:
           type: string
         phone:
@@ -1410,6 +1422,12 @@ components:
         type:
           type: string
           enum: [hotel, airbnb, hostel, resort, other]
+        lat:
+          type: number
+        lon:
+          type: number
+        imageUrl:
+          type: string
         confirmationCode:
           type: string
         phone:
@@ -1435,6 +1453,12 @@ components:
           type: ["string", "null"]
         location:
           type: ["string", "null"]
+        lat:
+          type: ["number", "null"]
+        lon:
+          type: ["number", "null"]
+        imageUrl:
+          type: ["string", "null"]
         type:
           type: string
           enum: [sightseeing, dining, adventure, culture, relaxation, transport, other]
@@ -1455,6 +1479,12 @@ components:
           type: string
         location:
           type: string
+        lat:
+          type: number
+        lon:
+          type: number
+        imageUrl:
+          type: string
         type:
           type: string
           enum: [sightseeing, dining, adventure, culture, relaxation, transport, other]
@@ -1473,6 +1503,12 @@ components:
         time:
           type: string
         location:
+          type: string
+        lat:
+          type: number
+        lon:
+          type: number
+        imageUrl:
           type: string
         type:
           type: string

@@ -16,6 +16,12 @@ export interface Accommodation {
   checkOut: string;
   type?: AccommodationType;
   /** @nullable */
+  lat?: number | null;
+  /** @nullable */
+  lon?: number | null;
+  /** @nullable */
+  imageUrl?: string | null;
+  /** @nullable */
   confirmationCode?: string | null;
   /** @nullable */
   phone?: string | null;
