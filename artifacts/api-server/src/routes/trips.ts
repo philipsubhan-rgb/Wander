@@ -240,6 +240,8 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
       description: f.notes ?? null,
       location: f.departureAirport,
       time: f.departureDatetime.length > 10 ? f.departureDatetime.substring(11, 16) : null,
+      imageUrl: null as string | null,
+      carrierCode: f.flightNumber?.match(/^([A-Z0-9]{2,3})\d/)?.[1] ?? null,
     })),
     ...accommodations.map(a => ({
       id: a.id,
@@ -249,6 +251,8 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
       description: a.notes ?? null,
       location: a.address,
       time: null,
+      imageUrl: a.imageUrl ?? null,
+      carrierCode: null as string | null,
     })),
     ...activities.map(a => ({
       id: a.id,
@@ -258,6 +262,8 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
       description: a.description ?? null,
       location: a.location ?? null,
       time: a.time ?? null,
+      imageUrl: a.imageUrl ?? null,
+      carrierCode: null as string | null,
     })),
     ...itinerary.map(d => ({
       id: d.id,
@@ -267,6 +273,8 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
       description: d.description ?? null,
       location: null,
       time: null,
+      imageUrl: null as string | null,
+      carrierCode: null as string | null,
     })),
   ];
 

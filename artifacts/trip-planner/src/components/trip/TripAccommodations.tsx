@@ -195,13 +195,21 @@ function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tr
   const [gradFrom, gradTo] = STAY_GRADIENTS[stay.type ?? 'other'] ?? STAY_GRADIENTS.other;
   const hasMap = stay.lat != null && stay.lon != null;
 
+  // Auto-fetch a wiki image for existing records that don't have one stored
+  const [liveImage, setLiveImage] = useState<string | null>(null);
+  useEffect(() => {
+    if (stay.imageUrl) return;
+    fetchWikiImage(stay.name).then(url => { if (url) setLiveImage(url); });
+  }, [stay.id, stay.imageUrl]);
+  const displayImage = stay.imageUrl || liveImage;
+
   return (
     <div className="bg-card border rounded-xl shadow-sm overflow-hidden relative group">
       {/* ── Image / gradient header ── */}
       <div className="relative h-40">
-        {stay.imageUrl ? (
+        {displayImage ? (
           <img
-            src={stay.imageUrl}
+            src={displayImage}
             alt={stay.name}
             className="h-full w-full object-cover"
           />

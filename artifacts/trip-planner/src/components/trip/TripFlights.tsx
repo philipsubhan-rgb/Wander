@@ -324,6 +324,28 @@ export function TripFlights({ tripId, editMode, tripStartDate, tripEndDate }: { 
 }
 
 // ─── Flight card ──────────────────────────────────────────────────────────────
+function AirlineLogo({ flightNumber, airlineName }: { flightNumber: string; airlineName: string }) {
+  const carrierCode = flightNumber?.match(/^([A-Z0-9]{2,3})\d/)?.[1] ?? null;
+  const [error, setError] = useState(false);
+
+  if (!carrierCode || error) {
+    return (
+      <div className="h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center shrink-0">
+        <Plane className="h-5 w-5 text-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={`https://pics.avs.io/200/80/${carrierCode}.png`}
+      alt={airlineName}
+      className="h-8 w-auto max-w-[110px] object-contain"
+      onError={() => setError(true)}
+    />
+  );
+}
+
 function FlightCard({ tripId, flight, editMode, tripStartDate }: { tripId: number; flight: any; editMode?: boolean; tripStartDate?: string }) {
   const queryClient = useQueryClient();
   const deleteFlight = useDeleteFlight();
@@ -368,9 +390,7 @@ function FlightCard({ tripId, flight, editMode, tripStartDate }: { tripId: numbe
       <div className="flex flex-col md:flex-row gap-6 md:items-center justify-between">
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-4">
-            <div className="h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center">
-              <Plane className="h-5 w-5 text-primary" />
-            </div>
+            <AirlineLogo flightNumber={flight.flightNumber} airlineName={flight.airline} />
             <div>
               <h3 className="font-semibold text-lg">{flight.airline}</h3>
               <p className="text-sm text-muted-foreground flex gap-2">

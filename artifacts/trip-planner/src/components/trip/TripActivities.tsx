@@ -199,13 +199,22 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
   const [gradFrom, gradTo] = ACTIVITY_GRADIENTS[activity.type ?? 'other'] ?? ACTIVITY_GRADIENTS.other;
   const hasMap = activity.lat != null && activity.lon != null;
 
+  // Auto-fetch a wiki image for existing records that don't have one stored
+  const [liveImage, setLiveImage] = useState<string | null>(null);
+  useEffect(() => {
+    if (activity.imageUrl) return;
+    const query = activity.location || activity.title;
+    fetchWikiImage(query).then(url => { if (url) setLiveImage(url); });
+  }, [activity.id, activity.imageUrl]);
+  const displayImage = activity.imageUrl || liveImage;
+
   return (
     <div className="bg-card border rounded-xl shadow-sm overflow-hidden relative group hover:border-primary/50 transition-colors">
       {/* ── Image / gradient header ── */}
       <div className="relative h-36">
-        {activity.imageUrl ? (
+        {displayImage ? (
           <img
-            src={activity.imageUrl}
+            src={displayImage}
             alt={activity.title}
             className="h-full w-full object-cover"
           />
