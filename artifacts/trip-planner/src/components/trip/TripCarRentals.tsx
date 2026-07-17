@@ -13,7 +13,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MiniMap } from './MiniMap';
-import { fetchWikiImage } from '@/lib/wiki-image';
+import { carRentalLogoUrl } from '@/lib/car-rental-logo';
 import {
   useListCarRentals,
   useCreateCarRental,
@@ -190,13 +190,9 @@ function CarRentalCard({ tripId, rental, editMode, tripStartDate, tripEndDate, t
   const [gradFrom, gradTo] = CAR_GRADIENTS[rental.carType ?? 'other'] ?? CAR_GRADIENTS.other;
   const hasMap = rental.lat != null && rental.lon != null;
 
-  // Auto-fetch wiki image for company
-  const [liveImage, setLiveImage] = useState<string | null>(null);
-  useEffect(() => {
-    if (rental.imageUrl) return;
-    fetchWikiImage(rental.company).then(url => { if (url) setLiveImage(url); });
-  }, [rental.id, rental.imageUrl]);
-  const displayImage = rental.imageUrl || liveImage;
+  // Logo: use stored imageUrl if admin picked one, otherwise derive from company name via Clearbit
+  const logoUrl = rental.imageUrl || carRentalLogoUrl(rental.company);
+  const [logoError, setLogoError] = useState(false);
 
   const pickup  = parseISO(rental.pickupDatetime);
   const dropoff = parseISO(rental.dropoffDatetime);
@@ -209,15 +205,20 @@ function CarRentalCard({ tripId, rental, editMode, tripStartDate, tripEndDate, t
   return (
     <div className="bg-card border rounded-xl shadow-sm overflow-hidden relative group hover:border-primary/50 transition-colors">
       {/* ── Header ── */}
-      <div className="relative h-36">
-        {displayImage ? (
-          <img src={displayImage} alt={rental.company} className="h-full w-full object-cover" />
-        ) : (
-          <div style={{ background: `linear-gradient(to bottom right, ${gradFrom}, ${gradTo})` }}
-            className="h-full w-full flex items-center justify-center">
+      <div className="relative h-36"
+        style={{ background: `linear-gradient(to bottom right, ${gradFrom}, ${gradTo})` }}>
+        <div className="h-full w-full flex items-center justify-center p-4">
+          {!logoError ? (
+            <img
+              src={logoUrl}
+              alt={rental.company}
+              className="h-14 w-auto max-w-[160px] object-contain filter drop-shadow-md brightness-0 invert"
+              onError={() => setLogoError(true)}
+            />
+          ) : (
             <Car className="h-12 w-12 text-white/50" />
-          </div>
-        )}
+          )}
+        </div>
         {editMode && (
           <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>

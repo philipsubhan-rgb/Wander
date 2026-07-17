@@ -325,10 +325,12 @@ export function TripFlights({ tripId, editMode, tripStartDate, tripEndDate }: { 
 
 // ─── Flight card ──────────────────────────────────────────────────────────────
 function AirlineLogo({ flightNumber, airlineName }: { flightNumber: string; airlineName: string }) {
-  const carrierCode = flightNumber?.match(/^([A-Z0-9]{2,3})\d/)?.[1] ?? null;
-  const [error, setError] = useState(false);
+  // Normalise: uppercase, allow optional space between letters and digits (e.g. "LH 123" or "LH123")
+  const carrierCode = flightNumber?.toUpperCase().match(/^([A-Z0-9]{2,3})\s*\d/)?.[1] ?? null;
+  // Try avs.io first, fall back to gstatic, then show icon
+  const [attempt, setAttempt] = useState<'avs' | 'gstatic' | 'none'>('avs');
 
-  if (!carrierCode || error) {
+  if (!carrierCode || attempt === 'none') {
     return (
       <div className="h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center shrink-0">
         <Plane className="h-5 w-5 text-primary" />
@@ -336,12 +338,16 @@ function AirlineLogo({ flightNumber, airlineName }: { flightNumber: string; airl
     );
   }
 
+  const src = attempt === 'avs'
+    ? `https://pics.avs.io/200/80/${carrierCode}.png`
+    : `https://www.gstatic.com/flights/airline_logos/70px/${carrierCode}.png`;
+
   return (
     <img
-      src={`https://pics.avs.io/200/80/${carrierCode}.png`}
+      src={src}
       alt={airlineName}
       className="h-8 w-auto max-w-[110px] object-contain"
-      onError={() => setError(true)}
+      onError={() => setAttempt(a => a === 'avs' ? 'gstatic' : 'none')}
     />
   );
 }
