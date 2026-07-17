@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Trip Planner"
+version = "1.0.0"
+id = "artifacts/trip-planner"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18638
+
+[services.development]
+run = "pnpm --filter @workspace/trip-planner run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/trip-planner", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/trip-planner/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18638"
+BASE_PATH = "/"
