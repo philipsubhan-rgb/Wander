@@ -6,14 +6,14 @@ import { getScheduledFlights } from '../lib/aviationstack';
 
 const router: IRouter = Router();
 
-// GET /api/search/airlines?q=lufth
-router.get('/search/airlines', requireAuth, (req, res): void => {
+// GET /api/search/airlines?q=lufth  — public, static data
+router.get('/search/airlines', (req, res): void => {
   const q = String(req.query.q ?? '');
   res.json(searchAirlines(q, 10));
 });
 
-// GET /api/search/airports?q=JFK  or  ?q=new york
-router.get('/search/airports', requireAuth, (req, res): void => {
+// GET /api/search/airports?q=JFK  or  ?q=new york  — public, static data
+router.get('/search/airports', (req, res): void => {
   const q = String(req.query.q ?? '');
   res.json(searchAirports(q, 10));
 });
