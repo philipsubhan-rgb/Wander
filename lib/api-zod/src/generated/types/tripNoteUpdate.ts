@@ -9,4 +9,5 @@
 export interface TripNoteUpdate {
   title?: string;
   content?: string;
+  isShared?: boolean;
 }

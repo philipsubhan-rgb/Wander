@@ -1560,7 +1560,7 @@ components:
 
     TripNote:
       type: object
-      required: [id, tripId, userId, content, createdAt]
+      required: [id, tripId, userId, content, isShared, createdAt]
       properties:
         id:
           type: integer
@@ -1568,10 +1568,19 @@ components:
           type: integer
         userId:
           type: integer
+        authorName:
+          type: ["string", "null"]
+          description: Display name of the note author (populated when the note is shared by another traveler)
+        isMine:
+          type: boolean
+          description: True when this note belongs to the requesting user
         title:
           type: ["string", "null"]
         content:
           type: string
+        isShared:
+          type: boolean
+          description: When true, all trip participants can see this note
         createdAt:
           type: string
         updatedAt:
@@ -1585,6 +1594,8 @@ components:
           type: string
         content:
           type: string
+        isShared:
+          type: boolean
 
     TripNoteUpdate:
       type: object
@@ -1593,10 +1604,12 @@ components:
           type: string
         content:
           type: string
+        isShared:
+          type: boolean
 
     TravelDocument:
       type: object
-      required: [id, tripId, userId, type, number]
+      required: [id, tripId, userId, type, number, isShared]
       properties:
         id:
           type: integer
@@ -1604,6 +1617,12 @@ components:
           type: integer
         userId:
           type: integer
+        authorName:
+          type: ["string", "null"]
+          description: Display name of the document owner (populated when shared by another traveler)
+        isMine:
+          type: boolean
+          description: True when this document belongs to the requesting user
         type:
           type: string
           enum: [passport, visa, insurance, id_card, other]
@@ -1613,6 +1632,9 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
+        isShared:
+          type: boolean
+          description: When true, all trip participants can see this document
 
     TravelDocumentInput:
       type: object
@@ -1627,6 +1649,8 @@ components:
           type: string
         notes:
           type: string
+        isShared:
+          type: boolean
 
     TravelDocumentUpdate:
       type: object
@@ -1640,3 +1664,5 @@ components:
           type: string
         notes:
           type: string
+        isShared:
+          type: boolean

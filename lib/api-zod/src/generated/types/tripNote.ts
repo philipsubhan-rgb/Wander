@@ -10,9 +10,18 @@ export interface TripNote {
   id: number;
   tripId: number;
   userId: number;
+  /**
+     * Display name of the note author (populated when the note is shared by another traveler)
+     * @nullable
+     */
+  authorName?: string | null;
+  /** True when this note belongs to the requesting user */
+  isMine?: boolean;
   /** @nullable */
   title?: string | null;
   content: string;
+  /** When true, all trip participants can see this note */
+  isShared: boolean;
   createdAt: string;
   updatedAt?: string;
 }

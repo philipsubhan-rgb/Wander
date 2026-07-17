@@ -12,4 +12,5 @@ export interface TravelDocumentInput {
   number: string;
   expiryDate?: string;
   notes?: string;
+  isShared?: boolean;
 }

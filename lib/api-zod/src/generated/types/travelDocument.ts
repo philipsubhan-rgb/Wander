@@ -11,10 +11,19 @@ export interface TravelDocument {
   id: number;
   tripId: number;
   userId: number;
+  /**
+     * Display name of the document owner (populated when shared by another traveler)
+     * @nullable
+     */
+  authorName?: string | null;
+  /** True when this document belongs to the requesting user */
+  isMine?: boolean;
   type: TravelDocumentType;
   number: string;
   /** @nullable */
   expiryDate?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** When true, all trip participants can see this document */
+  isShared: boolean;
 }

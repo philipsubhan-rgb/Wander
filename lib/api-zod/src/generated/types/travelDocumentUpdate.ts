@@ -12,4 +12,5 @@ export interface TravelDocumentUpdate {
   number?: string;
   expiryDate?: string;
   notes?: string;
+  isShared?: boolean;
 }

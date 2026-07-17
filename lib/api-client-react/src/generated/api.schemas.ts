@@ -450,9 +450,18 @@ export interface TripNote {
   id: number;
   tripId: number;
   userId: number;
+  /**
+     * Display name of the note author (populated when the note is shared by another traveler)
+     * @nullable
+     */
+  authorName?: string | null;
+  /** True when this note belongs to the requesting user */
+  isMine?: boolean;
   /** @nullable */
   title?: string | null;
   content: string;
+  /** When true, all trip participants can see this note */
+  isShared: boolean;
   createdAt: string;
   updatedAt?: string;
 }
@@ -460,11 +469,13 @@ export interface TripNote {
 export interface TripNoteInput {
   title?: string;
   content: string;
+  isShared?: boolean;
 }
 
 export interface TripNoteUpdate {
   title?: string;
   content?: string;
+  isShared?: boolean;
 }
 
 export type TravelDocumentType = typeof TravelDocumentType[keyof typeof TravelDocumentType];
@@ -482,12 +493,21 @@ export interface TravelDocument {
   id: number;
   tripId: number;
   userId: number;
+  /**
+     * Display name of the document owner (populated when shared by another traveler)
+     * @nullable
+     */
+  authorName?: string | null;
+  /** True when this document belongs to the requesting user */
+  isMine?: boolean;
   type: TravelDocumentType;
   number: string;
   /** @nullable */
   expiryDate?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** When true, all trip participants can see this document */
+  isShared: boolean;
 }
 
 export type TravelDocumentInputType = typeof TravelDocumentInputType[keyof typeof TravelDocumentInputType];
@@ -506,6 +526,7 @@ export interface TravelDocumentInput {
   number: string;
   expiryDate?: string;
   notes?: string;
+  isShared?: boolean;
 }
 
 export type TravelDocumentUpdateType = typeof TravelDocumentUpdateType[keyof typeof TravelDocumentUpdateType];
@@ -524,5 +545,6 @@ export interface TravelDocumentUpdate {
   number?: string;
   expiryDate?: string;
   notes?: string;
+  isShared?: boolean;
 }
 

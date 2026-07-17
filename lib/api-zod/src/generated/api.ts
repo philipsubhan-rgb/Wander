@@ -736,8 +736,11 @@ export const ListTripNotesResponseItem = zod.object({
   "id": zod.number(),
   "tripId": zod.number(),
   "userId": zod.number(),
+  "authorName": zod.string().nullish().describe('Display name of the note author (populated when the note is shared by another traveler)'),
+  "isMine": zod.boolean().optional().describe('True when this note belongs to the requesting user'),
   "title": zod.string().nullish(),
   "content": zod.string(),
+  "isShared": zod.boolean().describe('When true, all trip participants can see this note'),
   "createdAt": zod.string(),
   "updatedAt": zod.string().optional()
 })
@@ -750,15 +753,19 @@ export const CreateTripNoteParams = zod.object({
 
 export const CreateTripNoteBody = zod.object({
   "title": zod.string().optional(),
-  "content": zod.string()
+  "content": zod.string(),
+  "isShared": zod.boolean().optional()
 })
 
 export const CreateTripNoteResponse = zod.object({
   "id": zod.number(),
   "tripId": zod.number(),
   "userId": zod.number(),
+  "authorName": zod.string().nullish().describe('Display name of the note author (populated when the note is shared by another traveler)'),
+  "isMine": zod.boolean().optional().describe('True when this note belongs to the requesting user'),
   "title": zod.string().nullish(),
   "content": zod.string(),
+  "isShared": zod.boolean().describe('When true, all trip participants can see this note'),
   "createdAt": zod.string(),
   "updatedAt": zod.string().optional()
 })
@@ -771,15 +778,19 @@ export const UpdateTripNoteParams = zod.object({
 
 export const UpdateTripNoteBody = zod.object({
   "title": zod.string().optional(),
-  "content": zod.string().optional()
+  "content": zod.string().optional(),
+  "isShared": zod.boolean().optional()
 })
 
 export const UpdateTripNoteResponse = zod.object({
   "id": zod.number(),
   "tripId": zod.number(),
   "userId": zod.number(),
+  "authorName": zod.string().nullish().describe('Display name of the note author (populated when the note is shared by another traveler)'),
+  "isMine": zod.boolean().optional().describe('True when this note belongs to the requesting user'),
   "title": zod.string().nullish(),
   "content": zod.string(),
+  "isShared": zod.boolean().describe('When true, all trip participants can see this note'),
   "createdAt": zod.string(),
   "updatedAt": zod.string().optional()
 })
@@ -806,10 +817,13 @@ export const ListTravelDocumentsResponseItem = zod.object({
   "id": zod.number(),
   "tripId": zod.number(),
   "userId": zod.number(),
+  "authorName": zod.string().nullish().describe('Display name of the document owner (populated when shared by another traveler)'),
+  "isMine": zod.boolean().optional().describe('True when this document belongs to the requesting user'),
   "type": zod.enum(['passport', 'visa', 'insurance', 'id_card', 'other']),
   "number": zod.string(),
   "expiryDate": zod.string().nullish(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "isShared": zod.boolean().describe('When true, all trip participants can see this document')
 })
 export const ListTravelDocumentsResponse = zod.array(ListTravelDocumentsResponseItem)
 
@@ -822,17 +836,21 @@ export const CreateTravelDocumentBody = zod.object({
   "type": zod.enum(['passport', 'visa', 'insurance', 'id_card', 'other']),
   "number": zod.string(),
   "expiryDate": zod.string().optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "isShared": zod.boolean().optional()
 })
 
 export const CreateTravelDocumentResponse = zod.object({
   "id": zod.number(),
   "tripId": zod.number(),
   "userId": zod.number(),
+  "authorName": zod.string().nullish().describe('Display name of the document owner (populated when shared by another traveler)'),
+  "isMine": zod.boolean().optional().describe('True when this document belongs to the requesting user'),
   "type": zod.enum(['passport', 'visa', 'insurance', 'id_card', 'other']),
   "number": zod.string(),
   "expiryDate": zod.string().nullish(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "isShared": zod.boolean().describe('When true, all trip participants can see this document')
 })
 
 
@@ -845,17 +863,21 @@ export const UpdateTravelDocumentBody = zod.object({
   "type": zod.enum(['passport', 'visa', 'insurance', 'id_card', 'other']).optional(),
   "number": zod.string().optional(),
   "expiryDate": zod.string().optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "isShared": zod.boolean().optional()
 })
 
 export const UpdateTravelDocumentResponse = zod.object({
   "id": zod.number(),
   "tripId": zod.number(),
   "userId": zod.number(),
+  "authorName": zod.string().nullish().describe('Display name of the document owner (populated when shared by another traveler)'),
+  "isMine": zod.boolean().optional().describe('True when this document belongs to the requesting user'),
   "type": zod.enum(['passport', 'visa', 'insurance', 'id_card', 'other']),
   "number": zod.string(),
   "expiryDate": zod.string().nullish(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "isShared": zod.boolean().describe('When true, all trip participants can see this document')
 })
 
 

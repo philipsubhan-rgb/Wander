@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { tripsTable } from "./trips";
@@ -10,6 +10,7 @@ export const tripNotesTable = pgTable("trip_notes", {
   userId: integer("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   title: text("title"),
   content: text("content").notNull(),
+  isShared: boolean("is_shared").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -22,6 +23,7 @@ export const travelDocumentsTable = pgTable("travel_documents", {
   number: text("number").notNull(),
   expiryDate: text("expiry_date"),
   notes: text("notes"),
+  isShared: boolean("is_shared").notNull().default(false),
 });
 
 export const insertTripNoteSchema = createInsertSchema(tripNotesTable).omit({ id: true, createdAt: true, updatedAt: true });
