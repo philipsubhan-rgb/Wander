@@ -1,10 +1,14 @@
 import { useParams, Link } from 'wouter';
-import { useGetTrip } from '@workspace/api-client-react';
+import { useGetTrip, useUpdateTrip, getGetTripQueryKey } from '@workspace/api-client-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Pencil, ArrowLeft, Loader2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Pencil, ArrowLeft, Loader2, CalendarDays, Check, X } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { format, parseISO } from 'date-fns';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 import { TripOverview } from '@/components/trip/TripOverview';
 import { TripFlights } from '@/components/trip/TripFlights';
@@ -22,11 +26,82 @@ function getGradientForDestination(destination: string) {
   return `linear-gradient(135deg, hsl(${hue1}, 40%, 60%), hsl(${hue2}, 50%, 40%))`;
 }
 
+function InlineDateEditor({ trip, onClose }: { trip: any; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const updateTrip = useUpdateTrip();
+  const [startDate, setStartDate] = useState((trip.startDate ?? '').slice(0, 10));
+  const [endDate, setEndDate] = useState((trip.endDate ?? '').slice(0, 10));
+
+  const handleSave = () => {
+    if (!startDate || !endDate) {
+      toast.error('Both dates are required');
+      return;
+    }
+    if (endDate < startDate) {
+      toast.error('End date must be after start date');
+      return;
+    }
+    updateTrip.mutate(
+      { tripId: trip.id, data: { startDate, endDate } },
+      {
+        onSuccess: () => {
+          toast.success('Dates updated');
+          queryClient.invalidateQueries({ queryKey: getGetTripQueryKey(trip.id) });
+          onClose();
+        },
+        onError: (err: any) => {
+          toast.error(err?.data?.error ?? err?.message ?? 'Failed to update dates');
+        },
+      }
+    );
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 bg-white/15 backdrop-blur-md rounded-2xl px-4 py-3 border border-white/30">
+      <CalendarDays className="h-4 w-4 text-white/80 shrink-0" />
+      <div className="flex items-center gap-2">
+        <Input
+          type="date"
+          value={startDate}
+          onChange={e => setStartDate(e.target.value)}
+          className="h-8 text-sm bg-white/20 border-white/30 text-white [color-scheme:dark] w-36"
+        />
+        <span className="text-white/70 text-sm">→</span>
+        <Input
+          type="date"
+          value={endDate}
+          onChange={e => setEndDate(e.target.value)}
+          className="h-8 text-sm bg-white/20 border-white/30 text-white [color-scheme:dark] w-36"
+        />
+      </div>
+      <div className="flex items-center gap-1">
+        <Button
+          size="sm"
+          onClick={handleSave}
+          disabled={updateTrip.isPending}
+          className="h-8 bg-white text-black hover:bg-white/90 rounded-full px-3"
+        >
+          {updateTrip.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onClose}
+          className="h-8 text-white hover:bg-white/20 rounded-full px-3"
+        >
+          <X className="h-3 w-3" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function TripDetail({ editMode = false }: { editMode?: boolean }) {
   const { id } = useParams();
   const tripId = Number(id);
   const { data: trip, isLoading } = useGetTrip(tripId, { query: { enabled: !!tripId } });
   const { isAdmin } = useAuth();
+  const [editingDates, setEditingDates] = useState(false);
 
   if (isLoading) return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary"/></div>;
   if (!trip) return <div className="p-10 text-center text-xl">Trip not found</div>;
@@ -53,10 +128,29 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
               <div className="inline-block px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-medium uppercase tracking-wider mb-4">
                 {trip.status}
               </div>
-              <h1 className="text-4xl md:text-5xl font-serif font-bold mb-2">{trip.title}</h1>
-              <div className="text-lg md:text-xl text-white/90">
-                {trip.destination} • {format(parseISO(trip.startDate), 'MMM d')} - {format(parseISO(trip.endDate), 'MMM d, yyyy')}
-              </div>
+              <h1 className="text-4xl md:text-5xl font-serif font-bold mb-3">{trip.title}</h1>
+
+              {/* Date display — clickable in edit mode */}
+              {editMode && isAdmin ? (
+                editingDates ? (
+                  <InlineDateEditor trip={trip} onClose={() => setEditingDates(false)} />
+                ) : (
+                  <button
+                    onClick={() => setEditingDates(true)}
+                    className="group flex items-center gap-2 text-lg md:text-xl text-white/90 hover:text-white transition-colors rounded-xl px-2 py-1 -ml-2 hover:bg-white/10"
+                    title="Click to edit dates"
+                  >
+                    <span>
+                      {trip.destination} • {format(parseISO(trip.startDate), 'MMM d')} – {format(parseISO(trip.endDate), 'MMM d, yyyy')}
+                    </span>
+                    <Pencil className="h-3.5 w-3.5 opacity-0 group-hover:opacity-70 transition-opacity shrink-0" />
+                  </button>
+                )
+              ) : (
+                <div className="text-lg md:text-xl text-white/90">
+                  {trip.destination} • {format(parseISO(trip.startDate), 'MMM d')} – {format(parseISO(trip.endDate), 'MMM d, yyyy')}
+                </div>
+              )}
             </div>
             {!editMode && isAdmin && (
               <Link href={`/trips/${trip.id}/edit`}>
