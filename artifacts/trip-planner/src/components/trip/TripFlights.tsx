@@ -14,19 +14,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Plane, PlaneTakeoff, Plus, Trash2, Pencil, Loader2, Search,
-  Clock, ArrowRight, AlertCircle, CheckCircle2,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type AirlineSuggestion = { code: string; name: string };
 type AirportSuggestion = { iata: string; name: string; city: string; country: string };
-type FlightOffer = {
-  id: string; airline: string; carrierCode: string; flightNumber: string;
-  stops: number; totalDuration: string; price: string | null; currency: string;
-  departureAirport: string; arrivalAirport: string;
-  departureTime: string; arrivalTime: string;
-};
 
 // ─── Base URL for API (mirrors the pattern used by the generated client) ──────
 const API_BASE = '/api';
@@ -151,135 +144,63 @@ function AirportInput({ value, onChange, placeholder }: { value: string; onChang
   );
 }
 
-// ─── Flight search panel ───────────────────────────────────────────────────────
-function formatDuration(iso: string) {
-  // PT2H30M → 2h 30m
-  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
-  if (!m) return iso;
-  const h = m[1] ? `${m[1]}h ` : '';
-  const min = m[2] ? `${m[2]}m` : '';
-  return `${h}${min}`.trim();
-}
-
+// ─── Flight search panel (external booking site deep-links) ──────────────────
 function FlightSearchPanel({
-  origin, destination, date, onSelect,
+  origin, destination, date,
 }: {
   origin: string; destination: string; date: string;
-  onSelect: (offer: FlightOffer) => void;
 }) {
-  const [flights, setFlights] = useState<FlightOffer[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [credsMissing, setCredsMissing] = useState(false);
+  const canLink = origin.length === 3 && destination.length === 3 && date.length === 10;
 
-  const canSearch = origin.length === 3 && destination.length === 3 && date.length === 10;
+  // Kayak: /flights/JFK-LAX/2026-09-10
+  const kayakUrl = canLink
+    ? `https://www.kayak.com/flights/${origin.toUpperCase()}-${destination.toUpperCase()}/${date}`
+    : null;
 
-  const handleSearch = async () => {
-    setLoading(true); setError(null); setCredsMissing(false); setFlights(null);
-    try {
-      const data = await fetchJson<FlightOffer[]>(
-        `${API_BASE}/search/flights?origin=${origin}&destination=${destination}&date=${date}`
-      );
-      setFlights(data);
-    } catch (e: any) {
-      if (e?.error === 'AMADEUS_CREDENTIALS_MISSING') {
-        setCredsMissing(true);
-      } else {
-        setError(e?.detail ?? e?.error ?? 'Flight search failed');
-      }
-    } finally { setLoading(false); }
-  };
+  // Google Flights: simple query string works as a deep-link into the search
+  const googleUrl = canLink
+    ? `https://www.google.com/travel/flights/search?q=Flights+from+${origin.toUpperCase()}+to+${destination.toUpperCase()}+on+${date}`
+    : null;
+
+  // Skyscanner: /transport/flights/org/dst/YYMMDD/
+  const skyscannerDate = canLink ? date.replace(/-/g, '').slice(2) : null; // YYMMDD
+  const skyscannerUrl = canLink
+    ? `https://www.skyscanner.com/transport/flights/${origin.toLowerCase()}/${destination.toLowerCase()}/${skyscannerDate}/`
+    : null;
+
+  const sites = [
+    { name: 'Google Flights', url: googleUrl, color: 'hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/30' },
+    { name: 'Kayak', url: kayakUrl, color: 'hover:border-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/30' },
+    { name: 'Skyscanner', url: skyscannerUrl, color: 'hover:border-sky-500 hover:bg-sky-50 dark:hover:bg-sky-950/30' },
+  ];
 
   return (
-    <div className="mt-2 space-y-3">
-      <Button
-        type="button" variant="outline" size="sm"
-        onClick={handleSearch}
-        disabled={!canSearch || loading}
-        className="w-full gap-2"
-      >
-        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-        {loading ? 'Searching flights…' : `Search flights ${origin} → ${destination}`}
-      </Button>
-
-      {!canSearch && (
-        <p className="text-xs text-muted-foreground text-center">
-          Enter 3-letter airport codes and a departure date to search flights
+    <div className="space-y-2">
+      {!canLink && (
+        <p className="text-xs text-muted-foreground text-center py-1">
+          Enter 3-letter airport codes and a departure date above to search for flights
         </p>
       )}
-
-      {credsMissing && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-4 text-sm space-y-2">
-          <div className="flex items-center gap-2 font-medium text-amber-800 dark:text-amber-400">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            Amadeus API credentials required
-          </div>
-          <p className="text-amber-700 dark:text-amber-500 text-xs leading-relaxed">
-            Live flight search uses the free Amadeus API. Create an account at{' '}
-            <a href="https://developers.amadeus.com" target="_blank" rel="noopener noreferrer" className="underline font-medium">
-              developers.amadeus.com
-            </a>
-            , create a test app, and add <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">AMADEUS_CLIENT_ID</code> and{' '}
-            <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">AMADEUS_CLIENT_SECRET</code> as Secrets in your Replit project.
-          </p>
-        </div>
-      )}
-
-      {error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive flex items-center gap-2">
-          <AlertCircle className="h-4 w-4 shrink-0" /> {error}
-        </div>
-      )}
-
-      {flights && flights.length === 0 && (
-        <p className="text-center text-sm text-muted-foreground py-4">No flights found for this route and date.</p>
-      )}
-
-      {flights && flights.length > 0 && (
-        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-          <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{flights.length} flights found — click to use</p>
-          {flights.map(f => (
-            <button
-              key={f.id} type="button"
-              onClick={() => onSelect(f)}
-              className="w-full text-left rounded-lg border p-3 hover:border-primary hover:bg-primary/5 transition-all group"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded shrink-0">{f.flightNumber}</span>
-                  <span className="text-sm font-medium truncate">{f.airline}</span>
-                </div>
-                {f.price && (
-                  <span className="text-sm font-bold text-primary shrink-0">{f.currency} {f.price}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2 mt-2 text-sm">
-                <div className="text-center">
-                  <div className="font-bold">{format(parseISO(f.departureTime), 'HH:mm')}</div>
-                  <div className="text-xs text-muted-foreground">{f.departureAirport}</div>
-                </div>
-                <div className="flex-1 flex flex-col items-center gap-0.5">
-                  <div className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Clock className="h-3 w-3" />{formatDuration(f.totalDuration)}
-                  </div>
-                  <div className="w-full flex items-center gap-1">
-                    <div className="h-px flex-1 bg-border" />
-                    <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <div className="h-px flex-1 bg-border" />
-                  </div>
-                  {f.stops > 0 && (
-                    <div className="text-xs text-amber-600">{f.stops} stop{f.stops > 1 ? 's' : ''}</div>
-                  )}
-                </div>
-                <div className="text-center">
-                  <div className="font-bold">{format(parseISO(f.arrivalTime), 'HH:mm')}</div>
-                  <div className="text-xs text-muted-foreground">{f.arrivalAirport}</div>
-                </div>
-                <CheckCircle2 className="h-4 w-4 text-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-              </div>
-            </button>
-          ))}
-        </div>
+      <div className="grid grid-cols-3 gap-2">
+        {sites.map(({ name, url, color }) => (
+          <a
+            key={name}
+            href={url ?? '#'}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={!url ? (e) => e.preventDefault() : undefined}
+            className={`flex flex-col items-center justify-center gap-1 rounded-lg border p-3 text-center text-sm font-medium transition-all
+              ${url ? `cursor-pointer ${color}` : 'opacity-40 cursor-not-allowed bg-muted/30'}`}
+          >
+            <Search className="h-4 w-4 text-muted-foreground" />
+            {name}
+          </a>
+        ))}
+      </div>
+      {canLink && (
+        <p className="text-xs text-muted-foreground text-center">
+          Opens a new tab — find your flight, then enter the details above
+        </p>
       )}
     </div>
   );
@@ -454,16 +375,6 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
     if (depDatetime && depDatetime.length >= 10) setSearchDate(depDatetime.slice(0, 10));
   }, [depDatetime]);
 
-  const handleSelectOffer = (offer: FlightOffer) => {
-    form.setValue('airline', offer.airline);
-    form.setValue('flightNumber', offer.flightNumber);
-    form.setValue('departureAirport', offer.departureAirport);
-    form.setValue('arrivalAirport', offer.arrivalAirport);
-    form.setValue('departureDatetime', offer.departureTime.slice(0, 16));
-    form.setValue('arrivalDatetime', offer.arrivalTime.slice(0, 16));
-    toast.success('Flight details filled in — review and save');
-  };
-
   const onSubmit = (values: z.infer<typeof flightSchema>) => {
     const payload = {
       ...values,
@@ -586,7 +497,6 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
             origin={depAirport}
             destination={arrAirport}
             date={searchDate}
-            onSelect={handleSelectOffer}
           />
         </div>
 
