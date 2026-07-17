@@ -15,6 +15,7 @@ import { TripFlights } from '@/components/trip/TripFlights';
 import { TripAccommodations } from '@/components/trip/TripAccommodations';
 import { TripActivities } from '@/components/trip/TripActivities';
 import { TripCarRentals } from '@/components/trip/TripCarRentals';
+import { TripReservations } from '@/components/trip/TripReservations';
 import { TripItinerary } from '@/components/trip/TripItinerary';
 import { TripPackingList } from '@/components/trip/TripPackingList';
 import { TripNotes, TripDocuments } from '@/components/trip/TripPrivate';
@@ -182,6 +183,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
               <TabsTrigger value="accommodations" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Stays</TabsTrigger>
               <TabsTrigger value="activities" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Activities</TabsTrigger>
               <TabsTrigger value="car-rentals" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Car Rentals</TabsTrigger>
+              <TabsTrigger value="reservations" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Reservations</TabsTrigger>
               <TabsTrigger value="packing" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Packing List</TabsTrigger>
               <TabsTrigger value="notes" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">My Notes</TabsTrigger>
               <TabsTrigger value="documents" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Documents</TabsTrigger>
@@ -198,6 +200,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
             <TabsContent value="accommodations" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripAccommodations tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} /></TabsContent>
             <TabsContent value="activities" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripActivities tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} tripDestination={trip.destination} /></TabsContent>
             <TabsContent value="car-rentals" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripCarRentals tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} tripDestination={trip.destination} /></TabsContent>
+            <TabsContent value="reservations" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripReservations tripId={tripId} editMode={editMode} tripDestination={trip.destination} /></TabsContent>
             <TabsContent value="packing" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripPackingList tripId={tripId} editMode={editMode} /></TabsContent>
             <TabsContent value="notes" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripNotes tripId={tripId} /></TabsContent>
             <TabsContent value="documents" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripDocuments tripId={tripId} /></TabsContent>

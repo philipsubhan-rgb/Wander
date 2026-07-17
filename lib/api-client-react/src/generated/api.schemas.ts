@@ -628,3 +628,63 @@ export interface TravelDocumentUpdate {
   isShared?: boolean;
 }
 
+
+// ── Reservations ─────────────────────────────────────────────────────────────
+
+export type ReservationType = 'restaurant' | 'attraction' | 'tour' | 'transport' | 'event' | 'spa' | 'other';
+
+export interface Reservation {
+  id: number;
+  tripId: number;
+  type: ReservationType;
+  title: string;
+  venue?: string | null;
+  address?: string | null;
+  date: string;
+  time?: string | null;
+  endTime?: string | null;
+  confirmationCode?: string | null;
+  numberOfPeople?: number | null;
+  phone?: string | null;
+  notes?: string | null;
+  url?: string | null;
+  imageUrl?: string | null;
+  lat?: number | null;
+  lon?: number | null;
+}
+
+export interface ReservationInput {
+  type?: ReservationType;
+  title: string;
+  venue?: string;
+  address?: string;
+  date: string;
+  time?: string;
+  endTime?: string;
+  confirmationCode?: string;
+  numberOfPeople?: number;
+  phone?: string;
+  notes?: string;
+  url?: string;
+  imageUrl?: string;
+  lat?: number;
+  lon?: number;
+}
+
+export interface ReservationUpdate {
+  type?: ReservationType;
+  title?: string;
+  venue?: string;
+  address?: string;
+  date?: string;
+  time?: string;
+  endTime?: string;
+  confirmationCode?: string;
+  numberOfPeople?: number;
+  phone?: string;
+  notes?: string;
+  url?: string;
+  imageUrl?: string;
+  lat?: number;
+  lon?: number;
+}

@@ -7,3 +7,4 @@ export * from "./itinerary";
 export * from "./packing";
 export * from "./notes";
 export * from "./carRentals";
+export * from "./reservations";

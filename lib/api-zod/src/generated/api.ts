@@ -1055,3 +1055,42 @@ export const DeleteTravelDocumentResponse = zod.object({
 })
 
 
+
+// ── Reservations ─────────────────────────────────────────────────────────────
+
+const zodReservationType = zod.enum(['restaurant','attraction','tour','transport','event','spa','other']);
+
+export const ListReservationsParams = zod.object({ tripId: zod.coerce.number() });
+
+export const ReservationBody = zod.object({
+  type:             zodReservationType.optional(),
+  title:            zod.string().min(1),
+  venue:            zod.string().optional(),
+  address:          zod.string().optional(),
+  date:             zod.string().min(1),
+  time:             zod.string().optional(),
+  endTime:          zod.string().optional(),
+  confirmationCode: zod.string().optional(),
+  numberOfPeople:   zod.number().int().optional(),
+  phone:            zod.string().optional(),
+  notes:            zod.string().optional(),
+  url:              zod.string().optional(),
+  imageUrl:         zod.string().optional(),
+  lat:              zod.number().optional(),
+  lon:              zod.number().optional(),
+});
+
+export const ReservationResponse = ReservationBody.extend({
+  id:     zod.number(),
+  tripId: zod.number(),
+});
+
+export const ListReservationsResponse = zod.array(ReservationResponse);
+
+export const CreateReservationParams = zod.object({ tripId: zod.coerce.number() });
+export const CreateReservationBody   = ReservationBody;
+
+export const UpdateReservationParams = zod.object({ tripId: zod.coerce.number(), reservationId: zod.coerce.number() });
+export const UpdateReservationBody   = ReservationBody.partial();
+
+export const DeleteReservationParams = zod.object({ tripId: zod.coerce.number(), reservationId: zod.coerce.number() });

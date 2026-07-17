@@ -3,6 +3,8 @@ export interface PlaceResult {
   address: string;
   lat: number;
   lon: number;
+  website?: string | null;
+  phone?: string | null;
 }
 
 export async function searchPlaces(query: string, near?: string): Promise<PlaceResult[]> {
@@ -52,6 +54,8 @@ export async function searchPlaces(query: string, near?: string): Promise<PlaceR
       address: parts.length ? parts.join(', ') : r.display_name.split(',').slice(0, 3).join(',').trim(),
       lat: parseFloat(r.lat),
       lon: parseFloat(r.lon),
+      website: r.extratags?.website ?? r.extratags?.['contact:website'] ?? null,
+      phone:   r.extratags?.phone   ?? r.extratags?.['contact:phone']   ?? null,
     };
   });
 

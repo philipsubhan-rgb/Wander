@@ -26,6 +26,9 @@ import type {
   CarRental,
   CarRentalInput,
   CarRentalUpdate,
+  Reservation,
+  ReservationInput,
+  ReservationUpdate,
   Activity,
   ActivityInput,
   ActivityUpdate,
@@ -3564,3 +3567,68 @@ export const useDeleteCarRental = <TError = ErrorType<unknown>, TContext = unkno
 ): UseMutationResult<Awaited<ReturnType<typeof deleteCarRental>>, TError, { tripId: number; carRentalId: number }, TContext> =>
   useMutation(getDeleteCarRentalMutationOptions(options));
 
+
+// ── Reservations ─────────────────────────────────────────────────────────────
+
+export const getListReservationsQueryKey = (tripId: number) => ['listReservations', tripId] as const;
+
+export const listReservations = async (tripId: number, options?: RequestInit): Promise<Reservation[]> =>
+  customFetch<Reservation[]>(`/api/trips/${tripId}/reservations`, { ...options });
+
+export const useListReservations = (
+  tripId: number,
+  options?: { query?: UseQueryOptions<Awaited<ReturnType<typeof listReservations>>, ErrorType<unknown>> }
+) => useQuery({ queryKey: getListReservationsQueryKey(tripId), queryFn: () => listReservations(tripId), ...options?.query });
+
+// Create
+export const createReservation = async (tripId: number, data: ReservationInput, options?: RequestInit): Promise<Reservation> =>
+  customFetch<Reservation>(`/api/trips/${tripId}/reservations`, {
+    ...options, method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(data),
+  });
+
+export const useCreateReservation = <TError = ErrorType<unknown>, TContext = unknown>(
+  options?: { mutation?: UseMutationOptions<Awaited<ReturnType<typeof createReservation>>, TError, { tripId: number; data: BodyType<ReservationInput> }, TContext>; request?: SecondParameter<typeof customFetch> }
+): UseMutationResult<Awaited<ReturnType<typeof createReservation>>, TError, { tripId: number; data: BodyType<ReservationInput> }, TContext> => {
+  const mutationKey = ['createReservation'];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+  return useMutation({ mutationFn: ({ tripId, data }) => createReservation(tripId, data, requestOptions), ...mutationOptions });
+};
+
+// Update
+export const updateReservation = async (tripId: number, reservationId: number, data: ReservationUpdate, options?: RequestInit): Promise<Reservation> =>
+  customFetch<Reservation>(`/api/trips/${tripId}/reservations/${reservationId}`, {
+    ...options, method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(data),
+  });
+
+export const useUpdateReservation = <TError = ErrorType<unknown>, TContext = unknown>(
+  options?: { mutation?: UseMutationOptions<Awaited<ReturnType<typeof updateReservation>>, TError, { tripId: number; reservationId: number; data: BodyType<ReservationUpdate> }, TContext>; request?: SecondParameter<typeof customFetch> }
+): UseMutationResult<Awaited<ReturnType<typeof updateReservation>>, TError, { tripId: number; reservationId: number; data: BodyType<ReservationUpdate> }, TContext> => {
+  const mutationKey = ['updateReservation'];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+  return useMutation({ mutationFn: ({ tripId, reservationId, data }) => updateReservation(tripId, reservationId, data, requestOptions), ...mutationOptions });
+};
+
+// Delete
+export const deleteReservation = async (tripId: number, reservationId: number, options?: RequestInit): Promise<SuccessResponse> =>
+  customFetch<SuccessResponse>(`/api/trips/${tripId}/reservations/${reservationId}`, { ...options, method: 'DELETE' });
+
+export const useDeleteReservation = <TError = ErrorType<unknown>, TContext = unknown>(
+  options?: { mutation?: UseMutationOptions<Awaited<ReturnType<typeof deleteReservation>>, TError, { tripId: number; reservationId: number }, TContext>; request?: SecondParameter<typeof customFetch> }
+): UseMutationResult<Awaited<ReturnType<typeof deleteReservation>>, TError, { tripId: number; reservationId: number }, TContext> => {
+  const mutationKey = ['deleteReservation'];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+  return useMutation({ mutationFn: ({ tripId, reservationId }) => deleteReservation(tripId, reservationId, requestOptions), ...mutationOptions });
+};
