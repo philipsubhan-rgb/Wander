@@ -419,15 +419,6 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
           </FormItem>
         )} />
 
-        {/* Flight number */}
-        <FormField control={form.control} name="flightNumber" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Flight Number</FormLabel>
-            <FormControl><Input {...field} placeholder="e.g. LH 441" /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-
         {/* Airports */}
         <div className="grid grid-cols-2 gap-4">
           <FormField control={form.control} name="departureAirport" render={({ field }) => (
@@ -499,6 +490,15 @@ function FlightForm({ tripId, flight, onSuccess }: { tripId: number; flight?: an
             date={searchDate}
           />
         </div>
+
+        {/* Flight number */}
+        <FormField control={form.control} name="flightNumber" render={({ field }) => (
+          <FormItem>
+            <FormLabel>Flight Number</FormLabel>
+            <FormControl><Input {...field} placeholder="e.g. LH 441" /></FormControl>
+            <FormMessage />
+          </FormItem>
+        )} />
 
         <div className="flex justify-end pt-2">
           <Button type="submit" disabled={isPending}>
