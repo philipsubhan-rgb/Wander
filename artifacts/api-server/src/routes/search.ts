@@ -54,12 +54,13 @@ router.get('/search/flights', requireAuth, async (req, res): Promise<void> => {
   }
 });
 
-// GET /api/search/places?q=BMW+Museum  — public, general POI search
+// GET /api/search/places?q=BMW+Museum&near=Munich  — public, general POI search
 router.get('/search/places', async (req, res): Promise<void> => {
-  const q = String(req.query.q ?? '').trim();
+  const q    = String(req.query.q    ?? '').trim();
+  const near = String(req.query.near ?? '').trim() || undefined;
   if (q.length < 3) { res.json([]); return; }
   try {
-    const results = await searchPlaces(q);
+    const results = await searchPlaces(q, near);
     res.json(results);
   } catch (err: any) {
     console.error('Place search error:', err.message);

@@ -25,9 +25,11 @@ interface PlaceSuggestion {
 function LocationInput({
   value,
   onChange,
+  near,
 }: {
   value: string;
   onChange: (v: string) => void;
+  near?: string;
 }) {
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -42,7 +44,8 @@ function LocationInput({
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/search/places?q=${encodeURIComponent(value)}`);
+        const url = `${API_BASE}/search/places?q=${encodeURIComponent(value)}${near ? `&near=${encodeURIComponent(near)}` : ''}`;
+        const res = await fetch(url);
         if (res.ok) {
           const data: PlaceSuggestion[] = await res.json();
           setSuggestions(data);
@@ -114,7 +117,7 @@ const activitySchema = z.object({
   type: z.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
 });
 
-export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate }: { tripId: number, editMode?: boolean, tripStartDate?: string, tripEndDate?: string }) {
+export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate, tripDestination }: { tripId: number, editMode?: boolean, tripStartDate?: string, tripEndDate?: string, tripDestination?: string }) {
   const { data: activities, isLoading } = useListActivities(tripId, { query: { enabled: !!tripId } });
   const [isAddOpen, setIsAddOpen] = useState(false);
 
@@ -132,7 +135,7 @@ export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate }:
             </DialogTrigger>
             <DialogContent>
               <DialogHeader><DialogTitle>Add Activity</DialogTitle></DialogHeader>
-              <ActivityForm tripId={tripId} tripStartDate={tripStartDate} tripEndDate={tripEndDate} onSuccess={() => setIsAddOpen(false)} />
+              <ActivityForm tripId={tripId} tripStartDate={tripStartDate} tripEndDate={tripEndDate} tripDestination={tripDestination} onSuccess={() => setIsAddOpen(false)} />
             </DialogContent>
           </Dialog>
         </div>
@@ -146,7 +149,7 @@ export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate }:
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {sortedActivities.map(activity => (
-            <ActivityCard key={activity.id} tripId={tripId} activity={activity} editMode={editMode} tripStartDate={tripStartDate} tripEndDate={tripEndDate} />
+            <ActivityCard key={activity.id} tripId={tripId} activity={activity} editMode={editMode} tripStartDate={tripStartDate} tripEndDate={tripEndDate} tripDestination={tripDestination} />
           ))}
         </div>
       )}
@@ -154,7 +157,7 @@ export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate }:
   );
 }
 
-function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate }: { tripId: number, activity: any, editMode?: boolean, tripStartDate?: string, tripEndDate?: string }) {
+function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, tripDestination }: { tripId: number, activity: any, editMode?: boolean, tripStartDate?: string, tripEndDate?: string, tripDestination?: string }) {
   const queryClient = useQueryClient();
   const deleteActivity = useDeleteActivity();
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -181,7 +184,7 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate }
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader><DialogTitle>Edit Activity</DialogTitle></DialogHeader>
-                <ActivityForm tripId={tripId} activity={activity} tripStartDate={tripStartDate} tripEndDate={tripEndDate} onSuccess={() => setIsEditOpen(false)} />
+                <ActivityForm tripId={tripId} activity={activity} tripStartDate={tripStartDate} tripEndDate={tripEndDate} tripDestination={tripDestination} onSuccess={() => setIsEditOpen(false)} />
               </DialogContent>
             </Dialog>
             <Button variant="ghost" size="icon" onClick={handleDelete} className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive">
@@ -227,7 +230,7 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate }
   );
 }
 
-function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, onSuccess }: { tripId: number, activity?: any, tripStartDate?: string, tripEndDate?: string, onSuccess: () => void }) {
+function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, tripDestination, onSuccess }: { tripId: number, activity?: any, tripStartDate?: string, tripEndDate?: string, tripDestination?: string, onSuccess: () => void }) {
   const queryClient = useQueryClient();
   const createActivity = useCreateActivity();
   const updateActivity = useUpdateActivity();
@@ -281,7 +284,7 @@ function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, onSuccess 
           <FormItem>
             <FormLabel>Location</FormLabel>
             <FormControl>
-              <LocationInput value={field.value ?? ''} onChange={field.onChange} />
+              <LocationInput value={field.value ?? ''} onChange={field.onChange} near={tripDestination} />
             </FormControl>
             <FormMessage />
           </FormItem>
