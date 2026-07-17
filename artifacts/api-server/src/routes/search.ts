@@ -3,7 +3,7 @@ import { requireAuth } from '../middlewares/auth';
 import { searchAirlines } from '../data/airlines';
 import { searchAirports } from '../data/airports';
 import { getScheduledFlights } from '../lib/aviationstack';
-import { searchHotels, searchPlaces } from '../lib/nominatim';
+import { searchHotels, searchPlaces, searchCarRentals } from '../lib/nominatim';
 
 const router: IRouter = Router();
 
@@ -65,6 +65,19 @@ router.get('/search/places', async (req, res): Promise<void> => {
   } catch (err: any) {
     console.error('Place search error:', err.message);
     res.status(502).json({ error: 'Place search failed' });
+  }
+});
+
+// GET /api/search/car-rentals?q=hertz+munich  — public
+router.get('/search/car-rentals', async (req, res): Promise<void> => {
+  const q = String(req.query.q ?? '').trim();
+  if (q.length < 2) { res.json([]); return; }
+  try {
+    const results = await searchCarRentals(q);
+    res.json(results);
+  } catch (err: any) {
+    console.error('Car rental search error:', err.message);
+    res.status(502).json({ error: 'Car rental search failed' });
   }
 });
 

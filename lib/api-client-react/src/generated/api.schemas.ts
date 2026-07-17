@@ -322,6 +322,78 @@ export interface AccommodationUpdate {
   notes?: string;
 }
 
+export type CarType = typeof CarType[keyof typeof CarType];
+
+export const CarType = {
+  economy: 'economy',
+  compact: 'compact',
+  midsize: 'midsize',
+  fullsize: 'fullsize',
+  suv: 'suv',
+  luxury: 'luxury',
+  van: 'van',
+  convertible: 'convertible',
+  other: 'other',
+} as const;
+
+export interface CarRental {
+  id: number;
+  tripId: number;
+  company: string;
+  pickupLocation: string;
+  /** @nullable */
+  dropoffLocation?: string | null;
+  pickupDatetime: string;
+  dropoffDatetime: string;
+  carType?: CarType;
+  /** @nullable */
+  confirmationCode?: string | null;
+  /** @nullable */
+  driverName?: string | null;
+  /** @nullable */
+  phone?: string | null;
+  /** @nullable */
+  lat?: number | null;
+  /** @nullable */
+  lon?: number | null;
+  /** @nullable */
+  imageUrl?: string | null;
+  /** @nullable */
+  notes?: string | null;
+}
+
+export interface CarRentalInput {
+  company: string;
+  pickupLocation: string;
+  dropoffLocation?: string;
+  pickupDatetime: string;
+  dropoffDatetime: string;
+  carType?: CarType;
+  confirmationCode?: string;
+  driverName?: string;
+  phone?: string;
+  lat?: number;
+  lon?: number;
+  imageUrl?: string;
+  notes?: string;
+}
+
+export interface CarRentalUpdate {
+  company?: string;
+  pickupLocation?: string;
+  dropoffLocation?: string;
+  pickupDatetime?: string;
+  dropoffDatetime?: string;
+  carType?: CarType;
+  confirmationCode?: string;
+  driverName?: string;
+  phone?: string;
+  lat?: number;
+  lon?: number;
+  imageUrl?: string;
+  notes?: string;
+}
+
 export type ActivityType = typeof ActivityType[keyof typeof ActivityType];
 
 

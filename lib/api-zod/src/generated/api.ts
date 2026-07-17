@@ -526,6 +526,121 @@ export const DeleteAccommodationResponse = zod.object({
 })
 
 
+const carTypeValues = ['economy', 'compact', 'midsize', 'fullsize', 'suv', 'luxury', 'van', 'convertible', 'other'] as const;
+
+export const ListCarRentalsParams = zod.object({
+  "tripId": zod.coerce.number()
+})
+
+export const ListCarRentalsResponseItem = zod.object({
+  "id": zod.number(),
+  "tripId": zod.number(),
+  "company": zod.string(),
+  "pickupLocation": zod.string(),
+  "dropoffLocation": zod.string().nullish(),
+  "pickupDatetime": zod.string(),
+  "dropoffDatetime": zod.string(),
+  "carType": zod.enum(carTypeValues).optional(),
+  "confirmationCode": zod.string().nullish(),
+  "driverName": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "lat": zod.number().nullish(),
+  "lon": zod.number().nullish(),
+  "imageUrl": zod.string().nullish(),
+  "notes": zod.string().nullish()
+})
+export const ListCarRentalsResponse = zod.array(ListCarRentalsResponseItem)
+
+
+export const CreateCarRentalParams = zod.object({
+  "tripId": zod.coerce.number()
+})
+
+export const CreateCarRentalBody = zod.object({
+  "company": zod.string(),
+  "pickupLocation": zod.string(),
+  "dropoffLocation": zod.string().optional(),
+  "pickupDatetime": zod.string(),
+  "dropoffDatetime": zod.string(),
+  "carType": zod.enum(carTypeValues).optional(),
+  "confirmationCode": zod.string().optional(),
+  "driverName": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "lat": zod.number().optional(),
+  "lon": zod.number().optional(),
+  "imageUrl": zod.string().optional(),
+  "notes": zod.string().optional()
+})
+
+export const CreateCarRentalResponse = zod.object({
+  "id": zod.number(),
+  "tripId": zod.number(),
+  "company": zod.string(),
+  "pickupLocation": zod.string(),
+  "dropoffLocation": zod.string().nullish(),
+  "pickupDatetime": zod.string(),
+  "dropoffDatetime": zod.string(),
+  "carType": zod.enum(carTypeValues).optional(),
+  "confirmationCode": zod.string().nullish(),
+  "driverName": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "lat": zod.number().nullish(),
+  "lon": zod.number().nullish(),
+  "imageUrl": zod.string().nullish(),
+  "notes": zod.string().nullish()
+})
+
+
+export const UpdateCarRentalParams = zod.object({
+  "tripId": zod.coerce.number(),
+  "carRentalId": zod.coerce.number()
+})
+
+export const UpdateCarRentalBody = zod.object({
+  "company": zod.string().optional(),
+  "pickupLocation": zod.string().optional(),
+  "dropoffLocation": zod.string().optional(),
+  "pickupDatetime": zod.string().optional(),
+  "dropoffDatetime": zod.string().optional(),
+  "carType": zod.enum(carTypeValues).optional(),
+  "confirmationCode": zod.string().optional(),
+  "driverName": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "lat": zod.number().optional(),
+  "lon": zod.number().optional(),
+  "imageUrl": zod.string().optional(),
+  "notes": zod.string().optional()
+})
+
+export const UpdateCarRentalResponse = zod.object({
+  "id": zod.number(),
+  "tripId": zod.number(),
+  "company": zod.string(),
+  "pickupLocation": zod.string(),
+  "dropoffLocation": zod.string().nullish(),
+  "pickupDatetime": zod.string(),
+  "dropoffDatetime": zod.string(),
+  "carType": zod.enum(carTypeValues).optional(),
+  "confirmationCode": zod.string().nullish(),
+  "driverName": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "lat": zod.number().nullish(),
+  "lon": zod.number().nullish(),
+  "imageUrl": zod.string().nullish(),
+  "notes": zod.string().nullish()
+})
+
+
+export const DeleteCarRentalParams = zod.object({
+  "tripId": zod.coerce.number(),
+  "carRentalId": zod.coerce.number()
+})
+
+export const DeleteCarRentalResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
 export const ListActivitiesParams = zod.object({
   "tripId": zod.coerce.number()
 })

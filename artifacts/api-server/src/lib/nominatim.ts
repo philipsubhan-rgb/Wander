@@ -98,6 +98,70 @@ async function geocodeDestination(destination: string): Promise<{ lat: number; l
   }
 }
 
+export interface CarRentalResult {
+  name: string;
+  address: string;
+  phone: string | null;
+  lat: number;
+  lon: number;
+}
+
+export async function searchCarRentals(query: string): Promise<CarRentalResult[]> {
+  const key = `car_rental:${query.toLowerCase().trim()}`;
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.ts < TTL) return cached.data;
+
+  const params = new URLSearchParams({
+    q: query,
+    format: 'jsonv2',
+    addressdetails: '1',
+    extratags: '1',
+    limit: '10',
+    'accept-language': 'en',
+  });
+
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?${params}`,
+    { headers: { 'User-Agent': 'WanderTripPlanner/1.0' } }
+  );
+  if (!res.ok) throw new Error(`Nominatim error ${res.status}`);
+
+  const raw = await res.json() as any[];
+  const rentalKeywords = ['hertz', 'avis', 'budget', 'enterprise', 'sixt', 'europcar', 'thrifty', 'dollar', 'alamo', 'national', 'rent-a-car', 'rentacar', 'car hire', 'car rental', 'autovermietung'];
+
+  const results: CarRentalResult[] = raw
+    .filter(r => {
+      const cls  = (r.class ?? '').toLowerCase();
+      const type = (r.type  ?? '').toLowerCase();
+      const name = (r.display_name ?? '').toLowerCase();
+      return (
+        (cls === 'amenity' && type === 'car_rental') ||
+        type === 'car_rental' ||
+        rentalKeywords.some(w => name.includes(w))
+      );
+    })
+    .map(r => {
+      const addr = r.address ?? {};
+      const parts = [
+        r.extratags?.['addr:housenumber'] ?? addr.house_number,
+        r.extratags?.['addr:street'] ?? addr.road,
+        addr.city ?? addr.town ?? addr.village ?? addr.county,
+        addr.state,
+        addr.country,
+      ].filter(Boolean);
+      return {
+        name: r.name || r.display_name.split(',')[0],
+        address: parts.length ? parts.join(', ') : r.display_name,
+        phone: r.extratags?.phone ?? r.extratags?.['contact:phone'] ?? null,
+        lat: parseFloat(r.lat),
+        lon: parseFloat(r.lon),
+      };
+    });
+
+  cache.set(key, { data: results, ts: Date.now() });
+  return results;
+}
+
 export async function searchHotels(query: string): Promise<HotelResult[]> {
   const key = query.toLowerCase().trim();
   const cached = cache.get(key);
