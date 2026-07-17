@@ -1,7 +1,7 @@
 import { 
   useUpdateTrip, useListTripParticipants, useAddTripParticipant, useRemoveTripParticipant, useListUsers, getGetTripQueryKey, getListTripParticipantsQueryKey 
 } from '@workspace/api-client-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -32,24 +32,48 @@ export function TripSettings({ trip }: { trip: any }) {
   
   const [selectedUserId, setSelectedUserId] = useState<string>('');
 
-  const form = useForm<z.infer<typeof tripSchema>>({
-    resolver: zodResolver(tripSchema),
-    defaultValues: {
-      title: trip.title,
-      destination: trip.destination,
-      startDate: trip.startDate.slice(0, 10),
-      endDate: trip.endDate.slice(0, 10),
-      status: trip.status,
-      coverImage: trip.coverImage || '',
-    },
+  const tripToFormValues = (t: typeof trip) => ({
+    title: t.title,
+    destination: t.destination,
+    startDate: (t.startDate ?? '').slice(0, 10),
+    endDate: (t.endDate ?? '').slice(0, 10),
+    status: t.status as z.infer<typeof tripSchema>['status'],
+    coverImage: t.coverImage ?? '',
   });
 
+  const form = useForm<z.infer<typeof tripSchema>>({
+    resolver: zodResolver(tripSchema),
+    defaultValues: tripToFormValues(trip),
+  });
+
+  // Re-sync form when the trip data changes (e.g. after save + refetch, or navigating between trips)
+  useEffect(() => {
+    form.reset(tripToFormValues(trip));
+  }, [trip.id, trip.startDate, trip.endDate, trip.title, trip.destination, trip.status, trip.coverImage]);
+
   const onSubmit = (values: z.infer<typeof tripSchema>) => {
-    updateTrip.mutate({ tripId: trip.id, data: values }, {
-      onSuccess: () => {
-        toast.success('Trip settings updated');
+    // Don't send an empty string for coverImage — omit the field instead so the existing URL isn't cleared
+    const payload = {
+      ...values,
+      coverImage: values.coverImage || undefined,
+    };
+    updateTrip.mutate({ tripId: trip.id, data: payload }, {
+      onSuccess: (updated) => {
+        toast.success('Trip settings saved');
         queryClient.invalidateQueries({ queryKey: getGetTripQueryKey(trip.id) });
-      }
+        // Reset form to exactly what the server confirmed
+        form.reset({
+          title: updated.title,
+          destination: updated.destination,
+          startDate: (updated.startDate ?? '').slice(0, 10),
+          endDate: (updated.endDate ?? '').slice(0, 10),
+          status: updated.status as z.infer<typeof tripSchema>['status'],
+          coverImage: updated.coverImage ?? '',
+        });
+      },
+      onError: (err: any) => {
+        toast.error(err?.data?.error ?? err?.message ?? 'Failed to save trip settings');
+      },
     });
   };
 
