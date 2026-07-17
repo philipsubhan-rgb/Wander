@@ -3,7 +3,7 @@ import { requireAuth } from '../middlewares/auth';
 import { searchAirlines } from '../data/airlines';
 import { searchAirports } from '../data/airports';
 import { getScheduledFlights } from '../lib/aviationstack';
-import { searchHotels } from '../lib/nominatim';
+import { searchHotels, searchPlaces } from '../lib/nominatim';
 
 const router: IRouter = Router();
 
@@ -51,6 +51,19 @@ router.get('/search/flights', requireAuth, async (req, res): Promise<void> => {
     }
     console.error('Flight search error:', err.message);
     res.status(502).json({ error: 'Flight search failed', detail: err.message });
+  }
+});
+
+// GET /api/search/places?q=BMW+Museum  — public, general POI search
+router.get('/search/places', async (req, res): Promise<void> => {
+  const q = String(req.query.q ?? '').trim();
+  if (q.length < 3) { res.json([]); return; }
+  try {
+    const results = await searchPlaces(q);
+    res.json(results);
+  } catch (err: any) {
+    console.error('Place search error:', err.message);
+    res.status(502).json({ error: 'Place search failed' });
   }
 });
 

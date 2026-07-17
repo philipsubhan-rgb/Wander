@@ -1,3 +1,55 @@
+export interface PlaceResult {
+  name: string;
+  address: string;
+  lat: number;
+  lon: number;
+}
+
+export async function searchPlaces(query: string): Promise<PlaceResult[]> {
+  const key = `places:${query.toLowerCase().trim()}`;
+  const cached = cache.get(key) as { data: PlaceResult[]; ts: number } | undefined;
+  if (cached && Date.now() - cached.ts < TTL) return cached.data;
+
+  const params = new URLSearchParams({
+    q: query,
+    format: 'jsonv2',
+    addressdetails: '1',
+    extratags: '1',
+    limit: '8',
+    'accept-language': 'en',
+  });
+
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?${params}`,
+    { headers: { 'User-Agent': 'WanderTripPlanner/1.0' } }
+  );
+
+  if (!res.ok) throw new Error(`Nominatim error ${res.status}`);
+
+  const raw = await res.json() as any[];
+
+  const results: PlaceResult[] = raw.map(r => {
+    const addr = r.address ?? {};
+    const parts = [
+      r.extratags?.['addr:housenumber'] ?? addr.house_number,
+      r.extratags?.['addr:street'] ?? addr.road,
+      addr.city ?? addr.town ?? addr.village ?? addr.county,
+      addr.state,
+      addr.country,
+    ].filter(Boolean);
+
+    return {
+      name: r.name || r.display_name.split(',')[0],
+      address: parts.length ? parts.join(', ') : r.display_name.split(',').slice(0, 3).join(',').trim(),
+      lat: parseFloat(r.lat),
+      lon: parseFloat(r.lon),
+    };
+  });
+
+  (cache as Map<string, { data: PlaceResult[]; ts: number }>).set(key, { data: results, ts: Date.now() });
+  return results;
+}
+
 export interface HotelResult {
   name: string;
   address: string;

@@ -1,5 +1,5 @@
 import { useListActivities, useCreateActivity, useUpdateActivity, useDeleteActivity, getListActivitiesQueryKey } from '@workspace/api-client-react';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -12,6 +12,98 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Compass, MapPin, Clock, Plus, Trash2, Pencil, CalendarDays } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+
+const API_BASE = `${import.meta.env.BASE_URL}api`;
+
+// ── Location autocomplete ─────────────────────────────────────────────────────
+
+interface PlaceSuggestion {
+  name: string;
+  address: string;
+}
+
+function LocationInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (value.length < 3) { setSuggestions([]); setOpen(false); return; }
+
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/search/places?q=${encodeURIComponent(value)}`);
+        if (res.ok) {
+          const data: PlaceSuggestion[] = await res.json();
+          setSuggestions(data);
+          setOpen(data.length > 0);
+        }
+      } catch {
+        // silently ignore — user can still type manually
+      } finally {
+        setLoading(false);
+      }
+    }, 350);
+  }, [value]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div className="relative">
+        <Input
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder="e.g. BMW Museum, Munich"
+          autoComplete="off"
+        />
+        {loading && (
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">…</span>
+        )}
+      </div>
+      {open && suggestions.length > 0 && (
+        <ul className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md overflow-hidden">
+          {suggestions.map((s, i) => (
+            <li
+              key={i}
+              className="px-3 py-2.5 cursor-pointer hover:bg-accent text-sm"
+              onMouseDown={e => {
+                e.preventDefault();
+                // Use full "Name, Address" string so the saved value is descriptive
+                const label = s.address ? `${s.name}, ${s.address}` : s.name;
+                onChange(label);
+                setOpen(false);
+              }}
+            >
+              <p className="font-medium leading-none">{s.name}</p>
+              {s.address && (
+                <p className="text-xs text-muted-foreground mt-0.5 truncate">{s.address}</p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 const activitySchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -186,7 +278,13 @@ function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, onSuccess 
           )} />
         </div>
         <FormField control={form.control} name="location" render={({ field }) => (
-          <FormItem><FormLabel>Location</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+          <FormItem>
+            <FormLabel>Location</FormLabel>
+            <FormControl>
+              <LocationInput value={field.value ?? ''} onChange={field.onChange} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
         )} />
         <FormField control={form.control} name="type" render={({ field }) => (
           <FormItem><FormLabel>Type</FormLabel>
