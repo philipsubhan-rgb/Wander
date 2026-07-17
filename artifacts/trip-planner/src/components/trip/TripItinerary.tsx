@@ -78,7 +78,7 @@ function ItineraryCard({ tripId, day, index, editMode }: { tripId: number, day: 
 
   const handleDelete = () => {
     if (confirm('Delete this day from itinerary?')) {
-      deleteDay.mutate({ tripId, itineraryDayId: day.id }, {
+      deleteDay.mutate({ tripId, dayId: day.id }, {
         onSuccess: () => {
           toast.success('Deleted');
           queryClient.invalidateQueries({ queryKey: getListItineraryDaysQueryKey(tripId) });
@@ -162,7 +162,7 @@ function ItineraryForm({ tripId, day, onSuccess }: { tripId: number, day?: any, 
       endTime: values.endTime || undefined,
     };
     if (day) {
-      updateDay.mutate({ tripId, itineraryDayId: day.id, data: payload }, {
+      updateDay.mutate({ tripId, dayId: day.id, data: payload }, {
         onSuccess: () => {
           toast.success('Updated');
           queryClient.invalidateQueries({ queryKey: getListItineraryDaysQueryKey(tripId) });
