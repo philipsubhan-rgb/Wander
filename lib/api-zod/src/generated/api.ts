@@ -560,6 +560,7 @@ export const CreateActivityBody = zod.object({
   "lat": zod.number().optional(),
   "lon": zod.number().optional(),
   "imageUrl": zod.string().optional(),
+  "locationUrl": zod.string().optional(),
   "type": zod.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
   "notes": zod.string().optional()
 })
@@ -575,6 +576,7 @@ export const CreateActivityResponse = zod.object({
   "lat": zod.number().nullish(),
   "lon": zod.number().nullish(),
   "imageUrl": zod.string().nullish(),
+  "locationUrl": zod.string().nullish(),
   "type": zod.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
   "notes": zod.string().nullish()
 })
@@ -594,6 +596,7 @@ export const UpdateActivityBody = zod.object({
   "lat": zod.number().optional(),
   "lon": zod.number().optional(),
   "imageUrl": zod.string().optional(),
+  "locationUrl": zod.string().optional(),
   "type": zod.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
   "notes": zod.string().optional()
 })
@@ -609,6 +612,7 @@ export const UpdateActivityResponse = zod.object({
   "lat": zod.number().nullish(),
   "lon": zod.number().nullish(),
   "imageUrl": zod.string().nullish(),
+  "locationUrl": zod.string().nullish(),
   "type": zod.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
   "notes": zod.string().nullish()
 })

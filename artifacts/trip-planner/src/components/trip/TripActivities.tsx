@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Compass, MapPin, Clock, Plus, Trash2, Pencil, CalendarDays } from 'lucide-react';
+import { Compass, MapPin, Clock, Plus, Trash2, Pencil, CalendarDays, ExternalLink } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { MiniMap } from './MiniMap';
 import { fetchWikiImage } from '@/lib/wiki-image';
@@ -36,6 +36,7 @@ const activitySchema = z.object({
   lat: z.number().optional(),
   lon: z.number().optional(),
   imageUrl: z.string().optional(),
+  locationUrl: z.string().optional(),
   type: z.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
 });
 
@@ -197,9 +198,8 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
   };
 
   const [gradFrom, gradTo] = ACTIVITY_GRADIENTS[activity.type ?? 'other'] ?? ACTIVITY_GRADIENTS.other;
-  const hasMap = activity.lat != null && activity.lon != null;
 
-  // Auto-fetch a wiki image for existing records that don't have one stored
+  // Auto-fetch wiki image for records without one
   const [liveImage, setLiveImage] = useState<string | null>(null);
   useEffect(() => {
     if (activity.imageUrl) return;
@@ -207,6 +207,29 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
     fetchWikiImage(query).then(url => { if (url) setLiveImage(url); });
   }, [activity.id, activity.imageUrl]);
   const displayImage = activity.imageUrl || liveImage;
+
+  // Auto-geocode location text for records that have no lat/lon yet
+  const [geoCoords, setGeoCoords] = useState<{ lat: number; lon: number } | null>(null);
+  useEffect(() => {
+    if (activity.lat != null && activity.lon != null) return;
+    if (!activity.location) return;
+    fetch(`${API_BASE}/search/places?q=${encodeURIComponent(activity.location)}`)
+      .then(r => r.ok ? r.json() : [])
+      .then((results: { lat: number; lon: number }[]) => {
+        if (results[0]) setGeoCoords({ lat: results[0].lat, lon: results[0].lon });
+      })
+      .catch(() => {});
+  }, [activity.id, activity.lat, activity.lon, activity.location]);
+
+  const mapLat: number | null = activity.lat ?? geoCoords?.lat ?? null;
+  const mapLon: number | null = activity.lon ?? geoCoords?.lon ?? null;
+  const hasMap = mapLat != null && mapLon != null;
+
+  // Best available maps URL: stored > generated from coords > text search
+  const mapsUrl: string | null =
+    activity.locationUrl ||
+    (mapLat != null && mapLon != null ? `https://maps.google.com/?q=${mapLat},${mapLon}` : null) ||
+    (activity.location ? `https://maps.google.com/?q=${encodeURIComponent(activity.location)}` : null);
 
   return (
     <div className="bg-card border rounded-xl shadow-sm overflow-hidden relative group hover:border-primary/50 transition-colors">
@@ -275,7 +298,19 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
           {activity.location && (
             <div className="flex items-start gap-2">
               <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
-              <span className="line-clamp-2">{activity.location}</span>
+              <span className="line-clamp-2 flex-1">{activity.location}</span>
+              {mapsUrl && (
+                <a
+                  href={mapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 text-primary hover:text-primary/80 transition-colors"
+                  title="Open in Google Maps"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
             </div>
           )}
         </div>
@@ -288,7 +323,7 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
       </div>
 
       {/* ── Mini map ── */}
-      {hasMap && <MiniMap lat={activity.lat} lon={activity.lon} label={activity.location ?? activity.title} />}
+      {hasMap && <MiniMap lat={mapLat!} lon={mapLon!} label={activity.location ?? activity.title} />}
     </div>
   );
 }
@@ -307,6 +342,7 @@ function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, tripDestin
       lat: activity.lat ?? undefined,
       lon: activity.lon ?? undefined,
       imageUrl: activity.imageUrl ?? undefined,
+      locationUrl: activity.locationUrl ?? undefined,
     } : {
       title: '', description: '', date: '', time: '', location: '', type: 'sightseeing' as const,
     },
@@ -352,6 +388,7 @@ function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, tripDestin
                   field.onChange(`${s.name}, ${s.address}`);
                   form.setValue('lat', s.lat);
                   form.setValue('lon', s.lon);
+                  form.setValue('locationUrl', `https://maps.google.com/?q=${s.lat},${s.lon}`);
                   fetchWikiImage(s.name).then(url => {
                     if (url) form.setValue('imageUrl', url);
                   });
@@ -376,6 +413,19 @@ function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, tripDestin
               </SelectContent>
             </Select>
           <FormMessage /></FormItem>
+        )} />
+        <FormField control={form.control} name="locationUrl" render={({ field }) => (
+          <FormItem>
+            <FormLabel>Maps URL <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
+            <FormControl>
+              <Input
+                {...field}
+                value={field.value ?? ''}
+                placeholder="Auto-filled when you pick from autocomplete, or paste any URL"
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
         )} />
         <FormField control={form.control} name="description" render={({ field }) => (
           <FormItem><FormLabel>Notes / Description</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>

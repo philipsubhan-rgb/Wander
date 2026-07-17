@@ -16,6 +16,7 @@ export interface ActivityInput {
   lat?: number;
   lon?: number;
   imageUrl?: string;
+  locationUrl?: string;
   type?: ActivityInputType;
   notes?: string;
 }

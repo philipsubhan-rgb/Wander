@@ -24,6 +24,8 @@ export interface Activity {
   lon?: number | null;
   /** @nullable */
   imageUrl?: string | null;
+  /** @nullable */
+  locationUrl?: string | null;
   type?: ActivityType;
   /** @nullable */
   notes?: string | null;

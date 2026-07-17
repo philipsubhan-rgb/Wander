@@ -16,6 +16,7 @@ export const activitiesTable = pgTable("activities", {
   lat: doublePrecision("lat"),
   lon: doublePrecision("lon"),
   imageUrl: text("image_url"),
+  locationUrl: text("location_url"),
   type: activityTypeEnum("type").notNull().default("other"),
   notes: text("notes"),
 });
