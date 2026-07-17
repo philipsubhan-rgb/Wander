@@ -1,5 +1,5 @@
 import { useParams, Link } from 'wouter';
-import { useGetTrip, useUpdateTrip, getGetTripQueryKey } from '@workspace/api-client-react';
+import { useGetTrip, useUpdateTrip, getGetTripQueryKey, getGetTripSummaryQueryKey } from '@workspace/api-client-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,6 +47,7 @@ function InlineDateEditor({ trip, onClose }: { trip: any; onClose: () => void })
         onSuccess: () => {
           toast.success('Dates updated');
           queryClient.invalidateQueries({ queryKey: getGetTripQueryKey(trip.id) });
+          queryClient.invalidateQueries({ queryKey: getGetTripSummaryQueryKey(trip.id) });
           onClose();
         },
         onError: (err: any) => {
