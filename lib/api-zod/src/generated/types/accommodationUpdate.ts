@@ -14,5 +14,6 @@ export interface AccommodationUpdate {
   checkOut?: string;
   type?: AccommodationUpdateType;
   confirmationCode?: string;
+  phone?: string;
   notes?: string;
 }

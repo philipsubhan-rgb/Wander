@@ -18,5 +18,7 @@ export interface Accommodation {
   /** @nullable */
   confirmationCode?: string | null;
   /** @nullable */
+  phone?: string | null;
+  /** @nullable */
   notes?: string | null;
 }

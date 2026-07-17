@@ -1,5 +1,5 @@
 import { useListAccommodations, useCreateAccommodation, useUpdateAccommodation, useDeleteAccommodation, getListAccommodationsQueryKey } from '@workspace/api-client-react';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -10,17 +10,114 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Home, MapPin, Calendar, Plus, Trash2, Pencil } from 'lucide-react';
+import { Home, MapPin, Calendar, Plus, Trash2, Pencil, Phone } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+
+const API_BASE = `${import.meta.env.BASE_URL}api`;
 
 const accommSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   address: z.string().min(1, 'Address is required'),
+  phone: z.string().optional(),
   checkIn: z.string().min(1, 'Check-in is required'),
   checkOut: z.string().min(1, 'Check-out is required'),
   type: z.enum(['hotel', 'airbnb', 'hostel', 'resort', 'other']).optional(),
   confirmationCode: z.string().optional(),
 });
+
+// ── Hotel name autocomplete ───────────────────────────────────────────────────
+
+interface HotelSuggestion {
+  name: string;
+  address: string;
+  phone: string | null;
+}
+
+function HotelNameInput({
+  value,
+  onChange,
+  onSelect,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSelect: (s: HotelSuggestion) => void;
+}) {
+  const [suggestions, setSuggestions] = useState<HotelSuggestion[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (value.length < 3) { setSuggestions([]); setOpen(false); return; }
+
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/search/hotels?q=${encodeURIComponent(value)}`);
+        if (res.ok) {
+          const data: HotelSuggestion[] = await res.json();
+          setSuggestions(data);
+          setOpen(data.length > 0);
+        }
+      } catch {
+        // ignore, user can type manually
+      } finally {
+        setLoading(false);
+      }
+    }, 400);
+  }, [value]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div className="relative">
+        <Input
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder="e.g. Marriott Tokyo"
+          autoComplete="off"
+        />
+        {loading && (
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+            …
+          </span>
+        )}
+      </div>
+      {open && suggestions.length > 0 && (
+        <ul className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md overflow-hidden">
+          {suggestions.map((s, i) => (
+            <li
+              key={i}
+              className="px-3 py-2.5 cursor-pointer hover:bg-accent text-sm"
+              onMouseDown={e => {
+                e.preventDefault();
+                onSelect(s);
+                setOpen(false);
+              }}
+            >
+              <p className="font-medium leading-none">{s.name}</p>
+              <p className="text-xs text-muted-foreground mt-0.5 truncate">{s.address}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
 
 export function TripAccommodations({ tripId, editMode }: { tripId: number, editMode?: boolean }) {
   const { data: stays, isLoading } = useListAccommodations(tripId, { query: { enabled: !!tripId } });
@@ -59,6 +156,8 @@ export function TripAccommodations({ tripId, editMode }: { tripId: number, editM
     </div>
   );
 }
+
+// ── Card ──────────────────────────────────────────────────────────────────────
 
 function AccommCard({ tripId, stay, editMode }: { tripId: number, stay: any, editMode?: boolean }) {
   const queryClient = useQueryClient();
@@ -112,6 +211,12 @@ function AccommCard({ tripId, stay, editMode }: { tripId: number, stay: any, edi
               <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
               <span>{stay.address}</span>
             </div>
+            {stay.phone && (
+              <div className="flex items-center gap-2">
+                <Phone className="h-4 w-4 shrink-0" />
+                <a href={`tel:${stay.phone}`} className="hover:text-foreground transition-colors">{stay.phone}</a>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Calendar className="h-4 w-4 shrink-0" />
               <span>{format(parseISO(stay.checkIn), 'MMM d')} - {format(parseISO(stay.checkOut), 'MMM d')}</span>
@@ -128,6 +233,8 @@ function AccommCard({ tripId, stay, editMode }: { tripId: number, stay: any, edi
   );
 }
 
+// ── Form ──────────────────────────────────────────────────────────────────────
+
 function AccommForm({ tripId, stay, onSuccess }: { tripId: number, stay?: any, onSuccess: () => void }) {
   const queryClient = useQueryClient();
   const createStay = useCreateAccommodation();
@@ -137,16 +244,18 @@ function AccommForm({ tripId, stay, onSuccess }: { tripId: number, stay?: any, o
     resolver: zodResolver(accommSchema),
     defaultValues: stay ? {
       ...stay,
+      phone: stay.phone ?? '',
       checkIn: stay.checkIn.slice(0, 16),
       checkOut: stay.checkOut.slice(0, 16),
     } : {
-      name: '', address: '', checkIn: '', checkOut: '', type: 'hotel', confirmationCode: ''
+      name: '', address: '', phone: '', checkIn: '', checkOut: '', type: 'hotel', confirmationCode: ''
     },
   });
 
   const onSubmit = (values: z.infer<typeof accommSchema>) => {
     const payload = {
       ...values,
+      phone: values.phone || undefined,
       checkIn: new Date(values.checkIn).toISOString(),
       checkOut: new Date(values.checkOut).toISOString(),
     };
@@ -176,12 +285,37 @@ function AccommForm({ tripId, stay, onSuccess }: { tripId: number, stay?: any, o
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-4">
+
+        {/* Hotel name with autocomplete */}
         <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+          <FormItem>
+            <FormLabel>Hotel / Property Name</FormLabel>
+            <FormControl>
+              <HotelNameInput
+                value={field.value}
+                onChange={field.onChange}
+                onSelect={s => {
+                  form.reset({
+                    ...form.getValues(),
+                    name: s.name,
+                    address: s.address,
+                    phone: s.phone ?? '',
+                  });
+                }}
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
         )} />
+
         <FormField control={form.control} name="address" render={({ field }) => (
           <FormItem><FormLabel>Address</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
         )} />
+
+        <FormField control={form.control} name="phone" render={({ field }) => (
+          <FormItem><FormLabel>Phone</FormLabel><FormControl><Input type="tel" placeholder="+1 212 555 0100" {...field} /></FormControl><FormMessage /></FormItem>
+        )} />
+
         <div className="grid grid-cols-2 gap-4">
           <FormField control={form.control} name="checkIn" render={({ field }) => (
             <FormItem><FormLabel>Check-in</FormLabel><FormControl><Input type="datetime-local" {...field} /></FormControl><FormMessage /></FormItem>

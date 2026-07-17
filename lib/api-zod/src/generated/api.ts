@@ -436,6 +436,7 @@ export const ListAccommodationsResponseItem = zod.object({
   "checkOut": zod.string(),
   "type": zod.enum(['hotel', 'airbnb', 'hostel', 'resort', 'other']).optional(),
   "confirmationCode": zod.string().nullish(),
+  "phone": zod.string().nullish(),
   "notes": zod.string().nullish()
 })
 export const ListAccommodationsResponse = zod.array(ListAccommodationsResponseItem)
@@ -452,6 +453,7 @@ export const CreateAccommodationBody = zod.object({
   "checkOut": zod.string(),
   "type": zod.enum(['hotel', 'airbnb', 'hostel', 'resort', 'other']).optional(),
   "confirmationCode": zod.string().optional(),
+  "phone": zod.string().optional(),
   "notes": zod.string().optional()
 })
 
@@ -464,6 +466,7 @@ export const CreateAccommodationResponse = zod.object({
   "checkOut": zod.string(),
   "type": zod.enum(['hotel', 'airbnb', 'hostel', 'resort', 'other']).optional(),
   "confirmationCode": zod.string().nullish(),
+  "phone": zod.string().nullish(),
   "notes": zod.string().nullish()
 })
 
@@ -480,6 +483,7 @@ export const UpdateAccommodationBody = zod.object({
   "checkOut": zod.string().optional(),
   "type": zod.enum(['hotel', 'airbnb', 'hostel', 'resort', 'other']).optional(),
   "confirmationCode": zod.string().optional(),
+  "phone": zod.string().optional(),
   "notes": zod.string().optional()
 })
 
@@ -492,6 +496,7 @@ export const UpdateAccommodationResponse = zod.object({
   "checkOut": zod.string(),
   "type": zod.enum(['hotel', 'airbnb', 'hostel', 'resort', 'other']).optional(),
   "confirmationCode": zod.string().nullish(),
+  "phone": zod.string().nullish(),
   "notes": zod.string().nullish()
 })
 

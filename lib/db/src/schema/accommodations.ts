@@ -14,6 +14,7 @@ export const accommodationsTable = pgTable("accommodations", {
   checkOut: text("check_out").notNull(),
   type: accommodationTypeEnum("type").notNull().default("hotel"),
   confirmationCode: text("confirmation_code"),
+  phone: text("phone"),
   notes: text("notes"),
 });
 

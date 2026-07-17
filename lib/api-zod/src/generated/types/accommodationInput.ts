@@ -14,5 +14,6 @@ export interface AccommodationInput {
   checkOut: string;
   type?: AccommodationInputType;
   confirmationCode?: string;
+  phone?: string;
   notes?: string;
 }
