@@ -14,7 +14,7 @@ import {
   AddTripParticipantParams,
   RemoveTripParticipantParams,
 } from "@workspace/api-zod";
-import { requireAdmin, requireAuth } from "../middlewares/auth";
+import { requireAdmin, requireAuth, requireTripAdmin } from "../middlewares/auth";
 import { fetchDestinationImage } from "../lib/destination-image";
 
 const router: IRouter = Router();
@@ -29,7 +29,25 @@ function serializeTrip(trip: typeof tripsTable.$inferSelect) {
   };
 }
 
-// Admin sees all trips; travelers see only trips they're participants of
+// Helper: resolve whether the calling user is a trip admin (global admin OR per-trip admin participant)
+async function resolveIsTripAdmin(userId: number, isGlobalAdmin: boolean, tripId: number): Promise<boolean> {
+  if (isGlobalAdmin) return true;
+  const [participant] = await db
+    .select()
+    .from(tripParticipantsTable)
+    .where(and(
+      eq(tripParticipantsTable.tripId, tripId),
+      eq(tripParticipantsTable.userId, userId),
+      eq(tripParticipantsTable.isTripAdmin, true),
+    ));
+  return !!participant;
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Trips CRUD
+// ──────────────────────────────────────────────────────────────────
+
+// Travelers see only their own trips; global admins see all
 router.get("/trips", requireAuth, async (req, res): Promise<void> => {
   if (req.session!.role === "admin") {
     const trips = await db.select().from(tripsTable).orderBy(tripsTable.startDate);
@@ -47,7 +65,8 @@ router.get("/trips", requireAuth, async (req, res): Promise<void> => {
   }
 });
 
-router.post("/trips", requireAdmin, async (req, res): Promise<void> => {
+// Any authenticated user can create a trip; they are automatically the trip admin
+router.post("/trips", requireAuth, async (req, res): Promise<void> => {
   const parsed = CreateTripBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -55,6 +74,11 @@ router.post("/trips", requireAdmin, async (req, res): Promise<void> => {
   }
 
   const [trip] = await db.insert(tripsTable).values(parsed.data).returning();
+
+  // Auto-add the creator as a participant and trip admin
+  await db.insert(tripParticipantsTable)
+    .values({ tripId: trip.id, userId: req.session!.userId!, isTripAdmin: true })
+    .onConflictDoNothing();
 
   // Auto-fetch a cover image if none was provided
   if (!trip.coverImage && trip.destination) {
@@ -65,9 +89,10 @@ router.post("/trips", requireAdmin, async (req, res): Promise<void> => {
     }).catch(() => { /* non-fatal */ });
   }
 
-  res.status(201).json(serializeTrip(trip));
+  res.status(201).json({ ...serializeTrip(trip), isTripAdmin: true });
 });
 
+// Returns trip + whether the calling user is a trip admin
 router.get("/trips/:tripId", requireAuth, async (req, res): Promise<void> => {
   const params = GetTripParams.safeParse(req.params);
   if (!params.success) {
@@ -81,8 +106,10 @@ router.get("/trips/:tripId", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  // Check access for travelers
-  if (req.session!.role !== "admin") {
+  const isGlobalAdmin = req.session!.role === "admin";
+
+  // Check access and resolve per-trip admin status in one query for non-global admins
+  if (!isGlobalAdmin) {
     const [participant] = await db
       .select()
       .from(tripParticipantsTable)
@@ -94,12 +121,14 @@ router.get("/trips/:tripId", requireAuth, async (req, res): Promise<void> => {
       res.status(403).json({ error: "Access denied" });
       return;
     }
+    res.json({ ...serializeTrip(trip), isTripAdmin: participant.isTripAdmin });
+    return;
   }
 
-  res.json(serializeTrip(trip));
+  res.json({ ...serializeTrip(trip), isTripAdmin: true });
 });
 
-router.patch("/trips/:tripId", requireAdmin, async (req, res): Promise<void> => {
+router.patch("/trips/:tripId", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = UpdateTripParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid tripId" });
@@ -123,7 +152,6 @@ router.patch("/trips/:tripId", requireAdmin, async (req, res): Promise<void> => 
     return;
   }
 
-  // If destination changed and there's no explicit coverImage in the payload, refresh image
   if (parsed.data.destination && !parsed.data.coverImage) {
     fetchDestinationImage(parsed.data.destination).then(async (imgUrl) => {
       if (imgUrl) {
@@ -135,8 +163,8 @@ router.patch("/trips/:tripId", requireAdmin, async (req, res): Promise<void> => 
   res.json(serializeTrip(trip));
 });
 
-// Manually refresh the cover image for a trip (admin only)
-router.post("/trips/:tripId/refresh-cover", requireAdmin, async (req, res): Promise<void> => {
+// Manually refresh the cover image for a trip
+router.post("/trips/:tripId/refresh-cover", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = GetTripParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid tripId" });
@@ -164,7 +192,7 @@ router.post("/trips/:tripId/refresh-cover", requireAdmin, async (req, res): Prom
   res.json(serializeTrip(updated));
 });
 
-router.delete("/trips/:tripId", requireAdmin, async (req, res): Promise<void> => {
+router.delete("/trips/:tripId", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = DeleteTripParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid tripId" });
@@ -179,6 +207,10 @@ router.delete("/trips/:tripId", requireAdmin, async (req, res): Promise<void> =>
 
   res.json({ success: true });
 });
+
+// ──────────────────────────────────────────────────────────────────
+// Summary & Timeline
+// ──────────────────────────────────────────────────────────────────
 
 router.get("/trips/:tripId/summary", requireAuth, async (req, res): Promise<void> => {
   const params = GetTripSummaryParams.safeParse(req.params);
@@ -195,7 +227,6 @@ router.get("/trips/:tripId/summary", requireAuth, async (req, res): Promise<void
   const [packCount] = await db.select({ count: sql<number>`count(*)` }).from(packingItemsTable).where(eq(packingItemsTable.tripId, tripId));
   const [packChecked] = await db.select({ count: sql<number>`count(*)` }).from(packingItemsTable).where(and(eq(packingItemsTable.tripId, tripId), eq(packingItemsTable.checked, true)));
 
-  // Calculate days from trip
   const [trip] = await db.select({ startDate: tripsTable.startDate, endDate: tripsTable.endDate }).from(tripsTable).where(eq(tripsTable.id, tripId));
   let daysCount = 0;
   if (trip) {
@@ -305,6 +336,10 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
   res.json(events);
 });
 
+// ──────────────────────────────────────────────────────────────────
+// Participants
+// ──────────────────────────────────────────────────────────────────
+
 router.get("/trips/:tripId/participants", requireAuth, async (req, res): Promise<void> => {
   const params = ListTripParticipantsParams.safeParse(req.params);
   if (!params.success) {
@@ -313,7 +348,7 @@ router.get("/trips/:tripId/participants", requireAuth, async (req, res): Promise
   }
 
   const participants = await db
-    .select({ user: usersTable })
+    .select({ user: usersTable, participant: tripParticipantsTable })
     .from(usersTable)
     .innerJoin(tripParticipantsTable, and(
       eq(tripParticipantsTable.userId, usersTable.id),
@@ -327,10 +362,12 @@ router.get("/trips/:tripId/participants", requireAuth, async (req, res): Promise
     role: p.user.role,
     email: p.user.email ?? null,
     createdAt: p.user.createdAt.toISOString(),
+    isTripAdmin: p.participant.isTripAdmin,
   })));
 });
 
-router.post("/trips/:tripId/participants", requireAdmin, async (req, res): Promise<void> => {
+// Trip admins can add travelers to their trip
+router.post("/trips/:tripId/participants", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = AddTripParticipantParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid tripId" });
@@ -345,13 +382,14 @@ router.post("/trips/:tripId/participants", requireAdmin, async (req, res): Promi
 
   await db
     .insert(tripParticipantsTable)
-    .values({ tripId: params.data.tripId, userId: parsed.data.userId })
+    .values({ tripId: params.data.tripId, userId: parsed.data.userId, isTripAdmin: false })
     .onConflictDoNothing();
 
   res.json({ success: true });
 });
 
-router.delete("/trips/:tripId/participants/:userId", requireAdmin, async (req, res): Promise<void> => {
+// Trip admins can remove travelers from their trip
+router.delete("/trips/:tripId/participants/:userId", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = RemoveTripParticipantParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid params" });

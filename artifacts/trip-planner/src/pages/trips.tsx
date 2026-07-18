@@ -38,7 +38,7 @@ function getGradientForDestination(destination: string) {
 
 export default function TripsDashboard() {
   const { data: trips, isLoading } = useListTrips();
-  const { isAdmin } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [isNewTripOpen, setIsNewTripOpen] = useState(false);
 
   if (isLoading) {
@@ -64,8 +64,8 @@ export default function TripsDashboard() {
           <h1 className="text-4xl font-serif font-bold text-foreground">Your Journeys</h1>
           <p className="text-muted-foreground mt-2 text-lg">Where to next?</p>
         </div>
-        
-        {isAdmin && (
+
+        {isAuthenticated && (
           <Dialog open={isNewTripOpen} onOpenChange={setIsNewTripOpen}>
             <DialogTrigger asChild>
               <Button size="lg" className="rounded-full shadow-sm hover-elevate">
@@ -94,17 +94,13 @@ export default function TripsDashboard() {
           <div className="space-y-2 max-w-md">
             <h3 className="text-2xl font-serif font-semibold">No trips planned yet</h3>
             <p className="text-muted-foreground">
-              {isAdmin 
-                ? "Start planning your first adventure by creating a new trip." 
-                : "You haven't been added to any trips yet. Check back soon!"}
+              Start planning your first adventure by creating a new trip.
             </p>
           </div>
-          {isAdmin && (
-            <Button onClick={() => setIsNewTripOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Create First Trip
-            </Button>
-          )}
+          <Button onClick={() => setIsNewTripOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Create First Trip
+          </Button>
         </div>
       ) : (
         <div className="space-y-12">
@@ -215,7 +211,7 @@ function NewTripForm({ onSuccess }: { onSuccess: () => void }) {
       } 
     }, {
       onSuccess: () => {
-        toast.success('Trip created successfully');
+        toast.success('Trip created! You\'re now the trip admin.');
         queryClient.invalidateQueries({ queryKey: getListTripsQueryKey() });
         onSuccess();
       },

@@ -9,7 +9,7 @@ import {
   UpdateCarRentalBody,
   DeleteCarRentalParams,
 } from "@workspace/api-zod";
-import { requireAdmin, requireAuth } from "../middlewares/auth";
+import { requireTripAdmin, requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -34,7 +34,7 @@ router.get("/trips/:tripId/car-rentals", requireAuth, async (req, res): Promise<
   res.json(items.map(mapItem));
 });
 
-router.post("/trips/:tripId/car-rentals", requireAdmin, async (req, res): Promise<void> => {
+router.post("/trips/:tripId/car-rentals", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = CreateCarRentalParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const parsed = CreateCarRentalBody.safeParse(req.body);
@@ -43,7 +43,7 @@ router.post("/trips/:tripId/car-rentals", requireAdmin, async (req, res): Promis
   res.status(201).json(mapItem(item));
 });
 
-router.patch("/trips/:tripId/car-rentals/:carRentalId", requireAdmin, async (req, res): Promise<void> => {
+router.patch("/trips/:tripId/car-rentals/:carRentalId", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = UpdateCarRentalParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const parsed = UpdateCarRentalBody.safeParse(req.body);
@@ -55,7 +55,7 @@ router.patch("/trips/:tripId/car-rentals/:carRentalId", requireAdmin, async (req
   res.json(mapItem(item));
 });
 
-router.delete("/trips/:tripId/car-rentals/:carRentalId", requireAdmin, async (req, res): Promise<void> => {
+router.delete("/trips/:tripId/car-rentals/:carRentalId", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = DeleteCarRentalParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const [item] = await db.delete(carRentalsTable)

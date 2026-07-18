@@ -9,7 +9,7 @@ import {
   UpdateActivityBody,
   DeleteActivityParams,
 } from "@workspace/api-zod";
-import { requireAdmin, requireAuth } from "../middlewares/auth";
+import { requireTripAdmin, requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -20,7 +20,7 @@ router.get("/trips/:tripId/activities", requireAuth, async (req, res): Promise<v
   res.json(items.map(a => ({ ...a, description: a.description ?? null, time: a.time ?? null, location: a.location ?? null, lat: a.lat ?? null, lon: a.lon ?? null, imageUrl: a.imageUrl ?? null, locationUrl: a.locationUrl ?? null, notes: a.notes ?? null })));
 });
 
-router.post("/trips/:tripId/activities", requireAdmin, async (req, res): Promise<void> => {
+router.post("/trips/:tripId/activities", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = CreateActivityParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const parsed = CreateActivityBody.safeParse(req.body);
@@ -29,7 +29,7 @@ router.post("/trips/:tripId/activities", requireAdmin, async (req, res): Promise
   res.status(201).json({ ...item, description: item.description ?? null, time: item.time ?? null, location: item.location ?? null, lat: item.lat ?? null, lon: item.lon ?? null, imageUrl: item.imageUrl ?? null, locationUrl: item.locationUrl ?? null, notes: item.notes ?? null });
 });
 
-router.patch("/trips/:tripId/activities/:activityId", requireAdmin, async (req, res): Promise<void> => {
+router.patch("/trips/:tripId/activities/:activityId", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = UpdateActivityParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const parsed = UpdateActivityBody.safeParse(req.body);
@@ -39,7 +39,7 @@ router.patch("/trips/:tripId/activities/:activityId", requireAdmin, async (req, 
   res.json({ ...item, description: item.description ?? null, time: item.time ?? null, location: item.location ?? null, lat: item.lat ?? null, lon: item.lon ?? null, imageUrl: item.imageUrl ?? null, locationUrl: item.locationUrl ?? null, notes: item.notes ?? null });
 });
 
-router.delete("/trips/:tripId/activities/:activityId", requireAdmin, async (req, res): Promise<void> => {
+router.delete("/trips/:tripId/activities/:activityId", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = DeleteActivityParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const [item] = await db.delete(activitiesTable).where(and(eq(activitiesTable.id, params.data.activityId), eq(activitiesTable.tripId, params.data.tripId))).returning();

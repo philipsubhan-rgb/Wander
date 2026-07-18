@@ -9,7 +9,7 @@ import {
   UpdateFlightBody,
   DeleteFlightParams,
 } from "@workspace/api-zod";
-import { requireAdmin, requireAuth } from "../middlewares/auth";
+import { requireTripAdmin, requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -20,7 +20,7 @@ router.get("/trips/:tripId/flights", requireAuth, async (req, res): Promise<void
   res.json(flights.map(f => ({ ...f, confirmationCode: f.confirmationCode ?? null, notes: f.notes ?? null })));
 });
 
-router.post("/trips/:tripId/flights", requireAdmin, async (req, res): Promise<void> => {
+router.post("/trips/:tripId/flights", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = CreateFlightParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const parsed = CreateFlightBody.safeParse(req.body);
@@ -29,7 +29,7 @@ router.post("/trips/:tripId/flights", requireAdmin, async (req, res): Promise<vo
   res.status(201).json({ ...flight, confirmationCode: flight.confirmationCode ?? null, notes: flight.notes ?? null });
 });
 
-router.patch("/trips/:tripId/flights/:flightId", requireAdmin, async (req, res): Promise<void> => {
+router.patch("/trips/:tripId/flights/:flightId", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = UpdateFlightParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const parsed = UpdateFlightBody.safeParse(req.body);
@@ -39,7 +39,7 @@ router.patch("/trips/:tripId/flights/:flightId", requireAdmin, async (req, res):
   res.json({ ...flight, confirmationCode: flight.confirmationCode ?? null, notes: flight.notes ?? null });
 });
 
-router.delete("/trips/:tripId/flights/:flightId", requireAdmin, async (req, res): Promise<void> => {
+router.delete("/trips/:tripId/flights/:flightId", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = DeleteFlightParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const [flight] = await db.delete(flightsTable).where(and(eq(flightsTable.id, params.data.flightId), eq(flightsTable.tripId, params.data.tripId))).returning();

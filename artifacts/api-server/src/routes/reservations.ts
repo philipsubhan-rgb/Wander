@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
 import { db, reservationsTable } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireAuth, requireTripAdmin } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -36,7 +36,7 @@ router.get("/trips/:tripId/reservations", requireAuth, async (req, res): Promise
 });
 
 // POST /api/trips/:tripId/reservations
-router.post("/trips/:tripId/reservations", requireAdmin, async (req, res): Promise<void> => {
+router.post("/trips/:tripId/reservations", requireTripAdmin(), async (req, res): Promise<void> => {
   const tripId = Number(req.params.tripId);
   if (isNaN(tripId)) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const {
@@ -52,7 +52,7 @@ router.post("/trips/:tripId/reservations", requireAdmin, async (req, res): Promi
 });
 
 // PATCH /api/trips/:tripId/reservations/:reservationId
-router.patch("/trips/:tripId/reservations/:reservationId", requireAdmin, async (req, res): Promise<void> => {
+router.patch("/trips/:tripId/reservations/:reservationId", requireTripAdmin(), async (req, res): Promise<void> => {
   const tripId        = Number(req.params.tripId);
   const reservationId = Number(req.params.reservationId);
   if (isNaN(tripId) || isNaN(reservationId)) { res.status(400).json({ error: "Invalid id" }); return; }
@@ -69,7 +69,7 @@ router.patch("/trips/:tripId/reservations/:reservationId", requireAdmin, async (
 });
 
 // DELETE /api/trips/:tripId/reservations/:reservationId
-router.delete("/trips/:tripId/reservations/:reservationId", requireAdmin, async (req, res): Promise<void> => {
+router.delete("/trips/:tripId/reservations/:reservationId", requireTripAdmin(), async (req, res): Promise<void> => {
   const reservationId = Number(req.params.reservationId);
   if (isNaN(reservationId)) { res.status(400).json({ error: "Invalid id" }); return; }
   await db.delete(reservationsTable).where(eq(reservationsTable.id, reservationId));

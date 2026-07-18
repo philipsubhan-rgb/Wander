@@ -110,6 +110,9 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
   if (isLoading) return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary"/></div>;
   if (!trip) return <div className="p-10 text-center text-xl">Trip not found</div>;
 
+  // canAdmin = global admin OR the user is a trip admin for this specific trip
+  const canAdmin = isAdmin || !!(trip as any).isTripAdmin;
+
   return (
     <div className="min-h-screen pb-20 bg-background">
       <div className="relative h-[40vh] min-h-[300px] w-full bg-muted">
@@ -134,8 +137,8 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
               </div>
               <h1 className="text-4xl md:text-5xl font-serif font-bold mb-3">{trip.title}</h1>
 
-              {/* Date display — clickable in edit mode */}
-              {editMode && isAdmin ? (
+              {/* Date display — clickable in edit mode for trip admins */}
+              {editMode && canAdmin ? (
                 editingDates ? (
                   <InlineDateEditor trip={trip} onClose={() => setEditingDates(false)} />
                 ) : (
@@ -156,14 +159,14 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
                 </div>
               )}
             </div>
-            {!editMode && isAdmin && (
+            {!editMode && canAdmin && (
               <Link href={`/trips/${trip.id}/edit`}>
                 <Button variant="secondary" className="bg-white text-black hover:bg-white/90 rounded-full shadow-sm hover-elevate">
                   <Pencil className="h-4 w-4 mr-2" /> Edit Trip
                 </Button>
               </Link>
             )}
-            {editMode && isAdmin && (
+            {editMode && canAdmin && (
               <Link href={`/trips/${trip.id}`}>
                 <Button variant="secondary" className="bg-white text-black hover:bg-white/90 rounded-full shadow-sm hover-elevate">
                   Done Editing
@@ -188,7 +191,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
               <TabsTrigger value="packing" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Packing List</TabsTrigger>
               <TabsTrigger value="notes" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">My Notes</TabsTrigger>
               <TabsTrigger value="documents" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Documents</TabsTrigger>
-              {editMode && isAdmin && (
+              {editMode && canAdmin && (
                 <TabsTrigger value="settings" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Settings</TabsTrigger>
               )}
             </TabsList>
@@ -202,10 +205,10 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
             <TabsContent value="activities" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripActivities tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} tripDestination={trip.destination} /></TabsContent>
             <TabsContent value="car-rentals" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripCarRentals tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} tripDestination={trip.destination} /></TabsContent>
             <TabsContent value="reservations" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripReservations tripId={tripId} editMode={editMode} tripDestination={trip.destination} /></TabsContent>
-            <TabsContent value="packing" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripPackingList tripId={tripId} editMode={editMode} /></TabsContent>
+            <TabsContent value="packing" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripPackingList tripId={tripId} /></TabsContent>
             <TabsContent value="notes" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripNotes tripId={tripId} /></TabsContent>
             <TabsContent value="documents" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripDocuments tripId={tripId} /></TabsContent>
-            {editMode && isAdmin && (
+            {editMode && canAdmin && (
               <TabsContent value="settings" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripSettings trip={trip} /></TabsContent>
             )}
           </div>
