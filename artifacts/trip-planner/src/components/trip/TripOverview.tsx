@@ -1,6 +1,6 @@
 import { useGetTripSummary, useGetTripTimeline } from '@workspace/api-client-react';
 import { useState, useEffect } from 'react';
-import { Calendar, Plane, Home, Compass, Users, CheckSquare } from 'lucide-react';
+import { Calendar, Plane, Home, Compass, Users, CheckSquare, Car } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { fetchWikiImage } from '@/lib/wiki-image';
 
@@ -31,6 +31,7 @@ export function TripOverview({ tripId, onNavigate }: { tripId: number; onNavigat
                   {event.type === 'accommodation' && <Home className="h-5 w-5 text-primary" />}
                   {event.type === 'activity' && <Compass className="h-5 w-5 text-primary" />}
                   {event.type === 'itinerary' && <Calendar className="h-5 w-5 text-primary" />}
+                  {event.type === 'car_rental' && <Car className="h-5 w-5 text-primary" />}
                 </div>
 
                 {/* Event card */}
@@ -125,6 +126,15 @@ function EventThumbnail({ event }: { event: any }) {
     return (
       <div className="w-24 shrink-0 flex items-center justify-center" style={{ background: bg }}>
         {icon}
+      </div>
+    );
+  }
+
+  // Car rentals: car icon with blue tint
+  if (event.type === 'car_rental') {
+    return (
+      <div className="w-20 shrink-0 flex items-center justify-center" style={{ background: '#3b82f6' }}>
+        <Car className="h-7 w-7 text-white/70" />
       </div>
     );
   }
