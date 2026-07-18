@@ -5,7 +5,7 @@ import * as z from 'zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { format, parseISO } from 'date-fns';
-import { Car, MapPin, Clock, Plus, Trash2, Pencil, Phone, ExternalLink, ArrowRight } from 'lucide-react';
+import { Car, MapPin, Clock, Plus, Trash2, Pencil, Camera, Phone, ExternalLink, ArrowRight } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MiniMap } from './MiniMap';
 import { carRentalLogoUrl } from '@/lib/car-rental-logo';
-import { ImageEditor } from '@/components/ImageEditor';
+import { ImagePickerContent } from '@/components/ImageEditor';
 import {
   useListCarRentals,
   useCreateCarRental,
@@ -179,7 +179,7 @@ function CarRentalCard({ tripId, rental, editMode, tripStartDate, tripEndDate, t
   const queryClient = useQueryClient();
   const deleteRental = useDeleteCarRental();
   const updateRentalImg = useUpdateCarRental();
-  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [cardDialog, setCardDialog] = useState<'none' | 'edit' | 'image'>('none');
 
   const handleImageSave = (url: string | null) => {
     updateRentalImg.mutate({ tripId, carRentalId: rental.id, data: { imageUrl: url ?? '' } }, {
@@ -229,24 +229,32 @@ function CarRentalCard({ tripId, rental, editMode, tripStartDate, tripEndDate, t
           )}
         </div>
         {editMode && (
-          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-              <DialogTrigger asChild>
-                <Button variant="secondary" size="icon" className="h-8 w-8 bg-white/90 hover:bg-white text-foreground shadow">
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-h-[90vh] overflow-y-auto">
-                <DialogHeader><DialogTitle>Edit Car Rental</DialogTitle></DialogHeader>
-                <CarRentalForm tripId={tripId} rental={rental} tripStartDate={tripStartDate} tripEndDate={tripEndDate} tripDestination={tripDestination} onSuccess={() => setIsEditOpen(false)} />
+          <>
+            <Dialog open={cardDialog !== 'none'} onOpenChange={open => { if (!open) setCardDialog('none'); }}>
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>{cardDialog === 'edit' ? 'Edit Car Rental' : 'Edit Image'}</DialogTitle>
+                </DialogHeader>
+                {cardDialog === 'edit' && (
+                  <CarRentalForm tripId={tripId} rental={rental} tripStartDate={tripStartDate} tripEndDate={tripEndDate} tripDestination={tripDestination} onSuccess={() => setCardDialog('none')} />
+                )}
+                {cardDialog === 'image' && (
+                  <ImagePickerContent searchHint={rental.company} onSave={url => { handleImageSave(url); setCardDialog('none'); }} onCancel={() => setCardDialog('none')} />
+                )}
               </DialogContent>
             </Dialog>
-            <ImageEditor searchHint={rental.company} onSave={handleImageSave} />
-            <Button variant="secondary" size="icon" onClick={handleDelete}
-              className="h-8 w-8 bg-white/90 hover:bg-white text-destructive hover:text-destructive shadow">
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </div>
+            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Button variant="secondary" size="icon" onClick={() => setCardDialog('edit')} className="h-8 w-8 bg-white/90 hover:bg-white text-foreground shadow">
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="secondary" size="icon" onClick={() => setCardDialog('image')} className="h-8 w-8 bg-white/90 hover:bg-white text-foreground shadow" title="Change image">
+                <Camera className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="secondary" size="icon" onClick={handleDelete} className="h-8 w-8 bg-white/90 hover:bg-white text-destructive hover:text-destructive shadow">
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </>
         )}
         <span className="absolute bottom-2 left-3 text-xs font-semibold text-white uppercase tracking-wider drop-shadow">
           {CAR_TYPE_LABELS[rental.carType ?? 'other'] ?? 'Other'}

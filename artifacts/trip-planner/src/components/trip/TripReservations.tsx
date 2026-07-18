@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { format, parseISO } from 'date-fns';
 import {
   UtensilsCrossed, Landmark, Map, Train, Ticket, Sparkles, ClipboardList,
-  MapPin, Phone, Clock, ExternalLink, Plus, Pencil, Trash2, Users, BookMarked,
+  MapPin, Phone, Clock, ExternalLink, Plus, Pencil, Camera, Trash2, Users, BookMarked,
   Globe, CalendarDays,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,7 @@ import {
   getListReservationsQueryKey,
 } from '@workspace/api-client-react';
 import { fetchWikiImage } from '@/lib/wiki-image';
-import { ImageEditor } from '@/components/ImageEditor';
+import { ImagePickerContent } from '@/components/ImageEditor';
 
 const API_BASE = `${import.meta.env.BASE_URL}api`;
 
@@ -140,7 +140,7 @@ function ReservationCard({ tripId, res, editMode }: { tripId: number; res: any; 
   const queryClient = useQueryClient();
   const deleteRes = useDeleteReservation();
   const updateResImg = useUpdateReservation();
-  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [cardDialog, setCardDialog] = useState<'none' | 'edit' | 'image'>('none');
   const [photo, setPhoto] = useState<string | null>(res.imageUrl);
   const [logoErr, setLogoErr] = useState(false);
 
@@ -218,26 +218,34 @@ function ReservationCard({ tripId, res, editMode }: { tripId: number; res: any; 
           </span>
         </div>
 
-        {/* Admin controls */}
+        {/* Admin controls — single Dialog avoids sibling-Dialog Radix conflicts */}
         {editMode && (
-          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-              <DialogTrigger asChild>
-                <Button variant="secondary" size="icon" className="h-7 w-7 bg-white/90 hover:bg-white text-foreground shadow">
-                  <Pencil className="h-3 w-3" />
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-h-[90vh] overflow-y-auto">
-                <DialogHeader><DialogTitle>Edit Reservation</DialogTitle></DialogHeader>
-                <ReservationForm tripId={tripId} reservation={res} onSuccess={() => setIsEditOpen(false)} />
+          <>
+            <Dialog open={cardDialog !== 'none'} onOpenChange={open => { if (!open) setCardDialog('none'); }}>
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>{cardDialog === 'edit' ? 'Edit Reservation' : 'Edit Image'}</DialogTitle>
+                </DialogHeader>
+                {cardDialog === 'edit' && (
+                  <ReservationForm tripId={tripId} reservation={res} onSuccess={() => setCardDialog('none')} />
+                )}
+                {cardDialog === 'image' && (
+                  <ImagePickerContent searchHint={res.venue || res.title} onSave={url => { handleImageSave(url); setCardDialog('none'); }} onCancel={() => setCardDialog('none')} />
+                )}
               </DialogContent>
             </Dialog>
-            <ImageEditor searchHint={res.venue || res.title} onSave={handleImageSave} size="xs" />
-            <Button variant="secondary" size="icon" onClick={handleDelete}
-              className="h-7 w-7 bg-white/90 hover:bg-white text-destructive shadow">
-              <Trash2 className="h-3 w-3" />
-            </Button>
-          </div>
+            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Button variant="secondary" size="icon" onClick={() => setCardDialog('edit')} className="h-7 w-7 bg-white/90 hover:bg-white text-foreground shadow">
+                <Pencil className="h-3 w-3" />
+              </Button>
+              <Button variant="secondary" size="icon" onClick={() => setCardDialog('image')} className="h-7 w-7 bg-white/90 hover:bg-white text-foreground shadow" title="Change image">
+                <Camera className="h-3 w-3" />
+              </Button>
+              <Button variant="secondary" size="icon" onClick={handleDelete} className="h-7 w-7 bg-white/90 hover:bg-white text-destructive shadow">
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </div>
+          </>
         )}
 
         {/* Title at bottom of image */}

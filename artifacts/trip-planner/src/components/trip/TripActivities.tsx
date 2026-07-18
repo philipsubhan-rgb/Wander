@@ -1,5 +1,5 @@
 import { useListActivities, useCreateActivity, useUpdateActivity, useDeleteActivity, getListActivitiesQueryKey } from '@workspace/api-client-react';
-import { ImageEditor } from '@/components/ImageEditor';
+import { ImagePickerContent } from '@/components/ImageEditor';
 import { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Compass, MapPin, Clock, Plus, Trash2, Pencil, CalendarDays, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
+import { Compass, MapPin, Clock, Plus, Trash2, Pencil, Camera, CalendarDays, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { MiniMap } from './MiniMap';
 import { fetchWikiImage } from '@/lib/wiki-image';
@@ -186,7 +186,7 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
   const queryClient = useQueryClient();
   const deleteActivity = useDeleteActivity();
   const updateActivity = useUpdateActivity();
-  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [cardDialog, setCardDialog] = useState<'none' | 'edit' | 'image'>('none');
   const [isExpanded, setIsExpanded] = useState(false);
 
   const handleImageSave = (url: string | null) => {
@@ -260,26 +260,34 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
         {/* Dark overlay gradient for text readability */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
 
-        {/* Edit / delete overlay */}
+        {/* Edit / delete overlay — single Dialog avoids sibling-Dialog Radix conflicts */}
         {editMode && (
-          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-              <DialogTrigger asChild>
-                <Button variant="secondary" size="icon" className="h-8 w-8 bg-white/90 hover:bg-white text-foreground shadow">
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-h-[90vh] overflow-y-auto">
-                <DialogHeader><DialogTitle>Edit Activity</DialogTitle></DialogHeader>
-                <ActivityForm tripId={tripId} activity={activity} tripStartDate={tripStartDate} tripEndDate={tripEndDate} tripDestination={tripDestination} onSuccess={() => setIsEditOpen(false)} />
+          <>
+            <Dialog open={cardDialog !== 'none'} onOpenChange={open => { if (!open) setCardDialog('none'); }}>
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>{cardDialog === 'edit' ? 'Edit Activity' : 'Edit Image'}</DialogTitle>
+                </DialogHeader>
+                {cardDialog === 'edit' && (
+                  <ActivityForm tripId={tripId} activity={activity} tripStartDate={tripStartDate} tripEndDate={tripEndDate} tripDestination={tripDestination} onSuccess={() => setCardDialog('none')} />
+                )}
+                {cardDialog === 'image' && (
+                  <ImagePickerContent searchHint={activity.location || activity.title} onSave={url => { handleImageSave(url); setCardDialog('none'); }} onCancel={() => setCardDialog('none')} />
+                )}
               </DialogContent>
             </Dialog>
-            <ImageEditor searchHint={activity.location || activity.title} onSave={handleImageSave} />
-            <Button variant="secondary" size="icon" onClick={handleDelete}
-              className="h-8 w-8 bg-white/90 hover:bg-white text-destructive hover:text-destructive shadow">
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </div>
+            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Button variant="secondary" size="icon" onClick={() => setCardDialog('edit')} className="h-8 w-8 bg-white/90 hover:bg-white text-foreground shadow">
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="secondary" size="icon" onClick={() => setCardDialog('image')} className="h-8 w-8 bg-white/90 hover:bg-white text-foreground shadow" title="Change image">
+                <Camera className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="secondary" size="icon" onClick={handleDelete} className="h-8 w-8 bg-white/90 hover:bg-white text-destructive hover:text-destructive shadow">
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </>
         )}
 
         {/* Type badge */}
