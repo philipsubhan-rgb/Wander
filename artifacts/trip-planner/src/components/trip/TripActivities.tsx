@@ -379,10 +379,12 @@ function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, tripDestin
     defaultValues: activity ? {
       title:       activity.title       ?? '',
       description: activity.description ?? '',
-      date:        activity.date        ?? '',
-      time:        activity.time        ?? '',
+      // Slice to YYYY-MM-DD — <input type="date"> rejects ISO timestamps
+      date:        activity.date ? String(activity.date).substring(0, 10) : '',
+      // Strip seconds from HH:MM:SS if present
+      time:        activity.time ? String(activity.time).substring(0, 5) : '',
       location:    activity.location    ?? '',
-      type:        activity.type        ?? 'sightseeing',
+      type:        (activity.type ?? 'sightseeing') as 'sightseeing' | 'dining' | 'adventure' | 'culture' | 'relaxation' | 'transport' | 'other',
       lat:         activity.lat         ?? undefined,
       lon:         activity.lon         ?? undefined,
       imageUrl:    activity.imageUrl    ?? undefined,
@@ -393,13 +395,27 @@ function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, tripDestin
   });
 
   const onSubmit = (values: z.infer<typeof activitySchema>) => {
+    // Normalize optional fields: convert empty strings → undefined so the server
+    // doesn't overwrite nullable columns with empty text.
+    const data = {
+      ...values,
+      time:        values.time        || undefined,
+      description: values.description || undefined,
+      location:    values.location    || undefined,
+      locationUrl: values.locationUrl || undefined,
+      imageUrl:    values.imageUrl    || undefined,
+    };
     if (activity) {
-      updateActivity.mutate({ tripId, activityId: activity.id, data: values }, {
-        onSuccess: () => { toast.success('Updated'); queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) }); onSuccess(); }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      updateActivity.mutate({ tripId, activityId: activity.id, data: data as any }, {
+        onSuccess: () => { toast.success('Activity updated'); queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) }); onSuccess(); },
+        onError: (err: unknown) => { const msg = err instanceof Error ? err.message : 'Unknown error'; toast.error(`Failed to save: ${msg}`); },
       });
     } else {
-      createActivity.mutate({ tripId, data: values }, {
-        onSuccess: () => { toast.success('Added'); queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) }); onSuccess(); }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      createActivity.mutate({ tripId, data: data as any }, {
+        onSuccess: () => { toast.success('Activity added'); queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) }); onSuccess(); },
+        onError: (err: unknown) => { const msg = err instanceof Error ? err.message : 'Unknown error'; toast.error(`Failed to add: ${msg}`); },
       });
     }
   };
@@ -444,8 +460,8 @@ function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, tripDestin
         )} />
         <FormField control={form.control} name="type" render={({ field }) => (
           <FormItem><FormLabel>Type</FormLabel>
-            <Select onValueChange={field.onChange} defaultValue={field.value}>
-              <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+            <Select onValueChange={field.onChange} value={field.value ?? 'other'}>
+              <FormControl><SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger></FormControl>
               <SelectContent>
                 <SelectItem value="sightseeing">Sightseeing</SelectItem>
                 <SelectItem value="dining">Dining</SelectItem>
