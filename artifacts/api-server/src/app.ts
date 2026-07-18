@@ -16,6 +16,11 @@ declare module "express-session" {
 
 const app: Express = express();
 
+// Trust the first proxy hop so req.protocol reflects the original HTTPS
+// scheme forwarded by Replit's reverse proxy. Without this, express-session
+// sees an HTTP connection in production and refuses to set secure cookies.
+app.set("trust proxy", 1);
+
 app.use(
   pinoHttp({
     logger,
