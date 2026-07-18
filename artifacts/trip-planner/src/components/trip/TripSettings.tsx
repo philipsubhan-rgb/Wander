@@ -1,5 +1,5 @@
 import { 
-  useUpdateTrip, useListTripParticipants, useAddTripParticipant, useRemoveTripParticipant, useListUsers, getGetTripQueryKey, getListTripParticipantsQueryKey 
+  useUpdateTrip, useDeleteTrip, useListTripParticipants, useAddTripParticipant, useRemoveTripParticipant, useListUsers, getGetTripQueryKey, getListTripParticipantsQueryKey 
 } from '@workspace/api-client-react';
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
@@ -9,9 +9,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useQueryClient } from '@tanstack/react-query';
+import { useLocation } from 'wouter';
 import { toast } from 'sonner';
-import { Users, Trash2, Plus, Shield } from 'lucide-react';
+import { Users, Trash2, Plus, Shield, TriangleAlert } from 'lucide-react';
 
 const tripSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -24,13 +26,16 @@ const tripSchema = z.object({
 
 export function TripSettings({ trip }: { trip: any }) {
   const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
   const updateTrip = useUpdateTrip();
+  const deleteTrip = useDeleteTrip();
   const { data: participants } = useListTripParticipants(trip.id);
   const { data: users } = useListUsers();
   const addParticipant = useAddTripParticipant();
   const removeParticipant = useRemoveTripParticipant();
   
   const [selectedUserId, setSelectedUserId] = useState<string>('');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const tripToFormValues = (t: typeof trip) => ({
     title: t.title,
@@ -94,6 +99,20 @@ export function TripSettings({ trip }: { trip: any }) {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListTripParticipantsQueryKey(trip.id) });
       }
+    });
+  };
+
+  const handleDeleteTrip = () => {
+    deleteTrip.mutate({ tripId: trip.id }, {
+      onSuccess: () => {
+        toast.success('Trip deleted');
+        queryClient.invalidateQueries({ queryKey: ['listTrips'] });
+        setLocation('/trips');
+      },
+      onError: (err: any) => {
+        toast.error(err?.data?.error ?? err?.message ?? 'Failed to delete trip');
+        setDeleteDialogOpen(false);
+      },
     });
   };
 
@@ -194,6 +213,45 @@ export function TripSettings({ trip }: { trip: any }) {
           </div>
         </div>
       </div>
+
+      {/* Danger Zone */}
+      <div className="md:col-span-2 space-y-4">
+        <h2 className="text-2xl font-serif font-bold text-destructive flex items-center gap-2">
+          <TriangleAlert className="h-5 w-5" /> Danger Zone
+        </h2>
+        <div className="bg-card border border-destructive/30 rounded-xl p-6 flex items-center justify-between">
+          <div>
+            <p className="font-medium">Delete this trip</p>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Permanently remove this trip and all its content. This cannot be undone.
+            </p>
+          </div>
+          <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
+            <Trash2 className="h-4 w-4 mr-2" /> Delete Trip
+          </Button>
+        </div>
+      </div>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete "{trip.title}"?</DialogTitle>
+            <DialogDescription>
+              This will permanently delete the trip and all associated flights, accommodations,
+              activities, and other content. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} disabled={deleteTrip.isPending}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteTrip} disabled={deleteTrip.isPending}>
+              {deleteTrip.isPending ? 'Deleting...' : 'Yes, delete trip'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
