@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
-import { db, usersTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
+import { db, usersTable, tripsTable, tripParticipantsTable } from "@workspace/db";
 import {
   CreateUserBody,
   UpdateUserBody,
@@ -63,6 +63,22 @@ router.get("/users/:userId", requireAuth, async (req, res): Promise<void> => {
   }
 
   res.json(serializeUser(user));
+});
+
+router.get("/users/:userId/trips", requireAdmin, async (req, res): Promise<void> => {
+  const params = GetUserParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Invalid userId" });
+    return;
+  }
+
+  const rows = await db
+    .select({ tripId: tripParticipantsTable.tripId })
+    .from(tripParticipantsTable)
+    .innerJoin(tripsTable, eq(tripsTable.id, tripParticipantsTable.tripId))
+    .where(eq(tripParticipantsTable.userId, params.data.userId));
+
+  res.json(rows.map(r => r.tripId));
 });
 
 router.patch("/users/:userId", requireAdmin, async (req, res): Promise<void> => {
