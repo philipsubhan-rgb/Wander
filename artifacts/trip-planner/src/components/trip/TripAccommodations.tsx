@@ -1,4 +1,5 @@
 import { useListAccommodations, useCreateAccommodation, useUpdateAccommodation, useDeleteAccommodation, getListAccommodationsQueryKey } from '@workspace/api-client-react';
+import { ImageEditor } from '@/components/ImageEditor';
 import { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -179,7 +180,15 @@ export function TripAccommodations({ tripId, editMode, tripStartDate, tripEndDat
 function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tripId: number, stay: any, editMode?: boolean, tripStartDate?: string, tripEndDate?: string }) {
   const queryClient = useQueryClient();
   const deleteStay = useDeleteAccommodation();
+  const updateStayImg = useUpdateAccommodation();
   const [isEditOpen, setIsEditOpen] = useState(false);
+
+  const handleImageSave = (url: string | null) => {
+    updateStayImg.mutate({ tripId, accommodationId: stay.id, data: { imageUrl: url ?? '' } }, {
+      onSuccess: () => { toast.success('Image updated'); queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) }); },
+      onError: () => toast.error('Failed to update image'),
+    });
+  };
 
   const handleDelete = () => {
     if (confirm('Delete this accommodation?')) {
@@ -235,6 +244,7 @@ function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tr
                 <AccommForm tripId={tripId} stay={stay} tripStartDate={tripStartDate} tripEndDate={tripEndDate} onSuccess={() => setIsEditOpen(false)} />
               </DialogContent>
             </Dialog>
+            <ImageEditor searchHint={stay.name} onSave={handleImageSave} />
             <Button
               variant="secondary"
               size="icon"

@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MiniMap } from './MiniMap';
 import { carRentalLogoUrl } from '@/lib/car-rental-logo';
+import { ImageEditor } from '@/components/ImageEditor';
 import {
   useListCarRentals,
   useCreateCarRental,
@@ -177,7 +178,15 @@ function CarRentalCard({ tripId, rental, editMode, tripStartDate, tripEndDate, t
 }) {
   const queryClient = useQueryClient();
   const deleteRental = useDeleteCarRental();
+  const updateRentalImg = useUpdateCarRental();
   const [isEditOpen, setIsEditOpen] = useState(false);
+
+  const handleImageSave = (url: string | null) => {
+    updateRentalImg.mutate({ tripId, carRentalId: rental.id, data: { imageUrl: url ?? '' } }, {
+      onSuccess: () => { toast.success('Image updated'); queryClient.invalidateQueries({ queryKey: getListCarRentalsQueryKey(tripId) }); },
+      onError: () => toast.error('Failed to update image'),
+    });
+  };
 
   const handleDelete = () => {
     if (confirm('Delete this car rental?')) {
@@ -232,6 +241,7 @@ function CarRentalCard({ tripId, rental, editMode, tripStartDate, tripEndDate, t
                 <CarRentalForm tripId={tripId} rental={rental} tripStartDate={tripStartDate} tripEndDate={tripEndDate} tripDestination={tripDestination} onSuccess={() => setIsEditOpen(false)} />
               </DialogContent>
             </Dialog>
+            <ImageEditor searchHint={rental.company} onSave={handleImageSave} />
             <Button variant="secondary" size="icon" onClick={handleDelete}
               className="h-8 w-8 bg-white/90 hover:bg-white text-destructive hover:text-destructive shadow">
               <Trash2 className="h-3.5 w-3.5" />

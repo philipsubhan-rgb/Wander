@@ -22,6 +22,7 @@ import {
   getListReservationsQueryKey,
 } from '@workspace/api-client-react';
 import { fetchWikiImage } from '@/lib/wiki-image';
+import { ImageEditor } from '@/components/ImageEditor';
 
 const API_BASE = `${import.meta.env.BASE_URL}api`;
 
@@ -138,15 +139,29 @@ function VenueInput({
 function ReservationCard({ tripId, res, editMode }: { tripId: number; res: any; editMode?: boolean }) {
   const queryClient = useQueryClient();
   const deleteRes = useDeleteReservation();
+  const updateResImg = useUpdateReservation();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [photo, setPhoto] = useState<string | null>(res.imageUrl);
   const [logoErr, setLogoErr] = useState(false);
+
+  // Keep photo in sync when imageUrl changes after a query refetch
+  useEffect(() => {
+    setPhoto(res.imageUrl ?? null);
+    setLogoErr(false);
+  }, [res.imageUrl]);
 
   useEffect(() => {
     if (photo) return;
     const q = res.venue || res.title;
     fetchWikiImage(q).then(url => { if (url) setPhoto(url); });
   }, [res.id]);
+
+  const handleImageSave = (url: string | null) => {
+    updateResImg.mutate({ tripId, reservationId: res.id, data: { imageUrl: url ?? '' } }, {
+      onSuccess: () => { toast.success('Image updated'); queryClient.invalidateQueries({ queryKey: getListReservationsQueryKey(tripId) }); },
+      onError: () => toast.error('Failed to update image'),
+    });
+  };
 
   const meta = TYPE_META[res.type as ResType] ?? TYPE_META.other;
   const Icon = meta.icon;
@@ -217,6 +232,7 @@ function ReservationCard({ tripId, res, editMode }: { tripId: number; res: any; 
                 <ReservationForm tripId={tripId} reservation={res} onSuccess={() => setIsEditOpen(false)} />
               </DialogContent>
             </Dialog>
+            <ImageEditor searchHint={res.venue || res.title} onSave={handleImageSave} size="xs" />
             <Button variant="secondary" size="icon" onClick={handleDelete}
               className="h-7 w-7 bg-white/90 hover:bg-white text-destructive shadow">
               <Trash2 className="h-3 w-3" />

@@ -1,4 +1,5 @@
 import { useListActivities, useCreateActivity, useUpdateActivity, useDeleteActivity, getListActivitiesQueryKey } from '@workspace/api-client-react';
+import { ImageEditor } from '@/components/ImageEditor';
 import { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -184,8 +185,16 @@ export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate, t
 function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, tripDestination }: { tripId: number, activity: any, editMode?: boolean, tripStartDate?: string, tripEndDate?: string, tripDestination?: string }) {
   const queryClient = useQueryClient();
   const deleteActivity = useDeleteActivity();
+  const updateActivity = useUpdateActivity();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+
+  const handleImageSave = (url: string | null) => {
+    updateActivity.mutate({ tripId, activityId: activity.id, data: { imageUrl: url ?? '' } }, {
+      onSuccess: () => { toast.success('Image updated'); queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) }); },
+      onError: () => toast.error('Failed to update image'),
+    });
+  };
 
   const handleDelete = () => {
     if (confirm('Delete this activity?')) {
@@ -265,6 +274,7 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
                 <ActivityForm tripId={tripId} activity={activity} tripStartDate={tripStartDate} tripEndDate={tripEndDate} tripDestination={tripDestination} onSuccess={() => setIsEditOpen(false)} />
               </DialogContent>
             </Dialog>
+            <ImageEditor searchHint={activity.location || activity.title} onSave={handleImageSave} />
             <Button variant="secondary" size="icon" onClick={handleDelete}
               className="h-8 w-8 bg-white/90 hover:bg-white text-destructive hover:text-destructive shadow">
               <Trash2 className="h-3.5 w-3.5" />
