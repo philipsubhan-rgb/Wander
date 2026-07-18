@@ -139,7 +139,6 @@ function HotelNameInput({
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function TripAccommodations({ tripId, editMode, tripStartDate, tripEndDate }: { tripId: number, editMode?: boolean, tripStartDate?: string, tripEndDate?: string }) {
-  const { isAdmin } = useAuth();
   const { data: stays, isLoading } = useListAccommodations(tripId, { query: { enabled: !!tripId } });
   const [isAddOpen, setIsAddOpen] = useState(false);
 
@@ -147,7 +146,7 @@ export function TripAccommodations({ tripId, editMode, tripStartDate, tripEndDat
 
   return (
     <div className="space-y-6">
-      {isAdmin && (
+      {(
         <div className="flex justify-end">
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
@@ -180,7 +179,6 @@ export function TripAccommodations({ tripId, editMode, tripStartDate, tripEndDat
 // ── Card ──────────────────────────────────────────────────────────────────────
 
 function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tripId: number, stay: any, editMode?: boolean, tripStartDate?: string, tripEndDate?: string }) {
-  const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const deleteStay = useDeleteAccommodation();
   const updateStayImg = useUpdateAccommodation();
@@ -234,7 +232,7 @@ function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tr
           </div>
         )}
         {/* Edit / delete overlay — single Dialog avoids sibling-Dialog Radix conflicts */}
-        {isAdmin && (
+        {(
           <>
             <Dialog open={cardDialog !== 'none'} onOpenChange={open => { if (!open) setCardDialog('none'); }}>
               <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

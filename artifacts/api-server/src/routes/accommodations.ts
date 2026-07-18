@@ -9,7 +9,7 @@ import {
   UpdateAccommodationBody,
   DeleteAccommodationParams,
 } from "@workspace/api-zod";
-import { requireTripAdmin, requireAuth } from "../middlewares/auth";
+import { requireTripParticipant, requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -20,7 +20,7 @@ router.get("/trips/:tripId/accommodations", requireAuth, async (req, res): Promi
   res.json(items.map(a => ({ ...a, lat: a.lat ?? null, lon: a.lon ?? null, imageUrl: a.imageUrl ?? null, confirmationCode: a.confirmationCode ?? null, phone: a.phone ?? null, notes: a.notes ?? null })));
 });
 
-router.post("/trips/:tripId/accommodations", requireTripAdmin(), async (req, res): Promise<void> => {
+router.post("/trips/:tripId/accommodations", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = CreateAccommodationParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const parsed = CreateAccommodationBody.safeParse(req.body);
@@ -29,7 +29,7 @@ router.post("/trips/:tripId/accommodations", requireTripAdmin(), async (req, res
   res.status(201).json({ ...item, lat: item.lat ?? null, lon: item.lon ?? null, imageUrl: item.imageUrl ?? null, confirmationCode: item.confirmationCode ?? null, phone: item.phone ?? null, notes: item.notes ?? null });
 });
 
-router.patch("/trips/:tripId/accommodations/:accommodationId", requireTripAdmin(), async (req, res): Promise<void> => {
+router.patch("/trips/:tripId/accommodations/:accommodationId", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = UpdateAccommodationParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const parsed = UpdateAccommodationBody.safeParse(req.body);
@@ -39,7 +39,7 @@ router.patch("/trips/:tripId/accommodations/:accommodationId", requireTripAdmin(
   res.json({ ...item, lat: item.lat ?? null, lon: item.lon ?? null, imageUrl: item.imageUrl ?? null, confirmationCode: item.confirmationCode ?? null, phone: item.phone ?? null, notes: item.notes ?? null });
 });
 
-router.delete("/trips/:tripId/accommodations/:accommodationId", requireTripAdmin(), async (req, res): Promise<void> => {
+router.delete("/trips/:tripId/accommodations/:accommodationId", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = DeleteAccommodationParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const [item] = await db.delete(accommodationsTable).where(and(eq(accommodationsTable.id, params.data.accommodationId), eq(accommodationsTable.tripId, params.data.tripId))).returning();

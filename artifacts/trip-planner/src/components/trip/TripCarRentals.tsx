@@ -135,7 +135,6 @@ function CompanyInput({ value, onChange, onSelect, tripDestination }: {
 export function TripCarRentals({ tripId, editMode, tripStartDate, tripEndDate, tripDestination }: {
   tripId: number; editMode?: boolean; tripStartDate?: string; tripEndDate?: string; tripDestination?: string;
 }) {
-  const { isAdmin } = useAuth();
   const { data: rentals, isLoading } = useListCarRentals(tripId, { query: { enabled: !!tripId } });
   const [isAddOpen, setIsAddOpen] = useState(false);
 
@@ -143,7 +142,7 @@ export function TripCarRentals({ tripId, editMode, tripStartDate, tripEndDate, t
 
   return (
     <div className="space-y-6">
-      {isAdmin && (
+      {(
         <div className="flex justify-end">
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
@@ -179,7 +178,6 @@ export function TripCarRentals({ tripId, editMode, tripStartDate, tripEndDate, t
 function CarRentalCard({ tripId, rental, editMode, tripStartDate, tripEndDate, tripDestination }: {
   tripId: number; rental: any; editMode?: boolean; tripStartDate?: string; tripEndDate?: string; tripDestination?: string;
 }) {
-  const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const deleteRental = useDeleteCarRental();
   const updateRentalImg = useUpdateCarRental();
@@ -232,7 +230,7 @@ function CarRentalCard({ tripId, rental, editMode, tripStartDate, tripEndDate, t
             <Car className="h-12 w-12 text-white/50" />
           )}
         </div>
-        {isAdmin && (
+        {(
           <>
             <Dialog open={cardDialog !== 'none'} onOpenChange={open => { if (!open) setCardDialog('none'); }}>
               <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

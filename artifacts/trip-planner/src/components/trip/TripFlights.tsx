@@ -293,7 +293,7 @@ export function TripFlights({ tripId, editMode, tripStartDate, tripEndDate }: { 
 
   return (
     <div className="space-y-6">
-      {editMode && (
+      {(
         <div className="flex justify-end">
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
@@ -372,7 +372,7 @@ function FlightCard({ tripId, flight, editMode, tripStartDate }: { tripId: numbe
   return (
     <div className="bg-card border rounded-xl p-6 shadow-sm relative overflow-hidden group">
       <div className="absolute top-0 right-0 p-4 flex gap-2">
-        {editMode && (
+        {(
           <>
             <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
               <DialogTrigger asChild>

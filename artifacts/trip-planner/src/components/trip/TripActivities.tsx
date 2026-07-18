@@ -142,7 +142,6 @@ function LocationInput({
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate, tripDestination }: { tripId: number, editMode?: boolean, tripStartDate?: string, tripEndDate?: string, tripDestination?: string }) {
-  const { isAdmin } = useAuth();
   const { data: activities, isLoading } = useListActivities(tripId, { query: { enabled: !!tripId } });
   const [isAddOpen, setIsAddOpen] = useState(false);
 
@@ -152,7 +151,7 @@ export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate, t
 
   return (
     <div className="space-y-6">
-      {isAdmin && (
+      {(
         <div className="flex justify-end">
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
@@ -185,7 +184,6 @@ export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate, t
 // ── Card ──────────────────────────────────────────────────────────────────────
 
 function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, tripDestination }: { tripId: number, activity: any, editMode?: boolean, tripStartDate?: string, tripEndDate?: string, tripDestination?: string }) {
-  const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const deleteActivity = useDeleteActivity();
   const updateActivity = useUpdateActivity();
@@ -264,7 +262,7 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
 
         {/* Edit / delete overlay — single Dialog avoids sibling-Dialog Radix conflicts */}
-        {isAdmin && (
+        {(
           <>
             <Dialog open={cardDialog !== 'none'} onOpenChange={open => { if (!open) setCardDialog('none'); }}>
               <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

@@ -315,7 +315,7 @@ function DayCard({
                 ) : (
                   <div className="py-10 text-center text-muted-foreground text-sm border border-dashed rounded-xl">
                     No events scheduled for this day
-                    {editMode && (
+                    {(
                       <p className="mt-1 text-xs">Add flights, stays, activities or car rentals from their respective tabs.</p>
                     )}
                   </div>
@@ -326,7 +326,7 @@ function DayCard({
               <div className="lg:w-64 xl:w-72 shrink-0 space-y-3">
                 <RightPanel events={events} note={note} />
 
-                {editMode && (
+                {(
                   <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
                     <DialogTrigger asChild>
                       <Button variant="outline" size="sm" className="w-full text-xs">

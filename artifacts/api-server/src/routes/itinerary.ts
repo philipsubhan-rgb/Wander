@@ -9,7 +9,7 @@ import {
   UpdateItineraryDayBody,
   DeleteItineraryDayParams,
 } from "@workspace/api-zod";
-import { requireTripAdmin, requireAuth } from "../middlewares/auth";
+import { requireTripParticipant, requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -20,7 +20,7 @@ router.get("/trips/:tripId/itinerary", requireAuth, async (req, res): Promise<vo
   res.json(items.map(d => ({ ...d, description: d.description ?? null, notes: d.notes ?? null, startTime: d.startTime ?? null, endTime: d.endTime ?? null })));
 });
 
-router.post("/trips/:tripId/itinerary", requireTripAdmin(), async (req, res): Promise<void> => {
+router.post("/trips/:tripId/itinerary", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = CreateItineraryDayParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const parsed = CreateItineraryDayBody.safeParse(req.body);
@@ -29,7 +29,7 @@ router.post("/trips/:tripId/itinerary", requireTripAdmin(), async (req, res): Pr
   res.status(201).json({ ...item, description: item.description ?? null, notes: item.notes ?? null });
 });
 
-router.patch("/trips/:tripId/itinerary/:dayId", requireTripAdmin(), async (req, res): Promise<void> => {
+router.patch("/trips/:tripId/itinerary/:dayId", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = UpdateItineraryDayParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const parsed = UpdateItineraryDayBody.safeParse(req.body);
@@ -39,7 +39,7 @@ router.patch("/trips/:tripId/itinerary/:dayId", requireTripAdmin(), async (req, 
   res.json({ ...item, description: item.description ?? null, notes: item.notes ?? null });
 });
 
-router.delete("/trips/:tripId/itinerary/:dayId", requireTripAdmin(), async (req, res): Promise<void> => {
+router.delete("/trips/:tripId/itinerary/:dayId", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = DeleteItineraryDayParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const [item] = await db.delete(itineraryDaysTable).where(and(eq(itineraryDaysTable.id, params.data.dayId), eq(itineraryDaysTable.tripId, params.data.tripId))).returning();
