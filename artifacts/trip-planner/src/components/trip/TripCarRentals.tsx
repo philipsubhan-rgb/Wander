@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MiniMap } from './MiniMap';
 import { carRentalLogoUrl } from '@/lib/car-rental-logo';
+import { fetchWikiImage } from '@/lib/wiki-image';
 import { ImagePickerContent } from '@/components/ImageEditor';
 import {
   useListCarRentals,
