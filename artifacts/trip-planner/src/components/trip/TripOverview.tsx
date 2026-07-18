@@ -4,19 +4,19 @@ import { Calendar, Plane, Home, Compass, Users, CheckSquare } from 'lucide-react
 import { format, parseISO } from 'date-fns';
 import { fetchWikiImage } from '@/lib/wiki-image';
 
-export function TripOverview({ tripId }: { tripId: number }) {
+export function TripOverview({ tripId, onNavigate }: { tripId: number; onNavigate?: (tab: string) => void }) {
   const { data: summary } = useGetTripSummary(tripId, { query: { enabled: !!tripId } });
   const { data: timeline } = useGetTripTimeline(tripId, { query: { enabled: !!tripId } });
 
   return (
     <div className="space-y-10">
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <StatCard icon={Calendar} label="Days" value={summary?.daysCount} />
-        <StatCard icon={Plane} label="Flights" value={summary?.flightsCount} />
-        <StatCard icon={Home} label="Stays" value={summary?.accommodationsCount} />
-        <StatCard icon={Compass} label="Activities" value={summary?.activitiesCount} />
-        <StatCard icon={Users} label="Travelers" value={summary?.participantsCount} />
-        <StatCard icon={CheckSquare} label="Packed" value={`${summary?.packingCheckedCount || 0}/${summary?.packingItemsCount || 0}`} />
+        <StatCard icon={Calendar} label="Days" value={summary?.daysCount} onClick={() => onNavigate?.('itinerary')} />
+        <StatCard icon={Plane} label="Flights" value={summary?.flightsCount} onClick={() => onNavigate?.('flights')} />
+        <StatCard icon={Home} label="Stays" value={summary?.accommodationsCount} onClick={() => onNavigate?.('accommodations')} />
+        <StatCard icon={Compass} label="Activities" value={summary?.activitiesCount} onClick={() => onNavigate?.('activities')} />
+        <StatCard icon={Users} label="Travelers" value={summary?.participantsCount} onClick={() => onNavigate?.('packing')} />
+        <StatCard icon={CheckSquare} label="Packed" value={`${summary?.packingCheckedCount || 0}/${summary?.packingItemsCount || 0}`} onClick={() => onNavigate?.('packing')} />
       </div>
 
       <div className="max-w-3xl">
@@ -139,14 +139,17 @@ function EventThumbnail({ event }: { event: any }) {
 
 // ── Stat card ─────────────────────────────────────────────────────────────────
 
-function StatCard({ icon: Icon, label, value }: { icon: any; label: string; value: any }) {
+function StatCard({ icon: Icon, label, value, onClick }: { icon: any; label: string; value: any; onClick?: () => void }) {
   return (
-    <div className="bg-card border rounded-xl p-4 flex flex-col items-center justify-center text-center space-y-2 shadow-sm hover:shadow-md transition-shadow">
-      <div className="p-2 bg-primary/10 rounded-full">
+    <button
+      onClick={onClick}
+      className="bg-card border rounded-xl p-4 flex flex-col items-center justify-center text-center space-y-2 shadow-sm hover:shadow-md hover:border-primary/50 hover:bg-primary/5 transition-all cursor-pointer w-full group"
+    >
+      <div className="p-2 bg-primary/10 rounded-full group-hover:bg-primary/20 transition-colors">
         <Icon className="h-5 w-5 text-primary" />
       </div>
       <span className="text-2xl font-bold text-foreground">{value !== undefined ? value : '-'}</span>
       <span className="text-xs text-muted-foreground uppercase tracking-wider font-medium">{label}</span>
-    </div>
+    </button>
   );
 }

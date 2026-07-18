@@ -21,6 +21,7 @@ import {
   useListReservations, useCreateReservation, useUpdateReservation, useDeleteReservation,
   getListReservationsQueryKey,
 } from '@workspace/api-client-react';
+import { useAuth } from '@/hooks/use-auth';
 import { fetchWikiImage } from '@/lib/wiki-image';
 import { ImagePickerContent } from '@/components/ImageEditor';
 
@@ -137,6 +138,7 @@ function VenueInput({
 // ── Reservation card ──────────────────────────────────────────────────────────
 
 function ReservationCard({ tripId, res, editMode }: { tripId: number; res: any; editMode?: boolean }) {
+  const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const deleteRes = useDeleteReservation();
   const updateResImg = useUpdateReservation();
@@ -219,7 +221,7 @@ function ReservationCard({ tripId, res, editMode }: { tripId: number; res: any; 
         </div>
 
         {/* Admin controls — single Dialog avoids sibling-Dialog Radix conflicts */}
-        {editMode && (
+        {isAdmin && (
           <>
             <Dialog open={cardDialog !== 'none'} onOpenChange={open => { if (!open) setCardDialog('none'); }}>
               <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -579,6 +581,7 @@ export function TripReservations({
   editMode?: boolean;
   tripDestination?: string;
 }) {
+  const { isAdmin } = useAuth();
   const { data: reservations, isLoading } = useListReservations(tripId, { query: { queryKey: getListReservationsQueryKey(tripId), enabled: !!tripId } });
   const [isAddOpen, setIsAddOpen] = useState(false);
 
@@ -606,7 +609,7 @@ export function TripReservations({
             Restaurants, attractions, tours, events and more
           </p>
         </div>
-        {editMode && (
+        {isAdmin && (
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
               <Button><Plus className="h-4 w-4 mr-2" />Add Reservation</Button>
@@ -627,7 +630,7 @@ export function TripReservations({
           <p className="text-muted-foreground text-sm mt-1">
             Add restaurants, tours, events, spa bookings and more.
           </p>
-          {editMode && (
+          {isAdmin && (
             <Button className="mt-4" onClick={() => setIsAddOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />Add First Reservation
             </Button>

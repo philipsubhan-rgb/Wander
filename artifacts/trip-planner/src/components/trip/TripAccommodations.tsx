@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { Home, MapPin, Calendar, Plus, Trash2, Pencil, Camera, Phone } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { MiniMap } from './MiniMap';
+import { useAuth } from '@/hooks/use-auth';
 import { fetchWikiImage } from '@/lib/wiki-image';
 
 const API_BASE = `${import.meta.env.BASE_URL}api`;
@@ -138,6 +139,7 @@ function HotelNameInput({
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function TripAccommodations({ tripId, editMode, tripStartDate, tripEndDate }: { tripId: number, editMode?: boolean, tripStartDate?: string, tripEndDate?: string }) {
+  const { isAdmin } = useAuth();
   const { data: stays, isLoading } = useListAccommodations(tripId, { query: { enabled: !!tripId } });
   const [isAddOpen, setIsAddOpen] = useState(false);
 
@@ -145,7 +147,7 @@ export function TripAccommodations({ tripId, editMode, tripStartDate, tripEndDat
 
   return (
     <div className="space-y-6">
-      {editMode && (
+      {isAdmin && (
         <div className="flex justify-end">
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
@@ -178,6 +180,7 @@ export function TripAccommodations({ tripId, editMode, tripStartDate, tripEndDat
 // ── Card ──────────────────────────────────────────────────────────────────────
 
 function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tripId: number, stay: any, editMode?: boolean, tripStartDate?: string, tripEndDate?: string }) {
+  const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const deleteStay = useDeleteAccommodation();
   const updateStayImg = useUpdateAccommodation();
@@ -231,7 +234,7 @@ function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tr
           </div>
         )}
         {/* Edit / delete overlay — single Dialog avoids sibling-Dialog Radix conflicts */}
-        {editMode && (
+        {isAdmin && (
           <>
             <Dialog open={cardDialog !== 'none'} onOpenChange={open => { if (!open) setCardDialog('none'); }}>
               <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

@@ -13,6 +13,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MiniMap } from './MiniMap';
+import { useAuth } from '@/hooks/use-auth';
 import { carRentalLogoUrl } from '@/lib/car-rental-logo';
 import { fetchWikiImage } from '@/lib/wiki-image';
 import { ImagePickerContent } from '@/components/ImageEditor';
@@ -134,6 +135,7 @@ function CompanyInput({ value, onChange, onSelect, tripDestination }: {
 export function TripCarRentals({ tripId, editMode, tripStartDate, tripEndDate, tripDestination }: {
   tripId: number; editMode?: boolean; tripStartDate?: string; tripEndDate?: string; tripDestination?: string;
 }) {
+  const { isAdmin } = useAuth();
   const { data: rentals, isLoading } = useListCarRentals(tripId, { query: { enabled: !!tripId } });
   const [isAddOpen, setIsAddOpen] = useState(false);
 
@@ -141,7 +143,7 @@ export function TripCarRentals({ tripId, editMode, tripStartDate, tripEndDate, t
 
   return (
     <div className="space-y-6">
-      {editMode && (
+      {isAdmin && (
         <div className="flex justify-end">
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
@@ -177,6 +179,7 @@ export function TripCarRentals({ tripId, editMode, tripStartDate, tripEndDate, t
 function CarRentalCard({ tripId, rental, editMode, tripStartDate, tripEndDate, tripDestination }: {
   tripId: number; rental: any; editMode?: boolean; tripStartDate?: string; tripEndDate?: string; tripDestination?: string;
 }) {
+  const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const deleteRental = useDeleteCarRental();
   const updateRentalImg = useUpdateCarRental();
@@ -229,7 +232,7 @@ function CarRentalCard({ tripId, rental, editMode, tripStartDate, tripEndDate, t
             <Car className="h-12 w-12 text-white/50" />
           )}
         </div>
-        {editMode && (
+        {isAdmin && (
           <>
             <Dialog open={cardDialog !== 'none'} onOpenChange={open => { if (!open) setCardDialog('none'); }}>
               <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

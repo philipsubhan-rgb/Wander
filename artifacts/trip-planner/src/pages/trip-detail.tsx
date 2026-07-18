@@ -105,6 +105,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
   const { data: trip, isLoading } = useGetTrip(tripId, { query: { enabled: !!tripId } });
   const { isAdmin } = useAuth();
   const [editingDates, setEditingDates] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
 
   if (isLoading) return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary"/></div>;
   if (!trip) return <div className="p-10 text-center text-xl">Trip not found</div>;
@@ -174,7 +175,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
       </div>
 
       <div className="max-w-7xl mx-auto px-4 md:px-10 py-8">
-        <Tabs defaultValue="overview" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="overflow-x-auto pb-2 scrollbar-hide">
             <TabsList className="inline-flex w-max min-w-full justify-start md:justify-center border-b rounded-none h-auto p-0 bg-transparent gap-8">
               <TabsTrigger value="overview" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Overview</TabsTrigger>
@@ -194,7 +195,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
           </div>
 
           <div className="mt-10">
-            <TabsContent value="overview" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripOverview tripId={tripId} /></TabsContent>
+            <TabsContent value="overview" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripOverview tripId={tripId} onNavigate={setActiveTab} /></TabsContent>
             <TabsContent value="itinerary" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripItinerary tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} tripDestination={trip.destination} tripCoverImage={trip.coverImage} /></TabsContent>
             <TabsContent value="flights" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripFlights tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} /></TabsContent>
             <TabsContent value="accommodations" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripAccommodations tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} /></TabsContent>
