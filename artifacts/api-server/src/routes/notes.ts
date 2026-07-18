@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { eq, and, or, ne } from "drizzle-orm";
-import { db, tripNotesTable, travelDocumentsTable, usersTable, tripParticipantsTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
+import { db, tripNotesTable, travelDocumentsTable } from "@workspace/db";
 import {
   ListTripNotesParams,
   CreateTripNoteParams,
@@ -42,7 +42,7 @@ function serializeDoc(doc: typeof travelDocumentsTable.$inferSelect & { authorNa
   };
 }
 
-// Trip Notes — own notes + shared notes from other participants
+// Trip Notes — own notes only (private per traveler)
 router.get("/trips/:tripId/notes", requireAuth, async (req, res): Promise<void> => {
   const params = ListTripNotesParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
@@ -50,32 +50,11 @@ router.get("/trips/:tripId/notes", requireAuth, async (req, res): Promise<void> 
   const { tripId } = params.data;
   const myUserId = req.session!.userId!;
 
-  // My own notes (all of them)
   const myNotes = await db.select().from(tripNotesTable).where(
     and(eq(tripNotesTable.tripId, tripId), eq(tripNotesTable.userId, myUserId))
   ).orderBy(tripNotesTable.createdAt);
 
-  // Shared notes from other participants (with author name)
-  const sharedRows = await db
-    .select({
-      note: tripNotesTable,
-      authorName: usersTable.name,
-    })
-    .from(tripNotesTable)
-    .innerJoin(usersTable, eq(usersTable.id, tripNotesTable.userId))
-    .where(and(
-      eq(tripNotesTable.tripId, tripId),
-      eq(tripNotesTable.isShared, true),
-      ne(tripNotesTable.userId, myUserId),
-    ))
-    .orderBy(tripNotesTable.createdAt);
-
-  const result = [
-    ...myNotes.map(n => serializeNote({ ...n, isMine: true })),
-    ...sharedRows.map(r => serializeNote({ ...r.note, authorName: r.authorName, isMine: false })),
-  ];
-
-  res.json(result);
+  res.json(myNotes.map(n => serializeNote({ ...n, isMine: true })));
 });
 
 router.post("/trips/:tripId/notes", requireAuth, async (req, res): Promise<void> => {
@@ -119,7 +98,7 @@ router.delete("/trips/:tripId/notes/:noteId", requireAuth, async (req, res): Pro
   res.json({ success: true });
 });
 
-// Travel Documents — own docs + shared docs from other participants
+// Travel Documents — own docs only (private per traveler)
 router.get("/trips/:tripId/documents", requireAuth, async (req, res): Promise<void> => {
   const params = ListTravelDocumentsParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
@@ -131,25 +110,7 @@ router.get("/trips/:tripId/documents", requireAuth, async (req, res): Promise<vo
     and(eq(travelDocumentsTable.tripId, tripId), eq(travelDocumentsTable.userId, myUserId))
   );
 
-  const sharedRows = await db
-    .select({
-      doc: travelDocumentsTable,
-      authorName: usersTable.name,
-    })
-    .from(travelDocumentsTable)
-    .innerJoin(usersTable, eq(usersTable.id, travelDocumentsTable.userId))
-    .where(and(
-      eq(travelDocumentsTable.tripId, tripId),
-      eq(travelDocumentsTable.isShared, true),
-      ne(travelDocumentsTable.userId, myUserId),
-    ));
-
-  const result = [
-    ...myDocs.map(d => serializeDoc({ ...d, isMine: true })),
-    ...sharedRows.map(r => serializeDoc({ ...r.doc, authorName: r.authorName, isMine: false })),
-  ];
-
-  res.json(result);
+  res.json(myDocs.map(d => serializeDoc({ ...d, isMine: true })));
 });
 
 router.post("/trips/:tripId/documents", requireAuth, async (req, res): Promise<void> => {

@@ -17,7 +17,7 @@ const packingSchema = z.object({
   required: z.boolean().default(false),
 });
 
-export function TripPackingList({ tripId, editMode }: { tripId: number, editMode?: boolean }) {
+export function TripPackingList({ tripId, editMode }: { tripId: number, editMode?: boolean }) { // editMode retained for API compat but packing is now per-user
   const { data: items, isLoading } = useListPackingItems(tripId, { query: { enabled: !!tripId } });
   const queryClient = useQueryClient();
   const createItem = useCreatePackingItem();
@@ -83,19 +83,17 @@ export function TripPackingList({ tripId, editMode }: { tripId: number, editMode
         <p className="text-sm text-muted-foreground">{packedItems} of {totalItems} items packed</p>
       </div>
 
-      {editMode && (
-        <form onSubmit={handleAdd} className="flex gap-2">
-          <Input 
-            placeholder="Add a new item..." 
-            value={newItemName}
-            onChange={e => setNewItemName(e.target.value)}
-            className="flex-1 bg-card"
-          />
-          <Button type="submit" disabled={createItem.isPending || !newItemName.trim()}>
-            <Plus className="h-4 w-4 mr-2" /> Add
-          </Button>
-        </form>
-      )}
+      <form onSubmit={handleAdd} className="flex gap-2">
+        <Input 
+          placeholder="Add a new item..." 
+          value={newItemName}
+          onChange={e => setNewItemName(e.target.value)}
+          className="flex-1 bg-card"
+        />
+        <Button type="submit" disabled={createItem.isPending || !newItemName.trim()}>
+          <Plus className="h-4 w-4 mr-2" /> Add
+        </Button>
+      </form>
 
       {(!items || items.length === 0) ? (
          <div className="text-center py-12 bg-muted/50 rounded-xl border border-dashed">
@@ -123,11 +121,9 @@ export function TripPackingList({ tripId, editMode }: { tripId: number, editMode
                         <ShieldAlert className="h-3.5 w-3.5 text-primary ml-2" />
                       )}
                     </label>
-                    {editMode && (
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0" onClick={() => handleDelete(item.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0" onClick={() => handleDelete(item.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 ))}
               </div>

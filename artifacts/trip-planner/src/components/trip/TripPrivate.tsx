@@ -8,9 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { StickyNote, Plus, Trash2, FileText, Globe, Lock, Users } from 'lucide-react';
+import { StickyNote, Plus, Trash2, FileText } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { Badge } from '@/components/ui/badge';
 
 // ─── Notes ────────────────────────────────────────────────────────────────────
 
@@ -23,9 +22,6 @@ export function TripNotes({ tripId }: { tripId: number }) {
   const [activeNoteId, setActiveNoteId] = useState<number | null>(null);
 
   if (isLoading) return <div className="text-muted-foreground p-4">Loading notes…</div>;
-
-  const myNotes = notes?.filter((n: any) => n.isMine !== false) ?? [];
-  const sharedNotes = notes?.filter((n: any) => n.isMine === false) ?? [];
 
   const handleCreate = () => {
     createNote.mutate({ tripId, data: { title: 'New Note', content: '', isShared: false } }, {
@@ -57,10 +53,8 @@ export function TripNotes({ tripId }: { tripId: number }) {
           <Plus className="h-4 w-4 mr-2" /> New Note
         </Button>
 
-        {/* My notes */}
         <div className="space-y-1">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-2">My Notes</p>
-          {myNotes.map((note: any) => (
+          {notes?.map((note: any) => (
             <NoteListItem
               key={note.id}
               note={note}
@@ -68,41 +62,20 @@ export function TripNotes({ tripId }: { tripId: number }) {
               onClick={() => setActiveNoteId(note.id)}
             />
           ))}
-          {myNotes.length === 0 && (
+          {(!notes || notes.length === 0) && (
             <p className="text-muted-foreground text-sm text-center py-3">No notes yet.</p>
           )}
         </div>
-
-        {/* Shared by others */}
-        {sharedNotes.length > 0 && (
-          <div className="space-y-1 border-t pt-4">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-2 flex items-center gap-1.5">
-              <Users className="h-3 w-3" /> Shared with group
-            </p>
-            {sharedNotes.map((note: any) => (
-              <NoteListItem
-                key={note.id}
-                note={note}
-                isActive={activeNoteId === note.id}
-                onClick={() => setActiveNoteId(note.id)}
-              />
-            ))}
-          </div>
-        )}
       </div>
 
-      {/* Editor / reader pane */}
+      {/* Editor pane */}
       <div className="flex-1 bg-card border rounded-xl shadow-sm flex flex-col">
         {activeNote ? (
-          (activeNote as any).isMine !== false ? (
-            <NoteEditor
-              tripId={tripId}
-              note={activeNote}
-              onDelete={() => handleDelete(activeNote.id)}
-            />
-          ) : (
-            <SharedNoteViewer note={activeNote} />
-          )
+          <NoteEditor
+            tripId={tripId}
+            note={activeNote}
+            onDelete={() => handleDelete(activeNote.id)}
+          />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-8">
             <StickyNote className="h-12 w-12 mb-4 opacity-20" />
@@ -122,39 +95,9 @@ function NoteListItem({ note, isActive, onClick }: { note: any; isActive: boolea
         isActive ? 'bg-primary/10 border-primary/50 text-primary' : 'bg-card hover:bg-muted/50 border-transparent hover:border-border'
       }`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="font-medium truncate text-sm">{note.title || 'Untitled'}</div>
-        {note.isMine !== false ? (
-          note.isShared
-            ? <Globe className="h-3 w-3 shrink-0 text-emerald-500" title="Shared with group" />
-            : <Lock className="h-3 w-3 shrink-0 text-muted-foreground" title="Private" />
-        ) : (
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
-            {note.authorName?.split(' ')[0] ?? 'Teammate'}
-          </Badge>
-        )}
-      </div>
+      <div className="font-medium truncate text-sm">{note.title || 'Untitled'}</div>
       <div className="text-xs text-muted-foreground mt-1 truncate">{note.content || 'No content…'}</div>
     </button>
-  );
-}
-
-function SharedNoteViewer({ note }: { note: any }) {
-  return (
-    <div className="flex flex-col h-full">
-      <div className="p-4 border-b flex items-center gap-3">
-        <div className="flex-1">
-          <p className="text-lg font-serif font-bold">{note.title || 'Untitled'}</p>
-          <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-            <Users className="h-3 w-3" /> Shared by {note.authorName ?? 'a teammate'}
-          </p>
-        </div>
-        <Badge variant="secondary" className="flex items-center gap-1 shrink-0">
-          <Globe className="h-3 w-3 text-emerald-500" /> Shared
-        </Badge>
-      </div>
-      <div className="flex-1 p-6 text-muted-foreground whitespace-pre-wrap">{note.content || <em>No content.</em>}</div>
-    </div>
   );
 }
 
@@ -163,23 +106,21 @@ function NoteEditor({ tripId, note, onDelete }: { tripId: number; note: any; onD
   const updateNote = useUpdateTripNote();
   const [title, setTitle] = useState(note.title || '');
   const [content, setContent] = useState(note.content || '');
-  const [isShared, setIsShared] = useState<boolean>(!!note.isShared);
 
   useEffect(() => {
     setTitle(note.title || '');
     setContent(note.content || '');
-    setIsShared(!!note.isShared);
   }, [note.id]);
 
   const mutateFnRef = useRef(updateNote.mutate);
   mutateFnRef.current = updateNote.mutate;
 
-  const save = useCallback((t: string, c: string, s: boolean) => {
-    mutateFnRef.current({ tripId, tripNoteId: note.id, data: { title: t, content: c, isShared: s } }, {
+  const save = useCallback((t: string, c: string) => {
+    mutateFnRef.current({ tripId, tripNoteId: note.id, data: { title: t, content: c, isShared: false } }, {
       onSuccess: () => {
         queryClient.setQueryData(getListTripNotesQueryKey(tripId), (old: any) => {
           if (!old) return old;
-          return old.map((n: any) => n.id === note.id ? { ...n, title: t, content: c, isShared: s } : n);
+          return old.map((n: any) => n.id === note.id ? { ...n, title: t, content: c } : n);
         });
       }
     });
@@ -189,18 +130,11 @@ function NoteEditor({ tripId, note, onDelete }: { tripId: number; note: any; onD
   useEffect(() => {
     const timer = setTimeout(() => {
       if (title !== note.title || content !== note.content) {
-        save(title, content, isShared);
+        save(title, content);
       }
     }, 1000);
     return () => clearTimeout(timer);
-  }, [title, content, note.title, note.content, isShared, save]);
-
-  const toggleShare = () => {
-    const next = !isShared;
-    setIsShared(next);
-    save(title, content, next);
-    toast.success(next ? 'Note shared with the group' : 'Note set to private');
-  };
+  }, [title, content, note.title, note.content, save]);
 
   return (
     <div className="flex flex-col h-full">
@@ -211,21 +145,9 @@ function NoteEditor({ tripId, note, onDelete }: { tripId: number; note: any; onD
           className="text-lg font-serif font-bold border-transparent bg-transparent hover:bg-muted/50 focus-visible:bg-muted/50 px-2 h-auto py-1"
           placeholder="Note Title"
         />
-        <div className="flex items-center gap-2 shrink-0">
-          <Button
-            variant={isShared ? 'default' : 'outline'}
-            size="sm"
-            onClick={toggleShare}
-            className={isShared ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''}
-            title={isShared ? 'Visible to all travelers — click to make private' : 'Only you can see this — click to share'}
-          >
-            {isShared ? <Globe className="h-3.5 w-3.5 mr-1.5" /> : <Lock className="h-3.5 w-3.5 mr-1.5" />}
-            {isShared ? 'Shared' : 'Private'}
-          </Button>
-          <Button variant="ghost" size="icon" onClick={onDelete} className="text-destructive hover:text-destructive">
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
+        <Button variant="ghost" size="icon" onClick={onDelete} className="text-destructive hover:text-destructive shrink-0">
+          <Trash2 className="h-4 w-4" />
+        </Button>
       </div>
       <Textarea
         value={content}
@@ -243,13 +165,9 @@ export function TripDocuments({ tripId }: { tripId: number }) {
   const { data: docs, isLoading } = useListTravelDocuments(tripId, { query: { enabled: !!tripId } });
   const queryClient = useQueryClient();
   const createDoc = useCreateTravelDocument();
-  const updateDoc = useUpdateTravelDocument();
   const deleteDoc = useDeleteTravelDocument();
 
   if (isLoading) return <div className="text-muted-foreground p-4">Loading documents…</div>;
-
-  const myDocs = docs?.filter((d: any) => d.isMine !== false) ?? [];
-  const sharedDocs = docs?.filter((d: any) => d.isMine === false) ?? [];
 
   const handleAdd = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -268,19 +186,6 @@ export function TripDocuments({ tripId }: { tripId: number }) {
         (e.target as HTMLFormElement).reset();
       }
     });
-  };
-
-  const toggleShare = (doc: any) => {
-    const next = !doc.isShared;
-    updateDoc.mutate(
-      { tripId, travelDocumentId: doc.id, data: { isShared: next } },
-      {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getListTravelDocumentsQueryKey(tripId) });
-          toast.success(next ? 'Document shared with the group' : 'Document set to private');
-        }
-      }
-    );
   };
 
   return (
@@ -318,14 +223,13 @@ export function TripDocuments({ tripId }: { tripId: number }) {
       </div>
 
       {/* My documents */}
-      {myDocs.length > 0 && (
+      {docs && docs.length > 0 ? (
         <div className="space-y-3">
           <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">My Documents</h3>
-          {myDocs.map((doc: any) => (
+          {docs.map((doc: any) => (
             <DocumentCard
               key={doc.id}
               doc={doc}
-              onToggleShare={() => toggleShare(doc)}
               onDelete={() => {
                 if (confirm('Delete document?')) {
                   deleteDoc.mutate({ tripId, travelDocumentId: doc.id }, {
@@ -336,22 +240,8 @@ export function TripDocuments({ tripId }: { tripId: number }) {
             />
           ))}
         </div>
-      )}
-
-      {myDocs.length === 0 && sharedDocs.length === 0 && (
+      ) : (
         <p className="text-muted-foreground text-center py-8">No documents added yet.</p>
-      )}
-
-      {/* Shared by others */}
-      {sharedDocs.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-            <Users className="h-4 w-4" /> Shared with group
-          </h3>
-          {sharedDocs.map((doc: any) => (
-            <DocumentCard key={doc.id} doc={doc} readOnly />
-          ))}
-        </div>
       )}
     </div>
   );
@@ -359,13 +249,9 @@ export function TripDocuments({ tripId }: { tripId: number }) {
 
 function DocumentCard({
   doc,
-  readOnly = false,
-  onToggleShare,
   onDelete,
 }: {
   doc: any;
-  readOnly?: boolean;
-  onToggleShare?: () => void;
   onDelete?: () => void;
 }) {
   return (
@@ -377,14 +263,6 @@ function DocumentCard({
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h4 className="font-semibold uppercase tracking-wider text-sm">{doc.type.replace('_', ' ')}</h4>
-            {!readOnly && (
-              doc.isShared
-                ? <Badge variant="secondary" className="text-[10px] px-1.5 py-0 flex items-center gap-1"><Globe className="h-2.5 w-2.5 text-emerald-500" />Shared</Badge>
-                : <Badge variant="outline" className="text-[10px] px-1.5 py-0 flex items-center gap-1"><Lock className="h-2.5 w-2.5" />Private</Badge>
-            )}
-            {readOnly && doc.authorName && (
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{doc.authorName}</Badge>
-            )}
           </div>
           <p className="font-mono text-muted-foreground text-sm mt-0.5">{doc.number}</p>
           {doc.notes && <p className="text-xs text-muted-foreground mt-1 truncate">{doc.notes}</p>}
@@ -398,26 +276,15 @@ function DocumentCard({
             <span className="text-sm font-medium">{format(parseISO(doc.expiryDate), 'MMM d, yyyy')}</span>
           </div>
         )}
-        {!readOnly && (
-          <>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onToggleShare}
-              className={doc.isShared ? 'text-emerald-600 hover:text-emerald-700' : 'text-muted-foreground'}
-              title={doc.isShared ? 'Shared — click to make private' : 'Private — click to share with group'}
-            >
-              {doc.isShared ? <Globe className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onDelete}
-              className="text-destructive hover:text-destructive"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </>
+        {onDelete && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onDelete}
+            className="text-destructive hover:text-destructive"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
         )}
       </div>
     </div>
