@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Compass, MapPin, Clock, Plus, Trash2, Pencil, CalendarDays, ExternalLink } from 'lucide-react';
+import { Compass, MapPin, Clock, Plus, Trash2, Pencil, CalendarDays, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { MiniMap } from './MiniMap';
 import { fetchWikiImage } from '@/lib/wiki-image';
@@ -185,6 +185,7 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
   const queryClient = useQueryClient();
   const deleteActivity = useDeleteActivity();
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const handleDelete = () => {
     if (confirm('Delete this activity?')) {
@@ -225,30 +226,31 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
   const mapLon: number | null = activity.lon ?? geoCoords?.lon ?? null;
   const hasMap = mapLat != null && mapLon != null;
 
-  // Best available maps URL: stored > generated from coords > text search
   const mapsUrl: string | null =
     activity.locationUrl ||
     (mapLat != null && mapLon != null ? `https://maps.google.com/?q=${mapLat},${mapLon}` : null) ||
     (activity.location ? `https://maps.google.com/?q=${encodeURIComponent(activity.location)}` : null);
+
+  const timeFmt = (t: string) => {
+    const [h, m] = t.split(':').map(Number);
+    return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+  };
 
   return (
     <div className="bg-card border rounded-xl shadow-sm overflow-hidden relative group hover:border-primary/50 transition-colors">
       {/* ── Image / gradient header ── */}
       <div className="relative h-36">
         {displayImage ? (
-          <img
-            src={displayImage}
-            alt={activity.title}
-            className="h-full w-full object-cover"
-          />
+          <img src={displayImage} alt={activity.title} className="h-full w-full object-cover" />
         ) : (
-          <div
-            style={{ background: `linear-gradient(to bottom right, ${gradFrom}, ${gradTo})` }}
-            className="h-full w-full flex items-center justify-center"
-          >
+          <div style={{ background: `linear-gradient(to bottom right, ${gradFrom}, ${gradTo})` }}
+            className="h-full w-full flex items-center justify-center">
             <Compass className="h-10 w-10 text-white/50" />
           </div>
         )}
+        {/* Dark overlay gradient for text readability */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+
         {/* Edit / delete overlay */}
         {editMode && (
           <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -258,21 +260,18 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="max-h-[90vh] overflow-y-auto">
                 <DialogHeader><DialogTitle>Edit Activity</DialogTitle></DialogHeader>
                 <ActivityForm tripId={tripId} activity={activity} tripStartDate={tripStartDate} tripEndDate={tripEndDate} tripDestination={tripDestination} onSuccess={() => setIsEditOpen(false)} />
               </DialogContent>
             </Dialog>
-            <Button
-              variant="secondary"
-              size="icon"
-              onClick={handleDelete}
-              className="h-8 w-8 bg-white/90 hover:bg-white text-destructive hover:text-destructive shadow"
-            >
+            <Button variant="secondary" size="icon" onClick={handleDelete}
+              className="h-8 w-8 bg-white/90 hover:bg-white text-destructive hover:text-destructive shadow">
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </div>
         )}
+
         {/* Type badge */}
         <span className="absolute bottom-2 left-3 text-xs font-semibold text-white uppercase tracking-wider drop-shadow">
           {activity.type}
@@ -291,23 +290,18 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
               <>
                 <span className="text-muted-foreground">·</span>
                 <Clock className="h-4 w-4 text-primary shrink-0" />
-                <span>{activity.time}</span>
+                <span>{timeFmt(activity.time)}</span>
               </>
             )}
           </div>
           {activity.location && (
             <div className="flex items-start gap-2">
               <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
-              <span className="line-clamp-2 flex-1">{activity.location}</span>
+              <span className={`flex-1 ${isExpanded ? '' : 'line-clamp-1'}`}>{activity.location}</span>
               {mapsUrl && (
-                <a
-                  href={mapsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
                   className="shrink-0 text-primary hover:text-primary/80 transition-colors"
-                  title="Open in Google Maps"
-                  onClick={e => e.stopPropagation()}
-                >
+                  title="Open in Google Maps" onClick={e => e.stopPropagation()}>
                   <ExternalLink className="h-3.5 w-3.5" />
                 </a>
               )}
@@ -316,14 +310,41 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
         </div>
 
         {activity.description && (
-          <p className="text-sm text-muted-foreground border-t pt-3 line-clamp-2">
+          <p className={`text-sm text-muted-foreground border-t pt-3 ${isExpanded ? '' : 'line-clamp-2'}`}>
             {activity.description}
           </p>
         )}
-      </div>
 
-      {/* ── Mini map ── */}
-      {hasMap && <MiniMap lat={mapLat!} lon={mapLon!} label={activity.location ?? activity.title} />}
+        {/* ── Expanded content ── */}
+        {isExpanded && (
+          <div className="space-y-3 pt-1">
+            {hasMap && (
+              <div className="rounded-lg overflow-hidden border">
+                <MiniMap lat={mapLat!} lon={mapLon!} label={activity.location ?? activity.title} />
+              </div>
+            )}
+            {mapsUrl && (
+              <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full py-2 px-3 rounded-lg border border-primary/30 text-primary hover:bg-primary/5 transition-colors text-sm font-medium">
+                <ExternalLink className="h-4 w-4" />
+                Open in Google Maps
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* ── Expand / collapse toggle ── */}
+        <button
+          onClick={() => setIsExpanded(prev => !prev)}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors mt-1 w-full justify-center pt-1 border-t"
+        >
+          {isExpanded ? (
+            <><ChevronUp className="h-3.5 w-3.5" /> Show less</>
+          ) : (
+            <><ChevronDown className="h-3.5 w-3.5" /> Show more</>
+          )}
+        </button>
+      </div>
     </div>
   );
 }
@@ -338,10 +359,15 @@ function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, tripDestin
   const form = useForm<z.infer<typeof activitySchema>>({
     resolver: zodResolver(activitySchema),
     defaultValues: activity ? {
-      ...activity,
-      lat: activity.lat ?? undefined,
-      lon: activity.lon ?? undefined,
-      imageUrl: activity.imageUrl ?? undefined,
+      title:       activity.title       ?? '',
+      description: activity.description ?? '',
+      date:        activity.date        ?? '',
+      time:        activity.time        ?? '',
+      location:    activity.location    ?? '',
+      type:        activity.type        ?? 'sightseeing',
+      lat:         activity.lat         ?? undefined,
+      lon:         activity.lon         ?? undefined,
+      imageUrl:    activity.imageUrl    ?? undefined,
       locationUrl: activity.locationUrl ?? undefined,
     } : {
       title: '', description: '', date: '', time: '', location: '', type: 'sightseeing' as const,
