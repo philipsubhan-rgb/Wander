@@ -105,7 +105,7 @@ async function recreateSplits(
  *
  * The sum of all nets must be 0 for the algorithm to be exact.
  */
-function minimizeDebts(
+export function minimizeDebts(
   balances: Record<number, { name: string; net: number }>,
 ): Array<{ fromUserId: number; fromName: string; toUserId: number; toName: string; amount: number }> {
   const creditors: Array<{ id: number; name: string; amount: number }> = [];
