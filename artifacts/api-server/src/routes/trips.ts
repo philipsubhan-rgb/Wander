@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, sql } from "drizzle-orm";
-import { db, tripsTable, tripParticipantsTable, usersTable, flightsTable, accommodationsTable, activitiesTable, itineraryDaysTable, packingItemsTable, carRentalsTable } from "@workspace/db";
+import { db, tripsTable, tripParticipantsTable, usersTable, flightsTable, accommodationsTable, activitiesTable, itineraryDaysTable, packingItemsTable, carRentalsTable, tripExpensesTable } from "@workspace/db";
 import {
   CreateTripBody,
   UpdateTripBody,
@@ -399,16 +399,25 @@ router.delete("/trips/:tripId/participants/:userId", requireTripAdmin(), async (
     return;
   }
 
+  const { tripId, userId } = params.data;
+
+  // Count how many expenses in this trip this user paid for, so the admin can be warned
+  const [payerExpenseCount] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(tripExpensesTable)
+    .where(and(eq(tripExpensesTable.tripId, tripId), eq(tripExpensesTable.paidByUserId, userId)));
+  const expensesAsPayer = Number(payerExpenseCount?.count ?? 0);
+
   await db
     .delete(tripParticipantsTable)
     .where(and(
-      eq(tripParticipantsTable.tripId, params.data.tripId),
-      eq(tripParticipantsTable.userId, params.data.userId)
+      eq(tripParticipantsTable.tripId, tripId),
+      eq(tripParticipantsTable.userId, userId)
     ));
 
-  const splitsRecalculated = await recalcExpenseSplitsForTrip(params.data.tripId);
+  const splitsRecalculated = await recalcExpenseSplitsForTrip(tripId);
 
-  res.json({ success: true, splitsRecalculated });
+  res.json({ success: true, splitsRecalculated, expensesAsPayer });
 });
 
 export default router;

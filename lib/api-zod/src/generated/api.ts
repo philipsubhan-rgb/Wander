@@ -343,7 +343,9 @@ export const RemoveTripParticipantParams = zod.object({
 })
 
 export const RemoveTripParticipantResponse = zod.object({
-  "success": zod.boolean()
+  "success": zod.boolean(),
+  "splitsRecalculated": zod.number().describe('Number of expenses whose unpaid splits were recalculated'),
+  "expensesAsPayer": zod.number().describe('Number of expenses this traveler paid for (they remain as departed payer in the balance)')
 })
 
 
@@ -1286,7 +1288,8 @@ export const GetExpenseBalanceResponse = zod.object({
   "name": zod.string(),
   "totalPaid": zod.number(),
   "totalOwed": zod.number(),
-  "net": zod.number()
+  "net": zod.number(),
+  "departed": zod.boolean().optional().describe('True when this person has left the trip but was the payer of one or more expenses')
 })),
   "settlements": zod.array(zod.object({
   "fromUserId": zod.number(),

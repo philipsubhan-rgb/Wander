@@ -902,6 +902,8 @@ export interface ExpenseBalanceEntry {
   totalPaid: number;
   totalOwed: number;
   net: number;
+  /** True when this person has left the trip but was the payer of one or more expenses */
+  departed?: boolean;
 }
 
 export interface ExpenseSettlement {
@@ -921,5 +923,13 @@ export interface ExpenseBalanceSummary {
 
 export type LookupUserByEmailParams = {
 email: string;
+};
+
+export type RemoveTripParticipant200 = {
+  success: boolean;
+  /** Number of expenses whose unpaid splits were recalculated */
+  splitsRecalculated: number;
+  /** Number of expenses this traveler paid for (they remain as departed payer in the balance) */
+  expensesAsPayer: number;
 };
 

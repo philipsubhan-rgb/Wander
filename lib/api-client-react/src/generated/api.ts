@@ -49,6 +49,7 @@ import type {
   PackingItemInput,
   PackingItemUpdate,
   ParticipantInput,
+  RemoveTripParticipant200,
   Reservation,
   ReservationInput,
   ReservationUpdate,
@@ -1560,9 +1561,9 @@ export const getRemoveTripParticipantUrl = (tripId: number,
  * @summary Remove a traveler from a trip (admin only)
  */
 export const removeTripParticipant = async (tripId: number,
-    userId: number, options?: RequestInit): Promise<SuccessResponse> => {
+    userId: number, options?: RequestInit): Promise<RemoveTripParticipant200> => {
 
-  return customFetch<SuccessResponse>(getRemoveTripParticipantUrl(tripId,userId),
+  return customFetch<RemoveTripParticipant200>(getRemoveTripParticipantUrl(tripId,userId),
   {
     ...options,
     method: 'DELETE'

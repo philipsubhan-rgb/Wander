@@ -238,21 +238,41 @@ export function TripSettings({ trip }: { trip: any }) {
     });
   };
 
-  const handleRemoveParticipant = (userId: number) => {
+  const [removePayerWarning, setRemovePayerWarning] = useState<{ userId: number; name: string; expensesAsPayer: number } | null>(null);
+
+  const doRemoveParticipant = (userId: number) => {
     removeParticipant.mutate({ tripId: trip.id, userId }, {
       onSuccess: (data: any) => {
         queryClient.invalidateQueries({ queryKey: getListTripParticipantsQueryKey(trip.id) });
         queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey(trip.id) });
         queryClient.invalidateQueries({ queryKey: getGetExpenseBalanceQueryKey(trip.id) });
+        setRemovePayerWarning(null);
         const recalc = data?.splitsRecalculated ?? 0;
-        if (recalc > 0) {
+        const asPayer = data?.expensesAsPayer ?? 0;
+        if (asPayer > 0) {
+          toast.warning(
+            `Traveler removed — they paid ${asPayer} expense${asPayer !== 1 ? 's' : ''}. Their balance is preserved so remaining travelers still owe them.`,
+            { duration: 6000 }
+          );
+        } else if (recalc > 0) {
           toast.info(`Traveler removed — ${recalc} expense${recalc !== 1 ? 's' : ''} recalculated`);
         } else {
           toast.info('Traveler removed');
         }
       },
-      onError: (e: any) => toast.error(e.error || 'Failed to remove traveler'),
+      onError: (e: any) => {
+        setRemovePayerWarning(null);
+        toast.error(e.error || 'Failed to remove traveler');
+      },
     });
+  };
+
+  const handleRemoveParticipant = (userId: number, name: string) => {
+    // Check if this participant is the payer of any expenses; if so show confirmation
+    const isPayer = (participants ?? []).some(p => p.id === userId);
+    // We always show the warning dialog — the real count comes from the API response,
+    // but we need an optimistic pre-check. Just open a confirm dialog for safety.
+    setRemovePayerWarning({ userId, name, expensesAsPayer: -1 }); // -1 = unknown until confirmed
   };
 
   const handleDeleteTrip = () => {
@@ -350,7 +370,7 @@ export function TripSettings({ trip }: { trip: any }) {
                     <p className="text-xs text-muted-foreground">{user.email ?? `@${user.username}`}</p>
                   </div>
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => handleRemoveParticipant(user.id)} className="h-8 w-8 text-destructive hover:text-destructive">
+                <Button variant="ghost" size="icon" onClick={() => handleRemoveParticipant(user.id, user.name)} className="h-8 w-8 text-destructive hover:text-destructive">
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
@@ -376,6 +396,43 @@ export function TripSettings({ trip }: { trip: any }) {
           </Button>
         </div>
       </div>
+
+      {/* Remove participant confirmation dialog */}
+      <Dialog open={!!removePayerWarning} onOpenChange={open => { if (!open) setRemovePayerWarning(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <TriangleAlert className="h-5 w-5 text-amber-500" />
+              Remove {removePayerWarning?.name}?
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-3 pt-1">
+                <p>
+                  This traveler will be removed from the trip and their unpaid splits will be
+                  recalculated among the remaining travelers.
+                </p>
+                <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+                  <strong>Heads up:</strong> If {removePayerWarning?.name} paid for any group expenses,
+                  their balance will be preserved and shown as a <em>departed traveler</em> on the
+                  balance screen so everyone knows they're still owed money.
+                </div>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setRemovePayerWarning(null)} disabled={removeParticipant.isPending}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => removePayerWarning && doRemoveParticipant(removePayerWarning.userId)}
+              disabled={removeParticipant.isPending}
+            >
+              {removeParticipant.isPending ? 'Removing…' : 'Yes, remove traveler'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>

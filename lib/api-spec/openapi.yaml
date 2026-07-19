@@ -439,7 +439,17 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SuccessResponse"
+                type: object
+                required: [success, splitsRecalculated, expensesAsPayer]
+                properties:
+                  success:
+                    type: boolean
+                  splitsRecalculated:
+                    type: integer
+                    description: Number of expenses whose unpaid splits were recalculated
+                  expensesAsPayer:
+                    type: integer
+                    description: Number of expenses this traveler paid for (they remain as departed payer in the balance)
 
   /trips/{tripId}/flights:
     get:
@@ -2418,6 +2428,9 @@ components:
           type: number
         net:
           type: number
+        departed:
+          type: boolean
+          description: True when this person has left the trip but was the payer of one or more expenses
 
     ExpenseSettlement:
       type: object

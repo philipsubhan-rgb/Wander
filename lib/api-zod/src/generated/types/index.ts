@@ -52,6 +52,7 @@ export * from './packingItem';
 export * from './packingItemInput';
 export * from './packingItemUpdate';
 export * from './participantInput';
+export * from './removeTripParticipant200';
 export * from './reservation';
 export * from './reservationInput';
 export * from './reservationInputType';

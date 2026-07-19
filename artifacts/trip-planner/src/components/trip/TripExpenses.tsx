@@ -7,7 +7,7 @@ import { format, parseISO } from 'date-fns';
 import {
   Receipt, Plus, Trash2, Pencil, Utensils, Car, Plane,
   Hotel, Compass, DollarSign, TrendingUp, TrendingDown, Minus, Check,
-  ArrowRight, Users,
+  ArrowRight, Users, UserMinus,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -44,6 +44,7 @@ interface TripExpense {
 
 interface BalanceEntry {
   userId: number; name: string; totalPaid: number; totalOwed: number; net: number;
+  departed?: boolean;
 }
 
 interface Settlement {
@@ -442,11 +443,20 @@ function BalancePanel({ tripId, refreshKey }: { tripId: number; refreshKey: numb
           <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-3">Net Balances</h3>
           <div className="bg-card border rounded-xl overflow-hidden divide-y">
             {balances.map(b => (
-              <div key={b.userId} className="flex items-center justify-between px-4 py-3">
+              <div key={b.userId} className={`flex items-center justify-between px-4 py-3 ${b.departed ? 'bg-amber-50 dark:bg-amber-950/20' : ''}`}>
                 <div>
-                  <p className="font-medium text-sm">{b.name}</p>
+                  <p className="font-medium text-sm flex items-center gap-1.5">
+                    {b.name}
+                    {b.departed && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 rounded-full px-1.5 py-0.5">
+                        <UserMinus className="h-2.5 w-2.5" />
+                        Departed
+                      </span>
+                    )}
+                  </p>
                   <p className="text-xs text-muted-foreground">
                     Paid {currency} {b.totalPaid.toFixed(2)} · Owes {currency} {b.totalOwed.toFixed(2)}
+                    {b.departed && ' · No longer on this trip'}
                   </p>
                 </div>
                 <div className={`flex items-center gap-1.5 font-semibold tabular-nums ${

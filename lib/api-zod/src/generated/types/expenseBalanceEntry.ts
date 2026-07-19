@@ -12,4 +12,6 @@ export interface ExpenseBalanceEntry {
   totalPaid: number;
   totalOwed: number;
   net: number;
+  /** True when this person has left the trip but was the payer of one or more expenses */
+  departed?: boolean;
 }

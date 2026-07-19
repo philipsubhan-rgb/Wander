@@ -285,10 +285,10 @@ router.get("/trips/:tripId/expenses/balance", requireTripParticipant(), async (r
     return;
   }
 
-  // Initialise balance entries keyed by userId
+  // Initialise balance entries keyed by userId (current participants only)
   const balances: Record<
     number,
-    { userId: number; name: string; totalPaid: number; totalOwed: number; net: number }
+    { userId: number; name: string; totalPaid: number; totalOwed: number; net: number; departed?: boolean }
   > = {};
   for (const p of participants) {
     balances[p.userId] = { userId: p.userId, name: p.name, totalPaid: 0, totalOwed: 0, net: 0 };
@@ -299,6 +299,26 @@ router.get("/trips/:tripId/expenses/balance", requireTripParticipant(), async (r
     .select()
     .from(tripExpensesTable)
     .where(eq(tripExpensesTable.tripId, tripId));
+
+  // Discover any payers who are no longer participants
+  const currentParticipantIds = new Set(participants.map(p => p.userId));
+  const departedPayerIds = new Set<number>();
+  for (const e of expenses) {
+    if (!currentParticipantIds.has(e.paidByUserId)) {
+      departedPayerIds.add(e.paidByUserId);
+    }
+  }
+
+  // Fetch departed payer names and add them to balances with `departed: true`
+  if (departedPayerIds.size > 0) {
+    const departedUsers = await db
+      .select({ id: usersTable.id, name: usersTable.name })
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ANY(ARRAY[${sql.join([...departedPayerIds].map(id => sql`${id}`), sql`, `)}]::int[])`);
+    for (const u of departedUsers) {
+      balances[u.id] = { userId: u.id, name: u.name, totalPaid: 0, totalOwed: 0, net: 0, departed: true };
+    }
+  }
 
   // Total amount paid out by each person (face value, regardless of reimbursement state)
   for (const e of expenses) {
@@ -333,9 +353,12 @@ router.get("/trips/:tripId/expenses/balance", requireTripParticipant(), async (r
    *
    * The payer's own split is always isPaid=true so it never affects either side.
    * This formulation guarantees sum(nets) = 0 at all times.
+   *
+   * Departed payers are included as full balance entries so their fronted money
+   * is never silently dropped from the summary.
    */
   const owedToUser = new Map<number, number>(); // userId → Σ unpaid splits owed TO this user
-  for (const p of participants) owedToUser.set(p.userId, 0);
+  for (const id of Object.keys(balances)) owedToUser.set(Number(id), 0);
 
   for (const split of allSplits) {
     const payerOfExpense = expensePayer.get(split.expenseId);
@@ -348,8 +371,8 @@ router.get("/trips/:tripId/expenses/balance", requireTripParticipant(), async (r
         if (balances[split.userId]) {
           balances[split.userId].totalOwed += parseFloat(split.shareAmount);
         }
-        // The expense payer is owed this amount
-        if (balances[payerOfExpense]) {
+        // The expense payer is owed this amount (includes departed payers)
+        if (balances[payerOfExpense] !== undefined) {
           owedToUser.set(payerOfExpense, (owedToUser.get(payerOfExpense) ?? 0) + parseFloat(split.shareAmount));
         }
       }
@@ -366,10 +389,16 @@ router.get("/trips/:tripId/expenses/balance", requireTripParticipant(), async (r
     totalSpent += b.totalPaid;
   }
 
+  // Current participants first, then departed payers sorted by name
+  const sortedBalances = Object.values(balances).sort((a, b) => {
+    if (!!a.departed !== !!b.departed) return a.departed ? 1 : -1;
+    return a.name.localeCompare(b.name);
+  });
+
   res.json({
-    balances:    Object.values(balances),
+    balances:    sortedBalances,
     settlements: minimizeDebts(
-      Object.fromEntries(Object.values(balances).map(b => [b.userId, { name: b.name, net: b.net }]))
+      Object.fromEntries(sortedBalances.map(b => [b.userId, { name: b.name, net: b.net }]))
     ),
     totalSpent:  Math.round(totalSpent * 100) / 100,
     currency:    expenses[0]?.currency ?? "USD",
