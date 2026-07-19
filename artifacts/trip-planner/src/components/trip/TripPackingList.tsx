@@ -205,7 +205,7 @@ function PackingSection({
                     {item.name}
                   </span>
                   {item.required && (
-                    <ShieldAlert className="h-3.5 w-3.5 text-primary ml-2" title="Required" />
+                    <ShieldAlert className="h-3.5 w-3.5 text-primary ml-2" aria-label="Required" />
                   )}
                 </label>
                 {canDelete && (

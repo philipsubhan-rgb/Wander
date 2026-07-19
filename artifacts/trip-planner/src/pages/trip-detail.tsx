@@ -1,5 +1,8 @@
 import { useParams, Link } from 'wouter';
-import { useGetTrip, useUpdateTrip, getGetTripQueryKey, getGetTripSummaryQueryKey } from '@workspace/api-client-react';
+import {
+  useGetTrip, useUpdateTrip, useListTripParticipants,
+  getGetTripQueryKey, getGetTripSummaryQueryKey,
+} from '@workspace/api-client-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +23,7 @@ import { TripItinerary } from '@/components/trip/TripItinerary';
 import { TripPackingList } from '@/components/trip/TripPackingList';
 import { TripNotes, TripDocuments } from '@/components/trip/TripPrivate';
 import { TripSettings } from '@/components/trip/TripSettings';
+import { TripExpenses } from '@/components/trip/TripExpenses';
 
 function getGradientForDestination(destination: string) {
   const hash = destination.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -103,7 +107,10 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
   const { id } = useParams();
   const tripId = Number(id);
   const { data: trip, isLoading } = useGetTrip(tripId, { query: { enabled: !!tripId } });
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
+  const currentUserId = (user as any)?.id as number | undefined;
+  const { data: participantsData } = useListTripParticipants(tripId, { query: { enabled: !!tripId } });
+  const participants = (participantsData ?? []).map((p: any) => ({ id: p.id, name: p.name }));
   const [editingDates, setEditingDates] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
 
@@ -186,6 +193,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
               <TabsTrigger value="flights" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Flights</TabsTrigger>
               <TabsTrigger value="accommodations" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Stays</TabsTrigger>
               <TabsTrigger value="activities" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Activities</TabsTrigger>
+              <TabsTrigger value="expenses" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Expenses</TabsTrigger>
               <TabsTrigger value="car-rentals" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Car Rentals</TabsTrigger>
               <TabsTrigger value="reservations" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Reservations</TabsTrigger>
               <TabsTrigger value="packing" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Packing List</TabsTrigger>
@@ -203,6 +211,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
             <TabsContent value="flights" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripFlights tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} /></TabsContent>
             <TabsContent value="accommodations" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripAccommodations tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} /></TabsContent>
             <TabsContent value="activities" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripActivities tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} tripDestination={trip.destination} /></TabsContent>
+            <TabsContent value="expenses" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripExpenses tripId={tripId} participants={participants} currentUserId={currentUserId} /></TabsContent>
             <TabsContent value="car-rentals" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripCarRentals tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} tripDestination={trip.destination} /></TabsContent>
             <TabsContent value="reservations" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripReservations tripId={tripId} editMode={editMode} tripDestination={trip.destination} /></TabsContent>
             <TabsContent value="packing" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripPackingList tripId={tripId} /></TabsContent>

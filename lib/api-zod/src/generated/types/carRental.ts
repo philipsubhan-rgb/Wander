@@ -5,28 +5,30 @@
  * Trip Planner API
  * OpenAPI spec version: 0.1.0
  */
-import type { ActivityType } from './activityType';
+import type { CarRentalCarType } from './carRentalCarType';
 
-export interface Activity {
+export interface CarRental {
   id: number;
   tripId: number;
-  title: string;
+  company: string;
+  pickupLocation: string;
   /** @nullable */
-  description?: string | null;
-  date: string;
+  dropoffLocation?: string | null;
+  pickupDatetime: string;
+  dropoffDatetime: string;
+  carType: CarRentalCarType;
   /** @nullable */
-  time?: string | null;
+  confirmationCode?: string | null;
   /** @nullable */
-  location?: string | null;
+  driverName?: string | null;
   /** @nullable */
-  locationUrl?: string | null;
+  phone?: string | null;
   /** @nullable */
   lat?: number | null;
   /** @nullable */
   lon?: number | null;
   /** @nullable */
   imageUrl?: string | null;
-  type?: ActivityType;
   /** @nullable */
   notes?: string | null;
 }

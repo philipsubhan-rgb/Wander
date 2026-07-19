@@ -98,12 +98,12 @@ router.post("/trips/:tripId/packing", requireAuth, async (req, res): Promise<voi
 });
 
 /**
- * PATCH /trips/:tripId/packing/:itemId
+ * PATCH /trips/:tripId/packing/:packingItemId
  * Template items: any authenticated user can update their own checked state
  *   (name/category/required updates are admin-only for template items)
  * Personal items: owner only for all updates
  */
-router.patch("/trips/:tripId/packing/:itemId", requireAuth, async (req, res): Promise<void> => {
+router.patch("/trips/:tripId/packing/:packingItemId", requireAuth, async (req, res): Promise<void> => {
   const params = UpdatePackingItemParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const parsed = UpdatePackingItemBody.safeParse(req.body);
@@ -115,7 +115,7 @@ router.patch("/trips/:tripId/packing/:itemId", requireAuth, async (req, res): Pr
   const [existing] = await db
     .select()
     .from(packingItemsTable)
-    .where(and(eq(packingItemsTable.id, params.data.itemId), eq(packingItemsTable.tripId, params.data.tripId)));
+    .where(and(eq(packingItemsTable.id, params.data.packingItemId), eq(packingItemsTable.tripId, params.data.tripId)));
 
   if (!existing) { res.status(404).json({ error: "Packing item not found" }); return; }
 
@@ -133,13 +133,13 @@ router.patch("/trips/:tripId/packing/:itemId", requireAuth, async (req, res): Pr
     // Update metadata on the item itself (admin only)
     if (hasMeta) {
       await db.update(packingItemsTable).set(metaFields)
-        .where(eq(packingItemsTable.id, params.data.itemId));
+        .where(eq(packingItemsTable.id, params.data.packingItemId));
     }
 
     // Upsert the user's checked state
     if (checked !== undefined) {
       await db.insert(packingItemChecksTable)
-        .values({ itemId: params.data.itemId, userId: myUserId, checked })
+        .values({ itemId: params.data.packingItemId, userId: myUserId, checked })
         .onConflictDoUpdate({
           target: [packingItemChecksTable.itemId, packingItemChecksTable.userId],
           set: { checked },
@@ -148,7 +148,7 @@ router.patch("/trips/:tripId/packing/:itemId", requireAuth, async (req, res): Pr
 
     // Return item with the user's checked state
     const [check] = await db.select().from(packingItemChecksTable)
-      .where(and(eq(packingItemChecksTable.itemId, params.data.itemId), eq(packingItemChecksTable.userId, myUserId)));
+      .where(and(eq(packingItemChecksTable.itemId, params.data.packingItemId), eq(packingItemChecksTable.userId, myUserId)));
 
     const updated = { ...existing, ...metaFields };
     res.json(serializeItem({ ...updated, checked: check?.checked ?? false }, true));
@@ -161,7 +161,7 @@ router.patch("/trips/:tripId/packing/:itemId", requireAuth, async (req, res): Pr
   }
 
   const [updated] = await db.update(packingItemsTable).set(parsed.data)
-    .where(and(eq(packingItemsTable.id, params.data.itemId), eq(packingItemsTable.userId, myUserId)))
+    .where(and(eq(packingItemsTable.id, params.data.packingItemId), eq(packingItemsTable.userId, myUserId)))
     .returning();
 
   if (!updated) { res.status(404).json({ error: "Packing item not found" }); return; }
@@ -169,11 +169,11 @@ router.patch("/trips/:tripId/packing/:itemId", requireAuth, async (req, res): Pr
 });
 
 /**
- * DELETE /trips/:tripId/packing/:itemId
+ * DELETE /trips/:tripId/packing/:packingItemId
  * Template items: admin only
  * Personal items: owner only
  */
-router.delete("/trips/:tripId/packing/:itemId", requireAuth, async (req, res): Promise<void> => {
+router.delete("/trips/:tripId/packing/:packingItemId", requireAuth, async (req, res): Promise<void> => {
   const params = DeletePackingItemParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
 
@@ -183,7 +183,7 @@ router.delete("/trips/:tripId/packing/:itemId", requireAuth, async (req, res): P
   const [existing] = await db
     .select()
     .from(packingItemsTable)
-    .where(and(eq(packingItemsTable.id, params.data.itemId), eq(packingItemsTable.tripId, params.data.tripId)));
+    .where(and(eq(packingItemsTable.id, params.data.packingItemId), eq(packingItemsTable.tripId, params.data.tripId)));
 
   if (!existing) { res.status(404).json({ error: "Packing item not found" }); return; }
 
@@ -197,7 +197,7 @@ router.delete("/trips/:tripId/packing/:itemId", requireAuth, async (req, res): P
     res.status(403).json({ error: "Not your item" }); return;
   }
 
-  await db.delete(packingItemsTable).where(eq(packingItemsTable.id, params.data.itemId));
+  await db.delete(packingItemsTable).where(eq(packingItemsTable.id, params.data.packingItemId));
   res.json({ success: true });
 });
 

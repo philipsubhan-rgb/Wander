@@ -1,0 +1,1 @@
+- [Orval codegen + missing paths](orval-codegen-paths.md) — running codegen with `clean:true` wipes all generated files; every route's OpenAPI paths must be in the spec or their hooks vanish.

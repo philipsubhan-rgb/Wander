@@ -70,7 +70,7 @@ router.post("/trips/:tripId/notes", requireAuth, async (req, res): Promise<void>
   res.status(201).json(serializeNote({ ...item, isMine: true }));
 });
 
-router.patch("/trips/:tripId/notes/:noteId", requireAuth, async (req, res): Promise<void> => {
+router.patch("/trips/:tripId/notes/:tripNoteId", requireAuth, async (req, res): Promise<void> => {
   const params = UpdateTripNoteParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const parsed = UpdateTripNoteBody.safeParse(req.body);
@@ -78,7 +78,7 @@ router.patch("/trips/:tripId/notes/:noteId", requireAuth, async (req, res): Prom
   const [item] = await db.update(tripNotesTable)
     .set({ ...parsed.data, updatedAt: new Date() })
     .where(and(
-      eq(tripNotesTable.id, params.data.noteId),
+      eq(tripNotesTable.id, params.data.tripNoteId),
       eq(tripNotesTable.tripId, params.data.tripId),
       eq(tripNotesTable.userId, req.session!.userId!)   // can only edit own notes
     )).returning();
@@ -86,11 +86,11 @@ router.patch("/trips/:tripId/notes/:noteId", requireAuth, async (req, res): Prom
   res.json(serializeNote({ ...item, isMine: true }));
 });
 
-router.delete("/trips/:tripId/notes/:noteId", requireAuth, async (req, res): Promise<void> => {
+router.delete("/trips/:tripId/notes/:tripNoteId", requireAuth, async (req, res): Promise<void> => {
   const params = DeleteTripNoteParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const [item] = await db.delete(tripNotesTable).where(and(
-    eq(tripNotesTable.id, params.data.noteId),
+    eq(tripNotesTable.id, params.data.tripNoteId),
     eq(tripNotesTable.tripId, params.data.tripId),
     eq(tripNotesTable.userId, req.session!.userId!)
   )).returning();
@@ -126,13 +126,13 @@ router.post("/trips/:tripId/documents", requireAuth, async (req, res): Promise<v
   res.status(201).json(serializeDoc({ ...item, isMine: true }));
 });
 
-router.patch("/trips/:tripId/documents/:documentId", requireAuth, async (req, res): Promise<void> => {
+router.patch("/trips/:tripId/documents/:travelDocumentId", requireAuth, async (req, res): Promise<void> => {
   const params = UpdateTravelDocumentParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const parsed = UpdateTravelDocumentBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [item] = await db.update(travelDocumentsTable).set(parsed.data).where(and(
-    eq(travelDocumentsTable.id, params.data.documentId),
+    eq(travelDocumentsTable.id, params.data.travelDocumentId),
     eq(travelDocumentsTable.tripId, params.data.tripId),
     eq(travelDocumentsTable.userId, req.session!.userId!)
   )).returning();
@@ -140,11 +140,11 @@ router.patch("/trips/:tripId/documents/:documentId", requireAuth, async (req, re
   res.json(serializeDoc({ ...item, isMine: true }));
 });
 
-router.delete("/trips/:tripId/documents/:documentId", requireAuth, async (req, res): Promise<void> => {
+router.delete("/trips/:tripId/documents/:travelDocumentId", requireAuth, async (req, res): Promise<void> => {
   const params = DeleteTravelDocumentParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const [item] = await db.delete(travelDocumentsTable).where(and(
-    eq(travelDocumentsTable.id, params.data.documentId),
+    eq(travelDocumentsTable.id, params.data.travelDocumentId),
     eq(travelDocumentsTable.tripId, params.data.tripId),
     eq(travelDocumentsTable.userId, req.session!.userId!)
   )).returning();

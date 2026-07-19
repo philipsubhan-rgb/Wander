@@ -37,7 +37,8 @@ export function requireTripParticipant(tripIdParam = "tripId") {
     }
     if (req.session.role === "admin") { next(); return; }
 
-    const tripId = parseInt(req.params[tripIdParam]);
+    const rawParam = req.params[tripIdParam];
+    const tripId = parseInt(Array.isArray(rawParam) ? rawParam[0] : rawParam);
     if (isNaN(tripId)) { res.status(400).json({ error: "Invalid tripId" }); return; }
 
     try {
@@ -77,7 +78,8 @@ export function requireTripAdmin(tripIdParam = "tripId") {
       return;
     }
 
-    const tripId = parseInt(req.params[tripIdParam]);
+    const rawParam2 = req.params[tripIdParam];
+    const tripId = parseInt(Array.isArray(rawParam2) ? rawParam2[0] : rawParam2);
     if (isNaN(tripId)) {
       res.status(400).json({ error: "Invalid tripId" });
       return;

@@ -30,6 +30,12 @@ tags:
     description: Private traveler notes
   - name: documents
     description: Private travel documents
+  - name: car-rentals
+    description: Trip car rentals
+  - name: reservations
+    description: Trip reservations
+  - name: expenses
+    description: Shared trip expenses
 
 paths:
   /healthz:
@@ -820,7 +826,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PackingItem"
 
-  /trips/{tripId}/packing/{itemId}:
+  /trips/{tripId}/packing/{packingItemId}:
     patch:
       operationId: updatePackingItem
       tags: [packing]
@@ -830,7 +836,7 @@ paths:
           required: true
           schema:
             type: integer
-        - name: itemId
+        - name: packingItemId
           in: path
           required: true
           schema:
@@ -857,7 +863,7 @@ paths:
           required: true
           schema:
             type: integer
-        - name: itemId
+        - name: packingItemId
           in: path
           required: true
           schema:
@@ -913,7 +919,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/TripNote"
 
-  /trips/{tripId}/notes/{noteId}:
+  /trips/{tripId}/notes/{tripNoteId}:
     patch:
       operationId: updateTripNote
       tags: [notes]
@@ -923,7 +929,7 @@ paths:
           required: true
           schema:
             type: integer
-        - name: noteId
+        - name: tripNoteId
           in: path
           required: true
           schema:
@@ -950,7 +956,7 @@ paths:
           required: true
           schema:
             type: integer
-        - name: noteId
+        - name: tripNoteId
           in: path
           required: true
           schema:
@@ -1006,7 +1012,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/TravelDocument"
 
-  /trips/{tripId}/documents/{documentId}:
+  /trips/{tripId}/documents/{travelDocumentId}:
     patch:
       operationId: updateTravelDocument
       tags: [documents]
@@ -1016,7 +1022,7 @@ paths:
           required: true
           schema:
             type: integer
-        - name: documentId
+        - name: travelDocumentId
           in: path
           required: true
           schema:
@@ -1043,7 +1049,7 @@ paths:
           required: true
           schema:
             type: integer
-        - name: documentId
+        - name: travelDocumentId
           in: path
           required: true
           schema:
@@ -1055,6 +1061,334 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SuccessResponse"
+
+  /trips/{tripId}/car-rentals:
+    get:
+      operationId: listCarRentals
+      tags: [car-rentals]
+      summary: List car rentals for a trip
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of car rentals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CarRental"
+    post:
+      operationId: createCarRental
+      tags: [car-rentals]
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CarRentalInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CarRental"
+
+  /trips/{tripId}/car-rentals/{carRentalId}:
+    patch:
+      operationId: updateCarRental
+      tags: [car-rentals]
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: carRentalId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CarRentalUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CarRental"
+    delete:
+      operationId: deleteCarRental
+      tags: [car-rentals]
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: carRentalId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /trips/{tripId}/reservations:
+    get:
+      operationId: listReservations
+      tags: [reservations]
+      summary: List reservations for a trip
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of reservations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Reservation"
+    post:
+      operationId: createReservation
+      tags: [reservations]
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReservationInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reservation"
+
+  /trips/{tripId}/reservations/{reservationId}:
+    patch:
+      operationId: updateReservation
+      tags: [reservations]
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: reservationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReservationUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reservation"
+    delete:
+      operationId: deleteReservation
+      tags: [reservations]
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: reservationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /trips/{tripId}/expenses:
+    get:
+      operationId: listExpenses
+      tags: [expenses]
+      summary: List all expenses for a trip
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of expenses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TripExpense"
+    post:
+      operationId: createExpense
+      tags: [expenses]
+      summary: Add an expense and split equally among all participants
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExpenseInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TripExpense"
+
+  /trips/{tripId}/expenses/balance:
+    get:
+      operationId: getExpenseBalance
+      tags: [expenses]
+      summary: Get balance summary and settlement list
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Balance summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpenseBalanceSummary"
+
+  /trips/{tripId}/expenses/{expenseId}:
+    patch:
+      operationId: updateExpense
+      tags: [expenses]
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: expenseId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExpenseUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TripExpense"
+    delete:
+      operationId: deleteExpense
+      tags: [expenses]
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: expenseId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /trips/{tripId}/expenses/{expenseId}/splits/{userId}/reimburse:
+    post:
+      operationId: reimburseExpenseSplit
+      tags: [expenses]
+      summary: Mark a participant's share as reimbursed
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: expenseId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Split marked as paid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpenseSplit"
 
 components:
   schemas:
@@ -1453,6 +1787,8 @@ components:
           type: ["string", "null"]
         location:
           type: ["string", "null"]
+        locationUrl:
+          type: ["string", "null"]
         lat:
           type: ["number", "null"]
         lon:
@@ -1479,6 +1815,8 @@ components:
           type: string
         location:
           type: string
+        locationUrl:
+          type: string
         lat:
           type: number
         lon:
@@ -1503,6 +1841,8 @@ components:
         time:
           type: string
         location:
+          type: string
+        locationUrl:
           type: string
         lat:
           type: number
@@ -1720,3 +2060,350 @@ components:
           type: string
         isShared:
           type: boolean
+
+    CarRental:
+      type: object
+      required: [id, tripId, company, pickupLocation, pickupDatetime, dropoffDatetime, carType]
+      properties:
+        id:
+          type: integer
+        tripId:
+          type: integer
+        company:
+          type: string
+        pickupLocation:
+          type: string
+        dropoffLocation:
+          type: ["string", "null"]
+        pickupDatetime:
+          type: string
+        dropoffDatetime:
+          type: string
+        carType:
+          type: string
+          enum: [economy, compact, midsize, fullsize, suv, luxury, van, convertible, other]
+        confirmationCode:
+          type: ["string", "null"]
+        driverName:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        lat:
+          type: ["number", "null"]
+        lon:
+          type: ["number", "null"]
+        imageUrl:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+
+    CarRentalInput:
+      type: object
+      required: [company, pickupLocation, pickupDatetime, dropoffDatetime]
+      properties:
+        company:
+          type: string
+        pickupLocation:
+          type: string
+        dropoffLocation:
+          type: string
+        pickupDatetime:
+          type: string
+        dropoffDatetime:
+          type: string
+        carType:
+          type: string
+          enum: [economy, compact, midsize, fullsize, suv, luxury, van, convertible, other]
+        confirmationCode:
+          type: string
+        driverName:
+          type: string
+        phone:
+          type: string
+        lat:
+          type: number
+        lon:
+          type: number
+        imageUrl:
+          type: string
+        notes:
+          type: string
+
+    CarRentalUpdate:
+      type: object
+      properties:
+        company:
+          type: string
+        pickupLocation:
+          type: string
+        dropoffLocation:
+          type: string
+        pickupDatetime:
+          type: string
+        dropoffDatetime:
+          type: string
+        carType:
+          type: string
+          enum: [economy, compact, midsize, fullsize, suv, luxury, van, convertible, other]
+        confirmationCode:
+          type: string
+        driverName:
+          type: string
+        phone:
+          type: string
+        lat:
+          type: number
+        lon:
+          type: number
+        imageUrl:
+          type: string
+        notes:
+          type: string
+
+    Reservation:
+      type: object
+      required: [id, tripId, type, title, date]
+      properties:
+        id:
+          type: integer
+        tripId:
+          type: integer
+        type:
+          type: string
+          enum: [restaurant, attraction, tour, transport, event, spa, other]
+        title:
+          type: string
+        venue:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        date:
+          type: string
+        time:
+          type: ["string", "null"]
+        endTime:
+          type: ["string", "null"]
+        confirmationCode:
+          type: ["string", "null"]
+        numberOfPeople:
+          type: ["integer", "null"]
+        phone:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        url:
+          type: ["string", "null"]
+        imageUrl:
+          type: ["string", "null"]
+        lat:
+          type: ["number", "null"]
+        lon:
+          type: ["number", "null"]
+
+    ReservationInput:
+      type: object
+      required: [type, title, date]
+      properties:
+        type:
+          type: string
+          enum: [restaurant, attraction, tour, transport, event, spa, other]
+        title:
+          type: string
+        venue:
+          type: string
+        address:
+          type: string
+        date:
+          type: string
+        time:
+          type: string
+        endTime:
+          type: string
+        confirmationCode:
+          type: string
+        numberOfPeople:
+          type: integer
+        phone:
+          type: string
+        notes:
+          type: string
+        url:
+          type: string
+        imageUrl:
+          type: string
+        lat:
+          type: number
+        lon:
+          type: number
+
+    ReservationUpdate:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [restaurant, attraction, tour, transport, event, spa, other]
+        title:
+          type: string
+        venue:
+          type: string
+        address:
+          type: string
+        date:
+          type: string
+        time:
+          type: string
+        endTime:
+          type: string
+        confirmationCode:
+          type: string
+        numberOfPeople:
+          type: integer
+        phone:
+          type: string
+        notes:
+          type: string
+        url:
+          type: string
+        imageUrl:
+          type: string
+        lat:
+          type: number
+        lon:
+          type: number
+
+    ExpenseSplit:
+      type: object
+      required: [id, expenseId, userId, shareAmount, isPaid]
+      properties:
+        id:
+          type: integer
+        expenseId:
+          type: integer
+        userId:
+          type: integer
+        userName:
+          type: string
+        shareAmount:
+          type: string
+        isPaid:
+          type: boolean
+        paidAt:
+          type: ["string", "null"]
+
+    TripExpense:
+      type: object
+      required: [id, tripId, paidByUserId, amount, currency, description, category, date, createdAt, splits]
+      properties:
+        id:
+          type: integer
+        tripId:
+          type: integer
+        paidByUserId:
+          type: integer
+        payerName:
+          type: string
+        amount:
+          type: string
+        currency:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+          enum: [travel, activity, restaurant, car_rental, accommodation, other]
+        date:
+          type: string
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        splits:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExpenseSplit"
+
+    ExpenseInput:
+      type: object
+      required: [paidByUserId, amount, description, date]
+      properties:
+        paidByUserId:
+          type: integer
+        amount:
+          type: string
+        currency:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+          enum: [travel, activity, restaurant, car_rental, accommodation, other]
+        date:
+          type: string
+        notes:
+          type: string
+
+    ExpenseUpdate:
+      type: object
+      properties:
+        paidByUserId:
+          type: integer
+        amount:
+          type: string
+        currency:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+          enum: [travel, activity, restaurant, car_rental, accommodation, other]
+        date:
+          type: string
+        notes:
+          type: string
+
+    ExpenseBalanceEntry:
+      type: object
+      required: [userId, name, totalPaid, totalOwed, net]
+      properties:
+        userId:
+          type: integer
+        name:
+          type: string
+        totalPaid:
+          type: number
+        totalOwed:
+          type: number
+        net:
+          type: number
+
+    ExpenseSettlement:
+      type: object
+      required: [fromUserId, fromName, toUserId, toName, amount]
+      properties:
+        fromUserId:
+          type: integer
+        fromName:
+          type: string
+        toUserId:
+          type: integer
+        toName:
+          type: string
+        amount:
+          type: number
+
+    ExpenseBalanceSummary:
+      type: object
+      required: [balances, settlements, totalSpent, currency]
+      properties:
+        balances:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExpenseBalanceEntry"
+        settlements:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExpenseSettlement"
+        totalSpent:
+          type: number
+        currency:
+          type: string

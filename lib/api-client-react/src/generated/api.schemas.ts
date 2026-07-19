@@ -275,7 +275,15 @@ export interface Accommodation {
   checkOut: string;
   type?: AccommodationType;
   /** @nullable */
+  lat?: number | null;
+  /** @nullable */
+  lon?: number | null;
+  /** @nullable */
+  imageUrl?: string | null;
+  /** @nullable */
   confirmationCode?: string | null;
+  /** @nullable */
+  phone?: string | null;
   /** @nullable */
   notes?: string | null;
 }
@@ -297,7 +305,11 @@ export interface AccommodationInput {
   checkIn: string;
   checkOut: string;
   type?: AccommodationInputType;
+  lat?: number;
+  lon?: number;
+  imageUrl?: string;
   confirmationCode?: string;
+  phone?: string;
   notes?: string;
 }
 
@@ -318,79 +330,11 @@ export interface AccommodationUpdate {
   checkIn?: string;
   checkOut?: string;
   type?: AccommodationUpdateType;
-  confirmationCode?: string;
-  notes?: string;
-}
-
-export type CarType = typeof CarType[keyof typeof CarType];
-
-export const CarType = {
-  economy: 'economy',
-  compact: 'compact',
-  midsize: 'midsize',
-  fullsize: 'fullsize',
-  suv: 'suv',
-  luxury: 'luxury',
-  van: 'van',
-  convertible: 'convertible',
-  other: 'other',
-} as const;
-
-export interface CarRental {
-  id: number;
-  tripId: number;
-  company: string;
-  pickupLocation: string;
-  /** @nullable */
-  dropoffLocation?: string | null;
-  pickupDatetime: string;
-  dropoffDatetime: string;
-  carType?: CarType;
-  /** @nullable */
-  confirmationCode?: string | null;
-  /** @nullable */
-  driverName?: string | null;
-  /** @nullable */
-  phone?: string | null;
-  /** @nullable */
-  lat?: number | null;
-  /** @nullable */
-  lon?: number | null;
-  /** @nullable */
-  imageUrl?: string | null;
-  /** @nullable */
-  notes?: string | null;
-}
-
-export interface CarRentalInput {
-  company: string;
-  pickupLocation: string;
-  dropoffLocation?: string;
-  pickupDatetime: string;
-  dropoffDatetime: string;
-  carType?: CarType;
-  confirmationCode?: string;
-  driverName?: string;
-  phone?: string;
   lat?: number;
   lon?: number;
   imageUrl?: string;
-  notes?: string;
-}
-
-export interface CarRentalUpdate {
-  company?: string;
-  pickupLocation?: string;
-  dropoffLocation?: string;
-  pickupDatetime?: string;
-  dropoffDatetime?: string;
-  carType?: CarType;
   confirmationCode?: string;
-  driverName?: string;
   phone?: string;
-  lat?: number;
-  lon?: number;
-  imageUrl?: string;
   notes?: string;
 }
 
@@ -418,6 +362,14 @@ export interface Activity {
   time?: string | null;
   /** @nullable */
   location?: string | null;
+  /** @nullable */
+  locationUrl?: string | null;
+  /** @nullable */
+  lat?: number | null;
+  /** @nullable */
+  lon?: number | null;
+  /** @nullable */
+  imageUrl?: string | null;
   type?: ActivityType;
   /** @nullable */
   notes?: string | null;
@@ -442,6 +394,10 @@ export interface ActivityInput {
   date: string;
   time?: string;
   location?: string;
+  locationUrl?: string;
+  lat?: number;
+  lon?: number;
+  imageUrl?: string;
   type?: ActivityInputType;
   notes?: string;
 }
@@ -465,6 +421,10 @@ export interface ActivityUpdate {
   date?: string;
   time?: string;
   location?: string;
+  locationUrl?: string;
+  lat?: number;
+  lon?: number;
+  imageUrl?: string;
   type?: ActivityUpdateType;
   notes?: string;
 }
@@ -628,33 +588,169 @@ export interface TravelDocumentUpdate {
   isShared?: boolean;
 }
 
+export type CarRentalCarType = typeof CarRentalCarType[keyof typeof CarRentalCarType];
 
-// ── Reservations ─────────────────────────────────────────────────────────────
 
-export type ReservationType = 'restaurant' | 'attraction' | 'tour' | 'transport' | 'event' | 'spa' | 'other';
+export const CarRentalCarType = {
+  economy: 'economy',
+  compact: 'compact',
+  midsize: 'midsize',
+  fullsize: 'fullsize',
+  suv: 'suv',
+  luxury: 'luxury',
+  van: 'van',
+  convertible: 'convertible',
+  other: 'other',
+} as const;
+
+export interface CarRental {
+  id: number;
+  tripId: number;
+  company: string;
+  pickupLocation: string;
+  /** @nullable */
+  dropoffLocation?: string | null;
+  pickupDatetime: string;
+  dropoffDatetime: string;
+  carType: CarRentalCarType;
+  /** @nullable */
+  confirmationCode?: string | null;
+  /** @nullable */
+  driverName?: string | null;
+  /** @nullable */
+  phone?: string | null;
+  /** @nullable */
+  lat?: number | null;
+  /** @nullable */
+  lon?: number | null;
+  /** @nullable */
+  imageUrl?: string | null;
+  /** @nullable */
+  notes?: string | null;
+}
+
+export type CarRentalInputCarType = typeof CarRentalInputCarType[keyof typeof CarRentalInputCarType];
+
+
+export const CarRentalInputCarType = {
+  economy: 'economy',
+  compact: 'compact',
+  midsize: 'midsize',
+  fullsize: 'fullsize',
+  suv: 'suv',
+  luxury: 'luxury',
+  van: 'van',
+  convertible: 'convertible',
+  other: 'other',
+} as const;
+
+export interface CarRentalInput {
+  company: string;
+  pickupLocation: string;
+  dropoffLocation?: string;
+  pickupDatetime: string;
+  dropoffDatetime: string;
+  carType?: CarRentalInputCarType;
+  confirmationCode?: string;
+  driverName?: string;
+  phone?: string;
+  lat?: number;
+  lon?: number;
+  imageUrl?: string;
+  notes?: string;
+}
+
+export type CarRentalUpdateCarType = typeof CarRentalUpdateCarType[keyof typeof CarRentalUpdateCarType];
+
+
+export const CarRentalUpdateCarType = {
+  economy: 'economy',
+  compact: 'compact',
+  midsize: 'midsize',
+  fullsize: 'fullsize',
+  suv: 'suv',
+  luxury: 'luxury',
+  van: 'van',
+  convertible: 'convertible',
+  other: 'other',
+} as const;
+
+export interface CarRentalUpdate {
+  company?: string;
+  pickupLocation?: string;
+  dropoffLocation?: string;
+  pickupDatetime?: string;
+  dropoffDatetime?: string;
+  carType?: CarRentalUpdateCarType;
+  confirmationCode?: string;
+  driverName?: string;
+  phone?: string;
+  lat?: number;
+  lon?: number;
+  imageUrl?: string;
+  notes?: string;
+}
+
+export type ReservationType = typeof ReservationType[keyof typeof ReservationType];
+
+
+export const ReservationType = {
+  restaurant: 'restaurant',
+  attraction: 'attraction',
+  tour: 'tour',
+  transport: 'transport',
+  event: 'event',
+  spa: 'spa',
+  other: 'other',
+} as const;
 
 export interface Reservation {
   id: number;
   tripId: number;
   type: ReservationType;
   title: string;
+  /** @nullable */
   venue?: string | null;
+  /** @nullable */
   address?: string | null;
   date: string;
+  /** @nullable */
   time?: string | null;
+  /** @nullable */
   endTime?: string | null;
+  /** @nullable */
   confirmationCode?: string | null;
+  /** @nullable */
   numberOfPeople?: number | null;
+  /** @nullable */
   phone?: string | null;
+  /** @nullable */
   notes?: string | null;
+  /** @nullable */
   url?: string | null;
+  /** @nullable */
   imageUrl?: string | null;
+  /** @nullable */
   lat?: number | null;
+  /** @nullable */
   lon?: number | null;
 }
 
+export type ReservationInputType = typeof ReservationInputType[keyof typeof ReservationInputType];
+
+
+export const ReservationInputType = {
+  restaurant: 'restaurant',
+  attraction: 'attraction',
+  tour: 'tour',
+  transport: 'transport',
+  event: 'event',
+  spa: 'spa',
+  other: 'other',
+} as const;
+
 export interface ReservationInput {
-  type?: ReservationType;
+  type: ReservationInputType;
   title: string;
   venue?: string;
   address?: string;
@@ -671,8 +767,21 @@ export interface ReservationInput {
   lon?: number;
 }
 
+export type ReservationUpdateType = typeof ReservationUpdateType[keyof typeof ReservationUpdateType];
+
+
+export const ReservationUpdateType = {
+  restaurant: 'restaurant',
+  attraction: 'attraction',
+  tour: 'tour',
+  transport: 'transport',
+  event: 'event',
+  spa: 'spa',
+  other: 'other',
+} as const;
+
 export interface ReservationUpdate {
-  type?: ReservationType;
+  type?: ReservationUpdateType;
   title?: string;
   venue?: string;
   address?: string;
@@ -688,3 +797,110 @@ export interface ReservationUpdate {
   lat?: number;
   lon?: number;
 }
+
+export interface ExpenseSplit {
+  id: number;
+  expenseId: number;
+  userId: number;
+  userName?: string;
+  shareAmount: string;
+  isPaid: boolean;
+  /** @nullable */
+  paidAt?: string | null;
+}
+
+export type TripExpenseCategory = typeof TripExpenseCategory[keyof typeof TripExpenseCategory];
+
+
+export const TripExpenseCategory = {
+  travel: 'travel',
+  activity: 'activity',
+  restaurant: 'restaurant',
+  car_rental: 'car_rental',
+  accommodation: 'accommodation',
+  other: 'other',
+} as const;
+
+export interface TripExpense {
+  id: number;
+  tripId: number;
+  paidByUserId: number;
+  payerName?: string;
+  amount: string;
+  currency: string;
+  description: string;
+  category: TripExpenseCategory;
+  date: string;
+  /** @nullable */
+  notes?: string | null;
+  createdAt: string;
+  splits: ExpenseSplit[];
+}
+
+export type ExpenseInputCategory = typeof ExpenseInputCategory[keyof typeof ExpenseInputCategory];
+
+
+export const ExpenseInputCategory = {
+  travel: 'travel',
+  activity: 'activity',
+  restaurant: 'restaurant',
+  car_rental: 'car_rental',
+  accommodation: 'accommodation',
+  other: 'other',
+} as const;
+
+export interface ExpenseInput {
+  paidByUserId: number;
+  amount: string;
+  currency?: string;
+  description: string;
+  category?: ExpenseInputCategory;
+  date: string;
+  notes?: string;
+}
+
+export type ExpenseUpdateCategory = typeof ExpenseUpdateCategory[keyof typeof ExpenseUpdateCategory];
+
+
+export const ExpenseUpdateCategory = {
+  travel: 'travel',
+  activity: 'activity',
+  restaurant: 'restaurant',
+  car_rental: 'car_rental',
+  accommodation: 'accommodation',
+  other: 'other',
+} as const;
+
+export interface ExpenseUpdate {
+  paidByUserId?: number;
+  amount?: string;
+  currency?: string;
+  description?: string;
+  category?: ExpenseUpdateCategory;
+  date?: string;
+  notes?: string;
+}
+
+export interface ExpenseBalanceEntry {
+  userId: number;
+  name: string;
+  totalPaid: number;
+  totalOwed: number;
+  net: number;
+}
+
+export interface ExpenseSettlement {
+  fromUserId: number;
+  fromName: string;
+  toUserId: number;
+  toName: string;
+  amount: number;
+}
+
+export interface ExpenseBalanceSummary {
+  balances: ExpenseBalanceEntry[];
+  settlements: ExpenseSettlement[];
+  totalSpent: number;
+  currency: string;
+}
+

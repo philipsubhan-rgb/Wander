@@ -105,7 +105,7 @@ function SearchGrid({ results, searching, query, setQuery, selected, setSelected
       {results.length > 0 && (
         <div className="grid grid-cols-3 gap-2">
           {results.map(r => (
-            <button key={r.url} type="button" onClick={() => setSelected(prev => prev === r.url ? null : r.url)}
+            <button key={r.url} type="button" onClick={() => setSelected(selected === r.url ? null : r.url)}
               className={`relative aspect-video rounded-lg overflow-hidden border-2 transition-all ${selected === r.url ? 'border-primary ring-2 ring-primary/30 scale-[0.98]' : 'border-transparent hover:border-muted-foreground/40'}`}
               title={r.title}
             >

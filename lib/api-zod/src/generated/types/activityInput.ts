@@ -13,10 +13,10 @@ export interface ActivityInput {
   date: string;
   time?: string;
   location?: string;
+  locationUrl?: string;
   lat?: number;
   lon?: number;
   imageUrl?: string;
-  locationUrl?: string;
   type?: ActivityInputType;
   notes?: string;
 }

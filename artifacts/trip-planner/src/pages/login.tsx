@@ -42,7 +42,7 @@ export default function Login() {
         setLocation('/trips');
       },
       onError: (error) => {
-        toast.error(error.error || "Failed to login. Please check your credentials.");
+        toast.error((error as any)?.error || "Failed to login. Please check your credentials.");
       }
     });
   };
