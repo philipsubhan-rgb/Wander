@@ -423,4 +423,107 @@ router.post(
   },
 );
 
+// ── Pure math helper (exported for testing) ───────────────────────────────────
+
+/**
+ * Given a fixed expense total, the paid splits already settled, and the set
+ * of current trip participant IDs, compute the new unpaid split amounts.
+ *
+ * Invariant guaranteed: sum(paidSplits.shareAmount) + sum(returned shares) === totalAmount
+ * (within cent rounding, with any remainder added to the first unpaid participant).
+ *
+ * Participants who already have a paid split are excluded from the result.
+ * If all participants are already paid, returns [].
+ */
+export function computeUnpaidShares(
+  totalAmount: number,
+  paidSplits: Array<{ userId: number; shareAmount: string }>,
+  currentParticipantIds: number[],
+): Array<{ userId: number; shareAmount: number }> {
+  const paidUserIds = new Set(paidSplits.map(s => s.userId));
+  const unpaidIds = currentParticipantIds.filter(id => !paidUserIds.has(id));
+  if (unpaidIds.length === 0) return [];
+
+  const paidTotal = paidSplits.reduce((sum, s) => sum + Math.round(parseFloat(s.shareAmount) * 100), 0); // in cents
+  const totalCents = Math.round(totalAmount * 100);
+  const remainingCents = totalCents - paidTotal;
+
+  if (remainingCents <= 0) {
+    return unpaidIds.map(id => ({ userId: id, shareAmount: 0 }));
+  }
+
+  const n = unpaidIds.length;
+  const shareCents = Math.floor(remainingCents / n);
+  const leftoverCents = remainingCents - shareCents * n; // goes to first participant
+
+  return unpaidIds.map((id, idx) => ({
+    userId: id,
+    shareAmount: Math.round((shareCents + (idx === 0 ? leftoverCents : 0))) / 100,
+  }));
+}
+
+// ── Exported helper: recalc splits on participant roster change ───────────────
+
+/**
+ * Called after a participant is added to or removed from a trip.
+ *
+ * For every expense in the trip:
+ *   • Paid splits are preserved exactly as-is (never changed).
+ *   • Unpaid splits are deleted and recreated by distributing only the
+ *     remaining (unpaid) portion of the expense among participants who
+ *     don't yet have a paid split.
+ *   • This guarantees sum(all splits) === expense.amount at all times.
+ *
+ * Returns the number of expenses whose unpaid splits were updated.
+ */
+export async function recalcExpenseSplitsForTrip(tripId: number): Promise<number> {
+  const [participants, expenses] = await Promise.all([
+    db
+      .select({ userId: tripParticipantsTable.userId })
+      .from(tripParticipantsTable)
+      .where(eq(tripParticipantsTable.tripId, tripId)),
+    db
+      .select()
+      .from(tripExpensesTable)
+      .where(eq(tripExpensesTable.tripId, tripId)),
+  ]);
+
+  if (expenses.length === 0 || participants.length === 0) return 0;
+
+  const participantIds = participants.map(p => p.userId);
+  let recalcCount = 0;
+
+  for (const expense of expenses) {
+    // Fetch paid splits — these are preserved untouched
+    const paidSplits = await db
+      .select({ userId: expenseSplitsTable.userId, shareAmount: expenseSplitsTable.shareAmount })
+      .from(expenseSplitsTable)
+      .where(and(eq(expenseSplitsTable.expenseId, expense.id), eq(expenseSplitsTable.isPaid, true)));
+
+    // Remove all unpaid splits (handles removed participants and stale amounts)
+    await db
+      .delete(expenseSplitsTable)
+      .where(and(eq(expenseSplitsTable.expenseId, expense.id), eq(expenseSplitsTable.isPaid, false)));
+
+    // Distribute the remaining (not-yet-paid) portion evenly among unpaid participants
+    const newShares = computeUnpaidShares(parseFloat(expense.amount), paidSplits, participantIds);
+
+    if (newShares.length > 0) {
+      await db.insert(expenseSplitsTable).values(
+        newShares.map(({ userId, shareAmount }) => ({
+          expenseId: expense.id,
+          userId,
+          shareAmount: String(shareAmount),
+          isPaid: false,
+          paidAt: null,
+        })),
+      );
+    }
+
+    recalcCount++;
+  }
+
+  return recalcCount;
+}
+
 export default router;

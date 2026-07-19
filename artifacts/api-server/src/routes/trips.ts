@@ -16,6 +16,7 @@ import {
 } from "@workspace/api-zod";
 import { requireAdmin, requireAuth, requireTripAdmin } from "../middlewares/auth";
 import { fetchDestinationImage } from "../lib/destination-image";
+import { recalcExpenseSplitsForTrip } from "./expenses";
 
 const router: IRouter = Router();
 
@@ -385,7 +386,9 @@ router.post("/trips/:tripId/participants", requireTripAdmin(), async (req, res):
     .values({ tripId: params.data.tripId, userId: parsed.data.userId, isTripAdmin: false })
     .onConflictDoNothing();
 
-  res.json({ success: true });
+  const splitsRecalculated = await recalcExpenseSplitsForTrip(params.data.tripId);
+
+  res.json({ success: true, splitsRecalculated });
 });
 
 // Trip admins can remove travelers from their trip
@@ -403,7 +406,9 @@ router.delete("/trips/:tripId/participants/:userId", requireTripAdmin(), async (
       eq(tripParticipantsTable.userId, params.data.userId)
     ));
 
-  res.json({ success: true });
+  const splitsRecalculated = await recalcExpenseSplitsForTrip(params.data.tripId);
+
+  res.json({ success: true, splitsRecalculated });
 });
 
 export default router;

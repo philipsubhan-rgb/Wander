@@ -1,5 +1,6 @@
 import { 
-  useUpdateTrip, useDeleteTrip, useListTripParticipants, useAddTripParticipant, useRemoveTripParticipant, useListUsers, getGetTripQueryKey, getListTripParticipantsQueryKey 
+  useUpdateTrip, useDeleteTrip, useListTripParticipants, useAddTripParticipant, useRemoveTripParticipant, useListUsers,
+  getGetTripQueryKey, getListTripParticipantsQueryKey, getListExpensesQueryKey, getGetExpenseBalanceQueryKey,
 } from '@workspace/api-client-react';
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
@@ -82,13 +83,24 @@ export function TripSettings({ trip }: { trip: any }) {
     });
   };
 
+  const invalidateExpenseQueries = () => {
+    queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey(trip.id) });
+    queryClient.invalidateQueries({ queryKey: getGetExpenseBalanceQueryKey(trip.id) });
+  };
+
   const handleAddParticipant = () => {
     if (!selectedUserId) return;
     addParticipant.mutate({ tripId: trip.id, data: { userId: Number(selectedUserId) } }, {
-      onSuccess: () => {
-        toast.success('Traveler added');
+      onSuccess: (data: any) => {
         queryClient.invalidateQueries({ queryKey: getListTripParticipantsQueryKey(trip.id) });
+        invalidateExpenseQueries();
         setSelectedUserId('');
+        const recalc = data?.splitsRecalculated ?? 0;
+        if (recalc > 0) {
+          toast.success(`Traveler added — ${recalc} expense${recalc !== 1 ? 's' : ''} split recalculated to include them`);
+        } else {
+          toast.success('Traveler added');
+        }
       },
       onError: (e: any) => toast.error(e.error || 'Failed to add traveler')
     });
@@ -96,9 +108,17 @@ export function TripSettings({ trip }: { trip: any }) {
 
   const handleRemoveParticipant = (userId: number) => {
     removeParticipant.mutate({ tripId: trip.id, userId }, {
-      onSuccess: () => {
+      onSuccess: (data: any) => {
         queryClient.invalidateQueries({ queryKey: getListTripParticipantsQueryKey(trip.id) });
-      }
+        invalidateExpenseQueries();
+        const recalc = data?.splitsRecalculated ?? 0;
+        if (recalc > 0) {
+          toast.info(`Traveler removed — ${recalc} expense${recalc !== 1 ? 's' : ''} split recalculated`);
+        } else {
+          toast.info('Traveler removed');
+        }
+      },
+      onError: (e: any) => toast.error(e.error || 'Failed to remove traveler')
     });
   };
 
