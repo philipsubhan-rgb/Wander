@@ -108,6 +108,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /users/lookup:
+    get:
+      operationId: lookupUserByEmail
+      tags: [users]
+      summary: Find a user by email address (for trip admins adding participants)
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Found user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserLookupResult"
+        "404":
+          description: No user with that email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /users:
     get:
       operationId: listUsers
@@ -1427,7 +1452,7 @@ components:
 
     AuthUser:
       type: object
-      required: [id, username, name, role]
+      required: [id, username, name, role, email]
       properties:
         id:
           type: integer
@@ -1439,11 +1464,11 @@ components:
           type: string
           enum: [admin, traveler]
         email:
-          type: ["string", "null"]
+          type: string
 
     User:
       type: object
-      required: [id, username, name, role]
+      required: [id, username, name, role, email]
       properties:
         id:
           type: integer
@@ -1455,13 +1480,31 @@ components:
           type: string
           enum: [admin, traveler]
         email:
-          type: ["string", "null"]
+          type: string
         createdAt:
           type: string
 
+    UserLookupResult:
+      type: object
+      required: [id, username, name, email, role, otherTripsCount]
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [admin, traveler]
+        otherTripsCount:
+          type: integer
+
     UserInput:
       type: object
-      required: [username, name, password]
+      required: [username, name, password, email]
       properties:
         username:
           type: string

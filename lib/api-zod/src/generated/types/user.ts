@@ -12,7 +12,6 @@ export interface User {
   username: string;
   name: string;
   role: UserRole;
-  /** @nullable */
-  email?: string | null;
+  email: string;
   createdAt?: string;
 }

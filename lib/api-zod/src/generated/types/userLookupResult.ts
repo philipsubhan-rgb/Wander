@@ -5,12 +5,13 @@
  * Trip Planner API
  * OpenAPI spec version: 0.1.0
  */
-import type { AuthUserRole } from './authUserRole';
+import type { UserLookupResultRole } from './userLookupResultRole';
 
-export interface AuthUser {
+export interface UserLookupResult {
   id: number;
   username: string;
   name: string;
-  role: AuthUserRole;
   email: string;
+  role: UserLookupResultRole;
+  otherTripsCount: number;
 }

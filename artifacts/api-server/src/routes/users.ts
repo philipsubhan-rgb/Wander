@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
-import { eq, and } from "drizzle-orm";
+import { eq, and, count, ne } from "drizzle-orm";
 import { db, usersTable, tripsTable, tripParticipantsTable } from "@workspace/db";
 import {
   CreateUserBody,
@@ -25,6 +25,41 @@ function serializeUser(user: typeof usersTable.$inferSelect) {
     createdAt: user.createdAt.toISOString(),
   };
 }
+
+// Lookup a user by email — accessible to any authenticated user so trip admins
+// can find travelers by email before adding them to a trip.
+router.get("/users/lookup", requireAuth, async (req, res): Promise<void> => {
+  const email = typeof req.query.email === "string" ? req.query.email.trim().toLowerCase() : null;
+  if (!email) {
+    res.status(400).json({ error: "email query parameter is required" });
+    return;
+  }
+
+  const [user] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.email, email));
+
+  if (!user) {
+    res.status(404).json({ error: "No traveler found with that email address" });
+    return;
+  }
+
+  // Count how many trips this user is a participant of
+  const [{ tripCount }] = await db
+    .select({ tripCount: count() })
+    .from(tripParticipantsTable)
+    .where(eq(tripParticipantsTable.userId, user.id));
+
+  res.json({
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    otherTripsCount: Number(tripCount),
+  });
+});
 
 router.get("/users", requireAdmin, async (_req, res): Promise<void> => {
   const users = await db.select().from(usersTable).orderBy(usersTable.createdAt);

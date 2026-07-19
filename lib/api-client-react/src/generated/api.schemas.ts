@@ -35,8 +35,7 @@ export interface AuthUser {
   username: string;
   name: string;
   role: AuthUserRole;
-  /** @nullable */
-  email?: string | null;
+  email: string;
 }
 
 export type UserRole = typeof UserRole[keyof typeof UserRole];
@@ -52,9 +51,25 @@ export interface User {
   username: string;
   name: string;
   role: UserRole;
-  /** @nullable */
-  email?: string | null;
+  email: string;
   createdAt?: string;
+}
+
+export type UserLookupResultRole = typeof UserLookupResultRole[keyof typeof UserLookupResultRole];
+
+
+export const UserLookupResultRole = {
+  admin: 'admin',
+  traveler: 'traveler',
+} as const;
+
+export interface UserLookupResult {
+  id: number;
+  username: string;
+  name: string;
+  email: string;
+  role: UserLookupResultRole;
+  otherTripsCount: number;
 }
 
 export type UserInputRole = typeof UserInputRole[keyof typeof UserInputRole];
@@ -69,7 +84,7 @@ export interface UserInput {
   username: string;
   name: string;
   password: string;
-  email?: string;
+  email: string;
   role?: UserInputRole;
 }
 
@@ -903,4 +918,8 @@ export interface ExpenseBalanceSummary {
   totalSpent: number;
   currency: string;
 }
+
+export type LookupUserByEmailParams = {
+email: string;
+};
 

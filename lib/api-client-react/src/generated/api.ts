@@ -44,6 +44,7 @@ import type {
   ItineraryDayInput,
   ItineraryDayUpdate,
   LoginInput,
+  LookupUserByEmailParams,
   PackingItem,
   PackingItemInput,
   PackingItemUpdate,
@@ -66,6 +67,7 @@ import type {
   TripUpdate,
   User,
   UserInput,
+  UserLookupResult,
   UserUpdate
 } from './api.schemas';
 
@@ -380,6 +382,90 @@ export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = Err
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetMeQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getLookupUserByEmailUrl = (params: LookupUserByEmailParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/users/lookup?${stringifiedParams}` : `/api/users/lookup`
+}
+
+/**
+ * @summary Find a user by email address (for trip admins adding participants)
+ */
+export const lookupUserByEmail = async (params: LookupUserByEmailParams, options?: RequestInit): Promise<UserLookupResult> => {
+
+  return customFetch<UserLookupResult>(getLookupUserByEmailUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getLookupUserByEmailQueryKey = (params?: LookupUserByEmailParams,) => {
+    return [
+    `/api/users/lookup`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getLookupUserByEmailQueryOptions = <TData = Awaited<ReturnType<typeof lookupUserByEmail>>, TError = ErrorType<ErrorResponse>>(params: LookupUserByEmailParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof lookupUserByEmail>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getLookupUserByEmailQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof lookupUserByEmail>>> = ({ signal }) => lookupUserByEmail(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof lookupUserByEmail>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type LookupUserByEmailQueryResult = NonNullable<Awaited<ReturnType<typeof lookupUserByEmail>>>
+export type LookupUserByEmailQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Find a user by email address (for trip admins adding participants)
+ */
+
+export function useLookupUserByEmail<TData = Awaited<ReturnType<typeof lookupUserByEmail>>, TError = ErrorType<ErrorResponse>>(
+ params: LookupUserByEmailParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof lookupUserByEmail>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getLookupUserByEmailQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

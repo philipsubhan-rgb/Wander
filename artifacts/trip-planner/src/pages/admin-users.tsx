@@ -28,14 +28,14 @@ const newUserSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   username: z.string().min(1, 'Username is required'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
-  email: z.string().email('Invalid email').optional().or(z.literal('')),
+  email: z.string().email('Valid email is required'),
   role: z.enum(['admin', 'traveler']),
 });
 
 const editUserSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   username: z.string().min(1, 'Username is required'),
-  email: z.string().email('Invalid email').optional().or(z.literal('')),
+  email: z.string().email('Valid email is required'),
   role: z.enum(['admin', 'traveler']),
 });
 
@@ -190,7 +190,7 @@ function EditUserForm({ user, onSuccess }: { user: any; onSuccess: () => void })
             <FormItem><FormLabel>Username</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
           )} />
           <FormField control={form.control} name="email" render={({ field }) => (
-            <FormItem><FormLabel>Email (Optional)</FormLabel><FormControl><Input type="email" {...field} /></FormControl><FormMessage /></FormItem>
+            <FormItem><FormLabel>Email</FormLabel><FormControl><Input type="email" {...field} /></FormControl><FormMessage /></FormItem>
           )} />
           <FormField control={form.control} name="role" render={({ field }) => (
             <FormItem>
@@ -297,7 +297,7 @@ function NewUserForm({ onSuccess }: { onSuccess: () => void }) {
   });
 
   const onSubmit = (values: z.infer<typeof newUserSchema>) => {
-    createUser.mutate({ data: { ...values, email: values.email || undefined } }, {
+    createUser.mutate({ data: values }, {
       onSuccess: () => {
         toast.success('Traveler created');
         queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
@@ -322,7 +322,7 @@ function NewUserForm({ onSuccess }: { onSuccess: () => void }) {
           )} />
         </div>
         <FormField control={form.control} name="email" render={({ field }) => (
-          <FormItem><FormLabel>Email (Optional)</FormLabel><FormControl><Input type="email" {...field} /></FormControl><FormMessage /></FormItem>
+          <FormItem><FormLabel>Email</FormLabel><FormControl><Input type="email" {...field} /></FormControl><FormMessage /></FormItem>
         )} />
         <FormField control={form.control} name="role" render={({ field }) => (
           <FormItem>

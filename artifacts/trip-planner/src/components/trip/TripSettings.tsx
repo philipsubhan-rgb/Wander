@@ -1,8 +1,9 @@
 import { 
-  useUpdateTrip, useDeleteTrip, useListTripParticipants, useAddTripParticipant, useRemoveTripParticipant, useListUsers,
+  useUpdateTrip, useDeleteTrip, useListTripParticipants, useAddTripParticipant, useRemoveTripParticipant,
+  useLookupUserByEmail,
   getGetTripQueryKey, getListTripParticipantsQueryKey, getListExpensesQueryKey, getGetExpenseBalanceQueryKey,
 } from '@workspace/api-client-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -14,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { toast } from 'sonner';
-import { Users, Trash2, Plus, Shield, TriangleAlert } from 'lucide-react';
+import { Users, Trash2, Shield, TriangleAlert, Search, UserCheck, AlertCircle } from 'lucide-react';
 
 const tripSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -25,17 +26,177 @@ const tripSchema = z.object({
   coverImage: z.string().optional(),
 });
 
+// ── Email-based participant lookup ────────────────────────────────────────────
+
+type LookupResult = {
+  id: number;
+  username: string;
+  name: string;
+  email: string;
+  role: string;
+  otherTripsCount: number;
+};
+
+function AddTravelerByEmail({
+  tripId,
+  currentParticipantIds,
+  onAdded,
+}: {
+  tripId: number;
+  currentParticipantIds: number[];
+  onAdded: () => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [found, setFound] = useState<LookupResult | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const addParticipant = useAddTripParticipant();
+  const queryClient = useQueryClient();
+
+  const handleSearch = async () => {
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed) return;
+    setSearching(true);
+    setFound(null);
+    setNotFound(false);
+
+    try {
+      const res = await fetch(`/api/users/lookup?email=${encodeURIComponent(trimmed)}`, {
+        credentials: 'include',
+      });
+      if (res.status === 404) {
+        setNotFound(true);
+      } else if (res.ok) {
+        const user: LookupResult = await res.json();
+        if (currentParticipantIds.includes(user.id)) {
+          toast.info(`${user.name} is already on this trip`);
+        } else {
+          setFound(user);
+          // If they're on other trips, require confirmation
+          if (user.otherTripsCount > 0) {
+            setConfirmOpen(true);
+          } else {
+            // New user with no trips — add immediately
+            doAdd(user);
+          }
+        }
+      } else {
+        toast.error('Search failed — please try again');
+      }
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const doAdd = (user: LookupResult) => {
+    addParticipant.mutate(
+      { tripId, data: { userId: user.id } },
+      {
+        onSuccess: (data: any) => {
+          queryClient.invalidateQueries({ queryKey: getListTripParticipantsQueryKey(tripId) });
+          queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey(tripId) });
+          queryClient.invalidateQueries({ queryKey: getGetExpenseBalanceQueryKey(tripId) });
+          setEmail('');
+          setFound(null);
+          setConfirmOpen(false);
+          const recalc = data?.splitsRecalculated ?? 0;
+          if (recalc > 0) {
+            toast.success(`${user.name} added — ${recalc} expense${recalc !== 1 ? 's' : ''} recalculated`);
+          } else {
+            toast.success(`${user.name} added to trip`);
+          }
+          onAdded();
+        },
+        onError: (e: any) => {
+          setConfirmOpen(false);
+          toast.error(e?.error || 'Failed to add traveler');
+        },
+      }
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        <Input
+          type="email"
+          placeholder="Enter traveler's email address"
+          value={email}
+          onChange={e => { setEmail(e.target.value); setFound(null); setNotFound(false); }}
+          onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
+          className="flex-1"
+        />
+        <Button
+          type="button"
+          onClick={handleSearch}
+          disabled={!email.trim() || searching}
+          variant="outline"
+        >
+          {searching ? (
+            <span className="h-4 w-4 animate-spin inline-block border-2 border-current border-t-transparent rounded-full" />
+          ) : (
+            <Search className="h-4 w-4" />
+          )}
+        </Button>
+      </div>
+
+      {notFound && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>No traveler found with that email. Ask an admin to create an account first.</span>
+        </div>
+      )}
+
+      {/* Confirmation dialog for existing user on other trips */}
+      {found && (
+        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <UserCheck className="h-5 w-5 text-primary" />
+                Confirm traveler
+              </DialogTitle>
+              <DialogDescription asChild>
+                <div className="space-y-3 pt-1">
+                  <p>Please confirm this is the right person before adding them to the trip.</p>
+                  <div className="bg-muted rounded-lg px-4 py-3 space-y-1">
+                    <p className="font-semibold text-foreground">{found.name}</p>
+                    <p className="text-sm text-muted-foreground">{found.email}</p>
+                    <p className="text-xs text-muted-foreground">@{found.username}</p>
+                  </div>
+                  {found.otherTripsCount > 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      This traveler is currently on {found.otherTripsCount} other trip{found.otherTripsCount !== 1 ? 's' : ''}.
+                    </p>
+                  )}
+                </div>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={addParticipant.isPending}>
+                Cancel
+              </Button>
+              <Button onClick={() => doAdd(found)} disabled={addParticipant.isPending}>
+                {addParticipant.isPending ? 'Adding…' : 'Yes, add to trip'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  );
+}
+
+// ── Main TripSettings component ───────────────────────────────────────────────
+
 export function TripSettings({ trip }: { trip: any }) {
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
   const updateTrip = useUpdateTrip();
   const deleteTrip = useDeleteTrip();
   const { data: participants } = useListTripParticipants(trip.id);
-  const { data: users } = useListUsers();
-  const addParticipant = useAddTripParticipant();
   const removeParticipant = useRemoveTripParticipant();
-  
-  const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const tripToFormValues = (t: typeof trip) => ({
@@ -52,22 +213,16 @@ export function TripSettings({ trip }: { trip: any }) {
     defaultValues: tripToFormValues(trip),
   });
 
-  // Re-sync form when the trip data changes (e.g. after save + refetch, or navigating between trips)
   useEffect(() => {
     form.reset(tripToFormValues(trip));
   }, [trip.id, trip.startDate, trip.endDate, trip.title, trip.destination, trip.status, trip.coverImage]);
 
   const onSubmit = (values: z.infer<typeof tripSchema>) => {
-    // Don't send an empty string for coverImage — omit the field instead so the existing URL isn't cleared
-    const payload = {
-      ...values,
-      coverImage: values.coverImage || undefined,
-    };
+    const payload = { ...values, coverImage: values.coverImage || undefined };
     updateTrip.mutate({ tripId: trip.id, data: payload }, {
       onSuccess: (updated) => {
         toast.success('Trip settings saved');
         queryClient.invalidateQueries({ queryKey: getGetTripQueryKey(trip.id) });
-        // Reset form to exactly what the server confirmed
         form.reset({
           title: updated.title,
           destination: updated.destination,
@@ -83,42 +238,20 @@ export function TripSettings({ trip }: { trip: any }) {
     });
   };
 
-  const invalidateExpenseQueries = () => {
-    queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey(trip.id) });
-    queryClient.invalidateQueries({ queryKey: getGetExpenseBalanceQueryKey(trip.id) });
-  };
-
-  const handleAddParticipant = () => {
-    if (!selectedUserId) return;
-    addParticipant.mutate({ tripId: trip.id, data: { userId: Number(selectedUserId) } }, {
-      onSuccess: (data: any) => {
-        queryClient.invalidateQueries({ queryKey: getListTripParticipantsQueryKey(trip.id) });
-        invalidateExpenseQueries();
-        setSelectedUserId('');
-        const recalc = data?.splitsRecalculated ?? 0;
-        if (recalc > 0) {
-          toast.success(`Traveler added — ${recalc} expense${recalc !== 1 ? 's' : ''} split recalculated to include them`);
-        } else {
-          toast.success('Traveler added');
-        }
-      },
-      onError: (e: any) => toast.error(e.error || 'Failed to add traveler')
-    });
-  };
-
   const handleRemoveParticipant = (userId: number) => {
     removeParticipant.mutate({ tripId: trip.id, userId }, {
       onSuccess: (data: any) => {
         queryClient.invalidateQueries({ queryKey: getListTripParticipantsQueryKey(trip.id) });
-        invalidateExpenseQueries();
+        queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey(trip.id) });
+        queryClient.invalidateQueries({ queryKey: getGetExpenseBalanceQueryKey(trip.id) });
         const recalc = data?.splitsRecalculated ?? 0;
         if (recalc > 0) {
-          toast.info(`Traveler removed — ${recalc} expense${recalc !== 1 ? 's' : ''} split recalculated`);
+          toast.info(`Traveler removed — ${recalc} expense${recalc !== 1 ? 's' : ''} recalculated`);
         } else {
           toast.info('Traveler removed');
         }
       },
-      onError: (e: any) => toast.error(e.error || 'Failed to remove traveler')
+      onError: (e: any) => toast.error(e.error || 'Failed to remove traveler'),
     });
   };
 
@@ -137,9 +270,7 @@ export function TripSettings({ trip }: { trip: any }) {
   };
 
   const startDate = form.watch('startDate');
-
-  // filter users not already in trip
-  const availableUsers = users?.filter(u => !participants?.some(p => p.id === u.id));
+  const currentParticipantIds = participants?.map(p => p.id) ?? [];
 
   return (
     <div className="grid md:grid-cols-2 gap-10">
@@ -191,26 +322,20 @@ export function TripSettings({ trip }: { trip: any }) {
       <div className="space-y-6">
         <h2 className="text-2xl font-serif font-bold">Travelers</h2>
         <div className="bg-card border rounded-xl p-6 shadow-sm space-y-6">
-          <div className="flex gap-2">
-            <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-              <SelectTrigger className="flex-1">
-                <SelectValue placeholder="Select traveler to add" />
-              </SelectTrigger>
-              <SelectContent>
-                {availableUsers?.map(user => (
-                  <SelectItem key={user.id} value={user.id.toString()}>
-                    {user.name} (@{user.username})
-                  </SelectItem>
-                ))}
-                {availableUsers?.length === 0 && <SelectItem value="none" disabled>No available users</SelectItem>}
-              </SelectContent>
-            </Select>
-            <Button onClick={handleAddParticipant} disabled={!selectedUserId || addParticipant.isPending}>
-              <Plus className="h-4 w-4 mr-2" /> Add
-            </Button>
+          <div className="space-y-1">
+            <p className="text-sm font-medium">Add by email</p>
+            <p className="text-xs text-muted-foreground mb-2">Enter the traveler's email address to find and add them.</p>
+            <AddTravelerByEmail
+              tripId={trip.id}
+              currentParticipantIds={currentParticipantIds}
+              onAdded={() => {}}
+            />
           </div>
 
           <div className="space-y-3">
+            <p className="text-sm font-medium text-muted-foreground">
+              {participants?.length ?? 0} traveler{(participants?.length ?? 0) !== 1 ? 's' : ''} on this trip
+            </p>
             {participants?.map(user => (
               <div key={user.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
                 <div className="flex items-center gap-3">
@@ -222,7 +347,7 @@ export function TripSettings({ trip }: { trip: any }) {
                       {user.name}
                       {user.role === 'admin' && <Shield className="h-3 w-3 text-primary" />}
                     </p>
-                    <p className="text-xs text-muted-foreground">@{user.username}</p>
+                    <p className="text-xs text-muted-foreground">{user.email ?? `@${user.username}`}</p>
                   </div>
                 </div>
                 <Button variant="ghost" size="icon" onClick={() => handleRemoveParticipant(user.id)} className="h-8 w-8 text-destructive hover:text-destructive">
@@ -252,7 +377,6 @@ export function TripSettings({ trip }: { trip: any }) {
         </div>
       </div>
 
-      {/* Delete confirmation dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>

@@ -8,7 +8,7 @@ export const usersTable = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
   name: text("name").notNull(),
-  email: text("email"),
+  email: text("email").notNull().unique(),
   role: userRoleEnum("role").notNull().default("traveler"),
   passwordHash: text("password_hash").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),

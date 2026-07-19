@@ -29,7 +29,7 @@ export const LoginResponse = zod.object({
   "username": zod.string(),
   "name": zod.string(),
   "role": zod.enum(['admin', 'traveler']),
-  "email": zod.string().nullish()
+  "email": zod.string()
 })
 
 
@@ -49,7 +49,24 @@ export const GetMeResponse = zod.object({
   "username": zod.string(),
   "name": zod.string(),
   "role": zod.enum(['admin', 'traveler']),
-  "email": zod.string().nullish()
+  "email": zod.string()
+})
+
+
+/**
+ * @summary Find a user by email address (for trip admins adding participants)
+ */
+export const LookupUserByEmailQueryParams = zod.object({
+  "email": zod.coerce.string()
+})
+
+export const LookupUserByEmailResponse = zod.object({
+  "id": zod.number(),
+  "username": zod.string(),
+  "name": zod.string(),
+  "email": zod.string(),
+  "role": zod.enum(['admin', 'traveler']),
+  "otherTripsCount": zod.number()
 })
 
 
@@ -61,7 +78,7 @@ export const ListUsersResponseItem = zod.object({
   "username": zod.string(),
   "name": zod.string(),
   "role": zod.enum(['admin', 'traveler']),
-  "email": zod.string().nullish(),
+  "email": zod.string(),
   "createdAt": zod.string().optional()
 })
 export const ListUsersResponse = zod.array(ListUsersResponseItem)
@@ -74,7 +91,7 @@ export const CreateUserBody = zod.object({
   "username": zod.string(),
   "name": zod.string(),
   "password": zod.string(),
-  "email": zod.string().optional(),
+  "email": zod.string(),
   "role": zod.enum(['admin', 'traveler']).optional()
 })
 
@@ -83,7 +100,7 @@ export const CreateUserResponse = zod.object({
   "username": zod.string(),
   "name": zod.string(),
   "role": zod.enum(['admin', 'traveler']),
-  "email": zod.string().nullish(),
+  "email": zod.string(),
   "createdAt": zod.string().optional()
 })
 
@@ -97,7 +114,7 @@ export const GetUserResponse = zod.object({
   "username": zod.string(),
   "name": zod.string(),
   "role": zod.enum(['admin', 'traveler']),
-  "email": zod.string().nullish(),
+  "email": zod.string(),
   "createdAt": zod.string().optional()
 })
 
@@ -116,7 +133,7 @@ export const UpdateUserResponse = zod.object({
   "username": zod.string(),
   "name": zod.string(),
   "role": zod.enum(['admin', 'traveler']),
-  "email": zod.string().nullish(),
+  "email": zod.string(),
   "createdAt": zod.string().optional()
 })
 
@@ -295,7 +312,7 @@ export const ListTripParticipantsResponseItem = zod.object({
   "username": zod.string(),
   "name": zod.string(),
   "role": zod.enum(['admin', 'traveler']),
-  "email": zod.string().nullish(),
+  "email": zod.string(),
   "createdAt": zod.string().optional()
 })
 export const ListTripParticipantsResponse = zod.array(ListTripParticipantsResponseItem)

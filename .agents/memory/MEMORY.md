@@ -1,1 +1,4 @@
 - [Orval codegen + missing paths](orval-codegen-paths.md) — running codegen with `clean:true` wipes all generated files; every route's OpenAPI paths must be in the spec or their hooks vanish.
+- [Orval + TanStack Query v5 UseQueryOptions fix](orval-tanstack-v5-fix.md) — Orval 8.21.0 generates `query?:UseQueryOptions<>` but TQ v5 requires `queryKey`; post-codegen script wraps with `Partial<>`.
+- [OpenAPI path param renames cascade](openapi-param-rename-cascade.md) — renaming path params in spec regenerates Zod schemas AND changes Express `req.params` keys; both API routes and Zod schemas must be updated together.
+- [Email lookup flow for trip participants](email-participant-lookup.md) — participants are added by email lookup (not dropdown); email is required+unique on users table; `GET /users/lookup?email=` is auth-gated (not admin-only).

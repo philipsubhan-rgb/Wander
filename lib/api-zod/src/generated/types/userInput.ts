@@ -11,6 +11,6 @@ export interface UserInput {
   username: string;
   name: string;
   password: string;
-  email?: string;
+  email: string;
   role?: UserInputRole;
 }
