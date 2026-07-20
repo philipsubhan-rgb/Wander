@@ -20,6 +20,11 @@ export interface TripExpense {
   date: string;
   /** @nullable */
   notes?: string | null;
+  /**
+     * Object path for the attached receipt photo (e.g. /objects/uploads/uuid)
+     * @nullable
+     */
+  receiptUrl?: string | null;
   createdAt: string;
   splits: ExpenseSplit[];
 }

@@ -8,6 +8,8 @@ servers:
   - url: /api
     description: Base API path
 tags:
+  - name: storage
+    description: Object storage upload and serving endpoints
   - name: health
     description: Health operations
   - name: auth
@@ -38,6 +40,63 @@ tags:
     description: Shared trip expenses
 
 paths:
+  /storage/uploads/request-url:
+    post:
+      tags: [storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned URL for file upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadUrlRequest'
+      responses:
+        '200':
+          description: Presigned upload URL generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadUrlResponse'
+        '400':
+          description: Missing or invalid required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to generate upload URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /storage/objects/{objectPath}:
+    get:
+      tags: [storage]
+      operationId: getStorageObject
+      summary: Serve an object entity from PRIVATE_OBJECT_DIR
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Object content
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Object not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /healthz:
     get:
       operationId: healthCheck
@@ -2362,6 +2421,31 @@ components:
         paidAt:
           type: ["string", "null"]
 
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        size:
+          type: integer
+          minimum: 1
+        contentType:
+          type: string
+          minLength: 1
+
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL:
+          type: string
+        objectPath:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/UploadUrlRequest'
+
     TripExpense:
       type: object
       required: [id, tripId, paidByUserId, amount, currency, description, category, date, createdAt, splits]
@@ -2387,6 +2471,9 @@ components:
           type: string
         notes:
           type: ["string", "null"]
+        receiptUrl:
+          type: ["string", "null"]
+          description: Object path for the attached receipt photo (e.g. /objects/uploads/uuid)
         createdAt:
           type: string
         splits:
@@ -2413,6 +2500,9 @@ components:
           type: string
         notes:
           type: string
+        receiptUrl:
+          type: string
+          description: Object path for the attached receipt photo
 
     ExpenseUpdate:
       type: object
@@ -2432,6 +2522,9 @@ components:
           type: string
         notes:
           type: string
+        receiptUrl:
+          type: string
+          description: Object path for the attached receipt photo
 
     ExpenseBalanceEntry:
       type: object

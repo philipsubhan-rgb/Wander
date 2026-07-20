@@ -23,6 +23,7 @@ export const tripExpensesTable = pgTable("trip_expenses", {
   category: expenseCategoryEnum("category").notNull().default("other"),
   date: text("date").notNull(), // ISO date string YYYY-MM-DD
   notes: text("notes"),
+  receiptUrl: text("receipt_url"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

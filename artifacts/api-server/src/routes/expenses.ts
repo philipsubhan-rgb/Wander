@@ -188,6 +188,7 @@ router.post("/trips/:tripId/expenses", requireTripParticipant(), async (req, res
       category:     parsed.data.category ?? "other",
       date:         parsed.data.date,
       notes:        parsed.data.notes ?? null,
+      receiptUrl:   parsed.data.receiptUrl ?? null,
     })
     .returning();
 
@@ -228,6 +229,7 @@ router.patch("/trips/:tripId/expenses/:expenseId", requireTripParticipant(), asy
   if (parsed.data.currency     !== undefined) updateData.currency     = parsed.data.currency;
   if (parsed.data.paidByUserId !== undefined) updateData.paidByUserId = parsed.data.paidByUserId;
   if (parsed.data.amount       !== undefined) updateData.amount       = parsed.data.amount;
+  if (parsed.data.receiptUrl   !== undefined) updateData.receiptUrl   = parsed.data.receiptUrl;
 
   const [expense] = await db
     .update(tripExpensesTable)

@@ -22,10 +22,10 @@ export interface LoginInput {
   password: string;
 }
 
-export type AuthUserRole = typeof AuthUserRole[keyof typeof AuthUserRole];
+export type LoginResponseRole = typeof LoginResponseRole[keyof typeof LoginResponseRole];
 
 
-export const AuthUserRole = {
+export const LoginResponseRole = {
   admin: 'admin',
   traveler: 'traveler',
 } as const;
@@ -34,11 +34,19 @@ export interface LoginResponse {
   id: number;
   username: string;
   name: string;
-  role: AuthUserRole;
+  role: LoginResponseRole;
   email: string;
   /** Signed JWT for use as a bearer token by native clients (e.g. Expo Go). Web clients should ignore this and rely on session cookies instead. */
   token?: string;
 }
+
+export type AuthUserRole = typeof AuthUserRole[keyof typeof AuthUserRole];
+
+
+export const AuthUserRole = {
+  admin: 'admin',
+  traveler: 'traveler',
+} as const;
 
 export interface AuthUser {
   id: number;
@@ -834,6 +842,21 @@ export interface ExpenseSplit {
   paidAt?: string | null;
 }
 
+export interface UploadUrlRequest {
+  /** @minLength 1 */
+  name: string;
+  /** @minimum 1 */
+  size: number;
+  /** @minLength 1 */
+  contentType: string;
+}
+
+export interface UploadUrlResponse {
+  uploadURL: string;
+  objectPath: string;
+  metadata?: UploadUrlRequest;
+}
+
 export type TripExpenseCategory = typeof TripExpenseCategory[keyof typeof TripExpenseCategory];
 
 
@@ -858,6 +881,11 @@ export interface TripExpense {
   date: string;
   /** @nullable */
   notes?: string | null;
+  /**
+     * Object path for the attached receipt photo (e.g. /objects/uploads/uuid)
+     * @nullable
+     */
+  receiptUrl?: string | null;
   createdAt: string;
   splits: ExpenseSplit[];
 }
@@ -882,6 +910,8 @@ export interface ExpenseInput {
   category?: ExpenseInputCategory;
   date: string;
   notes?: string;
+  /** Object path for the attached receipt photo */
+  receiptUrl?: string;
 }
 
 export type ExpenseUpdateCategory = typeof ExpenseUpdateCategory[keyof typeof ExpenseUpdateCategory];
@@ -904,6 +934,8 @@ export interface ExpenseUpdate {
   category?: ExpenseUpdateCategory;
   date?: string;
   notes?: string;
+  /** Object path for the attached receipt photo */
+  receiptUrl?: string;
 }
 
 export interface ExpenseBalanceEntry {

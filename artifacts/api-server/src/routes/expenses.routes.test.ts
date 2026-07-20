@@ -330,3 +330,79 @@ describe("PATCH /trips/:tripId/expenses/:expenseId — splits recalculate on cha
     expect(body.error).toMatch(/not found/i);
   });
 });
+
+// ── receiptUrl field — POST and PATCH ─────────────────────────────────────────
+
+describe("receiptUrl field on expenses", () => {
+  const participants = [{ userId: 1 }, { userId: 2 }];
+
+  function makeExpense(receiptUrl: string | null = null) {
+    return {
+      id: 55, tripId: 1, paidByUserId: 1, amount: "20.00",
+      currency: "USD", description: "Taxi", category: "other",
+      date: "2025-07-10", notes: null, receiptUrl, createdAt: new Date(),
+    };
+  }
+
+  function enqueuePostWithReceipt(receiptUrl: string | null = null) {
+    const expense = makeExpense(receiptUrl);
+    const splits = [
+      { split: { id: 1, expenseId: 55, userId: 1, shareAmount: "10.00", isPaid: true,  paidAt: new Date() }, userName: "Alice" },
+      { split: { id: 2, expenseId: 55, userId: 2, shareAmount: "10.00", isPaid: false, paidAt: null },       userName: "Bob" },
+    ];
+    enqueue(
+      participants,                              // validate payer
+      [expense],                                 // insert expense
+      [],                                        // delete splits
+      participants,                              // select participants (recreateSplits)
+      [],                                        // insert splits
+      [{ expense, payerName: "Alice" }],         // fetch expenses
+      splits,                                    // fetch splits
+    );
+    return expense;
+  }
+
+  it("POST with receiptUrl returns 201 and echoes receiptUrl in the response", async () => {
+    const objectPath = "/objects/uploads/test-receipt-uuid";
+    enqueuePostWithReceipt(objectPath);
+    const { status, body } = await post("/trips/1/expenses", {
+      paidByUserId: 1,
+      amount: "20.00",
+      description: "Taxi",
+      date: "2025-07-10",
+      receiptUrl: objectPath,
+    });
+    expect(status).toBe(201);
+    expect(body.receiptUrl).toBe(objectPath);
+  });
+
+  it("POST without receiptUrl returns 201 with null receiptUrl", async () => {
+    enqueuePostWithReceipt(null);
+    const { status, body } = await post("/trips/1/expenses", {
+      paidByUserId: 1,
+      amount: "20.00",
+      description: "Taxi",
+      date: "2025-07-10",
+    });
+    expect(status).toBe(201);
+    // receiptUrl should be null or absent — not a non-null string
+    expect(body.receiptUrl ?? null).toBeNull();
+  });
+
+  it("PATCH with receiptUrl echoes the updated receiptUrl", async () => {
+    const objectPath = "/objects/uploads/updated-receipt-uuid";
+    const updatedExpense = makeExpense(objectPath);
+    const splits = [
+      { split: { id: 1, expenseId: 55, userId: 1, shareAmount: "10.00", isPaid: true, paidAt: new Date() }, userName: "Alice" },
+    ];
+    // Description-only PATCH (no splits recalc): update → fetch expenses → fetch splits
+    enqueue(
+      [updatedExpense],
+      [{ expense: updatedExpense, payerName: "Alice" }],
+      splits,
+    );
+    const { status, body } = await patch("/trips/1/expenses/55", { receiptUrl: objectPath });
+    expect(status).toBe(200);
+    expect(body.receiptUrl).toBe(objectPath);
+  });
+});

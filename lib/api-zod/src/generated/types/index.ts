@@ -80,6 +80,8 @@ export * from './tripStatus';
 export * from './tripSummary';
 export * from './tripUpdate';
 export * from './tripUpdateStatus';
+export * from './uploadUrlRequest';
+export * from './uploadUrlResponse';
 export * from './user';
 export * from './userInput';
 export * from './userInputRole';

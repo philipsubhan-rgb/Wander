@@ -6,20 +6,23 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  FlatList,
   Platform,
   ScrollView,
+  Image,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import {
   useCreateExpense,
   useListTripParticipants,
   getListExpensesQueryKey,
   getGetExpenseBalanceQueryKey,
+  requestUploadUrl,
 } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
@@ -61,6 +64,9 @@ export default function AddExpenseScreen() {
   const [category, setCategory] = useState<Category>('restaurant');
   const [description, setDescription] = useState('');
   const [paidByUserId, setPaidByUserId] = useState<number | null>(user?.id ?? null);
+  const [receiptUri, setReceiptUri] = useState<string | null>(null);
+  const [receiptObjectPath, setReceiptObjectPath] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   const { data: participants } = useListTripParticipants(tripId, {
     query: { enabled: !!tripId },
@@ -76,6 +82,126 @@ export default function AddExpenseScreen() {
       },
     },
   });
+
+  async function uploadReceipt(uri: string, fileName: string, mimeType: string): Promise<string | null> {
+    setIsUploading(true);
+    try {
+      // Step 1: fetch the image blob first so we know the real file size
+      const imageRes = await fetch(uri);
+      if (!imageRes.ok) throw new Error(`Failed to read image: ${imageRes.status}`);
+      const blob = await imageRes.blob();
+
+      // Step 2: request a presigned URL with the actual file size (schema requires size >= 1)
+      const { uploadURL, objectPath } = await requestUploadUrl({
+        name: fileName,
+        size: blob.size || 1, // blob.size is 0 only if fetch polyfill misbehaves; floor at 1
+        contentType: mimeType,
+      });
+
+      // Step 3: upload the blob directly to GCS via the presigned URL
+      const uploadRes = await fetch(uploadURL, {
+        method: 'PUT',
+        headers: { 'Content-Type': mimeType },
+        body: blob,
+      });
+      if (!uploadRes.ok) {
+        throw new Error(`GCS upload responded ${uploadRes.status}`);
+      }
+
+      return objectPath;
+    } catch (err) {
+      console.error('[upload] Error uploading receipt', err);
+      Alert.alert(
+        'Receipt upload failed',
+        'Could not attach the receipt photo. You can still save the expense and try again later.',
+        [{ text: 'OK' }],
+      );
+      return null;
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  async function handlePickReceipt() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    if (isWeb) {
+      // Web: open file picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.7,
+        allowsEditing: false,
+      });
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        setReceiptUri(asset.uri);
+        setReceiptObjectPath(null);
+        const mimeType = asset.mimeType ?? 'image/jpeg';
+        const fileName = asset.fileName ?? `receipt-${Date.now()}.jpg`;
+        const objectPath = await uploadReceipt(asset.uri, fileName, mimeType);
+        setReceiptObjectPath(objectPath);
+      }
+      return;
+    }
+
+    // Native: offer camera or library
+    Alert.alert('Add Receipt', 'Choose a source', [
+      {
+        text: 'Camera',
+        onPress: async () => {
+          const perm = await ImagePicker.requestCameraPermissionsAsync();
+          if (!perm.granted) {
+            Alert.alert('Permission required', 'Camera access is needed to capture receipts.');
+            return;
+          }
+          const result = await ImagePicker.launchCameraAsync({
+            mediaTypes: ['images'],
+            quality: 0.7,
+            allowsEditing: false,
+          });
+          if (!result.canceled && result.assets[0]) {
+            const asset = result.assets[0];
+            setReceiptUri(asset.uri);
+            setReceiptObjectPath(null);
+            const mimeType = asset.mimeType ?? 'image/jpeg';
+            const fileName = asset.fileName ?? `receipt-${Date.now()}.jpg`;
+            const objectPath = await uploadReceipt(asset.uri, fileName, mimeType);
+            setReceiptObjectPath(objectPath);
+          }
+        },
+      },
+      {
+        text: 'Photo Library',
+        onPress: async () => {
+          const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (!perm.granted) {
+            Alert.alert('Permission required', 'Photo library access is needed to pick receipts.');
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            quality: 0.7,
+            allowsEditing: false,
+          });
+          if (!result.canceled && result.assets[0]) {
+            const asset = result.assets[0];
+            setReceiptUri(asset.uri);
+            setReceiptObjectPath(null);
+            const mimeType = asset.mimeType ?? 'image/jpeg';
+            const fileName = asset.fileName ?? `receipt-${Date.now()}.jpg`;
+            const objectPath = await uploadReceipt(asset.uri, fileName, mimeType);
+            setReceiptObjectPath(objectPath);
+          }
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
+  function handleRemoveReceipt() {
+    setReceiptUri(null);
+    setReceiptObjectPath(null);
+  }
 
   function handlePad(key: string) {
     Haptics.selectionAsync();
@@ -113,6 +239,7 @@ export default function AddExpenseScreen() {
         description: description.trim(),
         category,
         date: isoToday(),
+        receiptUrl: receiptObjectPath ?? undefined,
       },
     });
   }
@@ -121,7 +248,8 @@ export default function AddExpenseScreen() {
     parseFloat(amountRaw || '0') > 0 &&
     description.trim() &&
     paidByUserId &&
-    !isPending
+    !isPending &&
+    !isUploading
   );
 
   const catSelected = CATEGORIES.find((c) => c.key === category)!;
@@ -229,6 +357,38 @@ export default function AddExpenseScreen() {
           />
         </View>
 
+        {/* Receipt photo */}
+        <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>RECEIPT</Text>
+        {receiptUri ? (
+          <View style={[styles.receiptWrap, { borderColor: colors.border }]}>
+            <Image source={{ uri: receiptUri }} style={styles.receiptPreview} resizeMode="cover" />
+            {isUploading && (
+              <View style={styles.receiptOverlay}>
+                <ActivityIndicator color="#fff" />
+                <Text style={styles.receiptOverlayText}>Uploading…</Text>
+              </View>
+            )}
+            {!isUploading && receiptObjectPath && (
+              <View style={[styles.receiptBadge, { backgroundColor: '#10B981' }]}>
+                <Feather name="check" size={11} color="#fff" />
+                <Text style={styles.receiptBadgeText}>Uploaded</Text>
+              </View>
+            )}
+            <TouchableOpacity style={styles.receiptRemove} onPress={handleRemoveReceipt} hitSlop={8}>
+              <Feather name="x-circle" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.receiptBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+            onPress={handlePickReceipt}
+            activeOpacity={0.8}
+          >
+            <Feather name="camera" size={18} color={colors.primary} />
+            <Text style={[styles.receiptBtnText, { color: colors.primary }]}>Attach Receipt</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Paid by */}
         {participants && participants.length > 0 ? (
           <>
@@ -283,7 +443,7 @@ export default function AddExpenseScreen() {
           activeOpacity={0.85}
           testID="submit-expense"
         >
-          {isPending ? (
+          {isPending || isUploading ? (
             <ActivityIndicator color="#fff" />
           ) : (
             <>
@@ -403,6 +563,64 @@ const styles = StyleSheet.create({
     padding: 0,
     margin: 0,
   },
+  receiptWrap: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    height: 140,
+  },
+  receiptPreview: {
+    width: '100%',
+    height: '100%',
+  },
+  receiptOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  receiptOverlayText: {
+    color: '#fff',
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+  },
+  receiptBadge: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  receiptBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  receiptRemove: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+  },
+  receiptBtn: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderStyle: 'dashed',
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  receiptBtnText: { fontSize: 14, fontFamily: 'Inter_500Medium' },
   paidByScroll: {
     paddingLeft: 16,
     marginBottom: 16,

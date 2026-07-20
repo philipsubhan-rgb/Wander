@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Alert, RefreshControl,
+  ActivityIndicator, Alert, RefreshControl, Image,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -13,6 +13,7 @@ import {
 } from '@workspace/api-client-react';
 import type { TripExpense } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
+import { getBaseUrl } from '@/lib/api';
 
 type Category = 'travel' | 'activity' | 'restaurant' | 'car_rental' | 'accommodation' | 'other';
 
@@ -25,6 +26,14 @@ const CAT_COLORS: Record<Category, string> = {
   car_rental: '#8B5CF6', accommodation: '#EC4899', other: '#6B7FA3',
 };
 
+/** Convert a stored objectPath (e.g. /objects/uploads/uuid) to a full serving URL. */
+function receiptImageUrl(objectPath: string): string {
+  const base = getBaseUrl();
+  // objectPath already starts with /objects/…, serving endpoint is /api/storage/objects/…
+  const withoutPrefix = objectPath.replace(/^\/objects\//, '');
+  return `${base}/api/storage/objects/${withoutPrefix}`;
+}
+
 function ExpenseRow({ expense, colors, onDelete }: {
   expense: TripExpense; colors: ReturnType<typeof useColors>; onDelete: (id: number) => void;
 }) {
@@ -32,6 +41,7 @@ function ExpenseRow({ expense, colors, onDelete }: {
   const icon = CAT_ICONS[(expense.category as Category)] ?? 'tag';
   const amount = parseFloat(expense.amount);
   const date = new Date(expense.date);
+  const receiptUrl = expense.receiptUrl ? receiptImageUrl(expense.receiptUrl) : null;
 
   function confirmDelete() {
     Alert.alert('Delete Expense', `Remove "${expense.description}"?`, [
@@ -42,9 +52,13 @@ function ExpenseRow({ expense, colors, onDelete }: {
 
   return (
     <View style={[er.row, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <View style={[er.catIcon, { backgroundColor: color + '18' }]}>
-        <Feather name={icon} size={16} color={color} />
-      </View>
+      {receiptUrl ? (
+        <Image source={{ uri: receiptUrl }} style={er.thumbnail} resizeMode="cover" />
+      ) : (
+        <View style={[er.catIcon, { backgroundColor: color + '18' }]}>
+          <Feather name={icon} size={16} color={color} />
+        </View>
+      )}
       <View style={er.body}>
         <Text style={[er.desc, { color: colors.foreground }]} numberOfLines={1}>{expense.description}</Text>
         <View style={er.meta}>
@@ -53,6 +67,12 @@ function ExpenseRow({ expense, colors, onDelete }: {
           <Text style={[er.date, { color: colors.mutedForeground }]}>
             {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
           </Text>
+          {receiptUrl && (
+            <>
+              <View style={er.dot} />
+              <Feather name="camera" size={10} color={colors.mutedForeground} />
+            </>
+          )}
         </View>
       </View>
       <View style={er.right}>
@@ -68,6 +88,7 @@ function ExpenseRow({ expense, colors, onDelete }: {
 const er = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: 12, gap: 12 },
   catIcon: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  thumbnail: { width: 38, height: 38, borderRadius: 10 },
   body: { flex: 1, gap: 3 },
   desc: { fontSize: 14, fontFamily: 'Inter_500Medium' },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 6 },

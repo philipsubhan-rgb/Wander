@@ -15,4 +15,6 @@ export interface ExpenseInput {
   category?: ExpenseInputCategory;
   date: string;
   notes?: string;
+  /** Object path for the attached receipt photo */
+  receiptUrl?: string;
 }

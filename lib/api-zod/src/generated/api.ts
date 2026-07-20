@@ -9,6 +9,46 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary Request a presigned URL for file upload
+ */
+
+
+
+
+
+export const RequestUploadUrlBody = zod.object({
+  "name": zod.string().min(1),
+  "size": zod.number().min(1),
+  "contentType": zod.string().min(1)
+})
+
+
+
+
+
+
+export const RequestUploadUrlResponse = zod.object({
+  "uploadURL": zod.string(),
+  "objectPath": zod.string(),
+  "metadata": zod.object({
+  "name": zod.string().min(1),
+  "size": zod.number().min(1),
+  "contentType": zod.string().min(1)
+}).optional()
+})
+
+
+/**
+ * @summary Serve an object entity from PRIVATE_OBJECT_DIR
+ */
+export const GetStorageObjectParams = zod.object({
+  "objectPath": zod.coerce.string()
+})
+
+export const GetStorageObjectResponse = zod.unknown()
+
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
@@ -29,7 +69,8 @@ export const LoginResponse = zod.object({
   "username": zod.string(),
   "name": zod.string(),
   "role": zod.enum(['admin', 'traveler']),
-  "email": zod.string()
+  "email": zod.string(),
+  "token": zod.string().optional().describe('Signed JWT for use as a bearer token by native clients (e.g. Expo Go). Web clients should ignore this and rely on session cookies instead.')
 })
 
 
@@ -1220,6 +1261,7 @@ export const ListExpensesResponseItem = zod.object({
   "category": zod.enum(['travel', 'activity', 'restaurant', 'car_rental', 'accommodation', 'other']),
   "date": zod.string(),
   "notes": zod.string().nullish(),
+  "receiptUrl": zod.string().nullish().describe('Object path for the attached receipt photo (e.g. \/objects\/uploads\/uuid)'),
   "createdAt": zod.string(),
   "splits": zod.array(zod.object({
   "id": zod.number(),
@@ -1248,7 +1290,8 @@ export const CreateExpenseBody = zod.object({
   "description": zod.string(),
   "category": zod.enum(['travel', 'activity', 'restaurant', 'car_rental', 'accommodation', 'other']).optional(),
   "date": zod.string(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "receiptUrl": zod.string().optional().describe('Object path for the attached receipt photo')
 })
 
 export const CreateExpenseResponse = zod.object({
@@ -1262,6 +1305,7 @@ export const CreateExpenseResponse = zod.object({
   "category": zod.enum(['travel', 'activity', 'restaurant', 'car_rental', 'accommodation', 'other']),
   "date": zod.string(),
   "notes": zod.string().nullish(),
+  "receiptUrl": zod.string().nullish().describe('Object path for the attached receipt photo (e.g. \/objects\/uploads\/uuid)'),
   "createdAt": zod.string(),
   "splits": zod.array(zod.object({
   "id": zod.number(),
@@ -1315,7 +1359,8 @@ export const UpdateExpenseBody = zod.object({
   "description": zod.string().optional(),
   "category": zod.enum(['travel', 'activity', 'restaurant', 'car_rental', 'accommodation', 'other']).optional(),
   "date": zod.string().optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "receiptUrl": zod.string().optional().describe('Object path for the attached receipt photo')
 })
 
 export const UpdateExpenseResponse = zod.object({
@@ -1329,6 +1374,7 @@ export const UpdateExpenseResponse = zod.object({
   "category": zod.enum(['travel', 'activity', 'restaurant', 'car_rental', 'accommodation', 'other']),
   "date": zod.string(),
   "notes": zod.string().nullish(),
+  "receiptUrl": zod.string().nullish().describe('Object path for the attached receipt photo (e.g. \/objects\/uploads\/uuid)'),
   "createdAt": zod.string(),
   "splits": zod.array(zod.object({
   "id": zod.number(),

@@ -15,4 +15,6 @@ export interface ExpenseUpdate {
   category?: ExpenseUpdateCategory;
   date?: string;
   notes?: string;
+  /** Object path for the attached receipt photo */
+  receiptUrl?: string;
 }
