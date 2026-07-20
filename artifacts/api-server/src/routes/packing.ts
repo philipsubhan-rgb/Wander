@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and, isNull, sql } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { db, packingItemsTable, packingItemChecksTable } from "@workspace/db";
 import {
   ListPackingItemsParams,
@@ -9,7 +9,7 @@ import {
   UpdatePackingItemBody,
   DeletePackingItemParams,
 } from "@workspace/api-zod";
-import { requireAuth } from "../middlewares/auth";
+import { requireAuth, getAuthUserId, getAuthRole } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -36,7 +36,7 @@ router.get("/trips/:tripId/packing", requireAuth, async (req, res): Promise<void
   const params = ListPackingItemsParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const { tripId } = params.data;
-  const myUserId = req.session!.userId!;
+  const myUserId = getAuthUserId(req, res)!;
 
   // Template items — left join with packing_item_checks to get per-user checked state
   const templateRows = await db
@@ -84,8 +84,8 @@ router.post("/trips/:tripId/packing", requireAuth, async (req, res): Promise<voi
   const parsed = CreatePackingItemBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
-  const myUserId = req.session!.userId!;
-  const isAdmin = (req.session as any).isAdmin === true;
+  const myUserId = getAuthUserId(req, res)!;
+  const isAdmin = getAuthRole(req, res) === "admin";
   const isTemplate = isAdmin && req.body.isTemplate === true;
 
   const [item] = await db.insert(packingItemsTable).values({
@@ -109,8 +109,8 @@ router.patch("/trips/:tripId/packing/:packingItemId", requireAuth, async (req, r
   const parsed = UpdatePackingItemBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
-  const myUserId = req.session!.userId!;
-  const isAdmin = (req.session as any).isAdmin === true;
+  const myUserId = getAuthUserId(req, res)!;
+  const isAdmin = getAuthRole(req, res) === "admin";
 
   const [existing] = await db
     .select()
@@ -177,8 +177,8 @@ router.delete("/trips/:tripId/packing/:packingItemId", requireAuth, async (req, 
   const params = DeletePackingItemParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
 
-  const myUserId = req.session!.userId!;
-  const isAdmin = (req.session as any).isAdmin === true;
+  const myUserId = getAuthUserId(req, res)!;
+  const isAdmin = getAuthRole(req, res) === "admin";
 
   const [existing] = await db
     .select()

@@ -27,6 +27,7 @@ import type {
   ActivityInput,
   ActivityUpdate,
   AuthUser,
+  LoginResponse,
   CarRental,
   CarRentalInput,
   CarRentalUpdate,
@@ -187,9 +188,9 @@ export const getLoginUrl = () => {
 /**
  * @summary Login with username and password
  */
-export const login = async (loginInput: LoginInput, options?: RequestInit): Promise<AuthUser> => {
+export const login = async (loginInput: LoginInput, options?: RequestInit): Promise<LoginResponse> => {
 
-  return customFetch<AuthUser>(getLoginUrl(),
+  return customFetch<LoginResponse>(getLoginUrl(),
   {
     ...options,
     method: 'POST',

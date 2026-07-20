@@ -30,6 +30,16 @@ export const AuthUserRole = {
   traveler: 'traveler',
 } as const;
 
+export interface LoginResponse {
+  id: number;
+  username: string;
+  name: string;
+  role: AuthUserRole;
+  email: string;
+  /** Signed JWT for use as a bearer token by native clients (e.g. Expo Go). Web clients should ignore this and rely on session cookies instead. */
+  token?: string;
+}
+
 export interface AuthUser {
   id: number;
   username: string;

@@ -15,7 +15,7 @@ import {
   UpdateTravelDocumentBody,
   DeleteTravelDocumentParams,
 } from "@workspace/api-zod";
-import { requireAuth } from "../middlewares/auth";
+import { requireAuth, getAuthUserId } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -48,7 +48,7 @@ router.get("/trips/:tripId/notes", requireAuth, async (req, res): Promise<void> 
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
 
   const { tripId } = params.data;
-  const myUserId = req.session!.userId!;
+  const myUserId = getAuthUserId(req, res)!;
 
   const myNotes = await db.select().from(tripNotesTable).where(
     and(eq(tripNotesTable.tripId, tripId), eq(tripNotesTable.userId, myUserId))
@@ -65,7 +65,7 @@ router.post("/trips/:tripId/notes", requireAuth, async (req, res): Promise<void>
   const [item] = await db.insert(tripNotesTable).values({
     ...parsed.data,
     tripId: params.data.tripId,
-    userId: req.session!.userId!,
+    userId: getAuthUserId(req, res)!,
   }).returning();
   res.status(201).json(serializeNote({ ...item, isMine: true }));
 });
@@ -80,7 +80,7 @@ router.patch("/trips/:tripId/notes/:tripNoteId", requireAuth, async (req, res): 
     .where(and(
       eq(tripNotesTable.id, params.data.tripNoteId),
       eq(tripNotesTable.tripId, params.data.tripId),
-      eq(tripNotesTable.userId, req.session!.userId!)   // can only edit own notes
+      eq(tripNotesTable.userId, getAuthUserId(req, res)!)   // can only edit own notes
     )).returning();
   if (!item) { res.status(404).json({ error: "Note not found" }); return; }
   res.json(serializeNote({ ...item, isMine: true }));
@@ -92,7 +92,7 @@ router.delete("/trips/:tripId/notes/:tripNoteId", requireAuth, async (req, res):
   const [item] = await db.delete(tripNotesTable).where(and(
     eq(tripNotesTable.id, params.data.tripNoteId),
     eq(tripNotesTable.tripId, params.data.tripId),
-    eq(tripNotesTable.userId, req.session!.userId!)
+    eq(tripNotesTable.userId, getAuthUserId(req, res)!)
   )).returning();
   if (!item) { res.status(404).json({ error: "Note not found" }); return; }
   res.json({ success: true });
@@ -104,7 +104,7 @@ router.get("/trips/:tripId/documents", requireAuth, async (req, res): Promise<vo
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
 
   const { tripId } = params.data;
-  const myUserId = req.session!.userId!;
+  const myUserId = getAuthUserId(req, res)!;
 
   const myDocs = await db.select().from(travelDocumentsTable).where(
     and(eq(travelDocumentsTable.tripId, tripId), eq(travelDocumentsTable.userId, myUserId))
@@ -121,7 +121,7 @@ router.post("/trips/:tripId/documents", requireAuth, async (req, res): Promise<v
   const [item] = await db.insert(travelDocumentsTable).values({
     ...parsed.data,
     tripId: params.data.tripId,
-    userId: req.session!.userId!,
+    userId: getAuthUserId(req, res)!,
   }).returning();
   res.status(201).json(serializeDoc({ ...item, isMine: true }));
 });
@@ -134,7 +134,7 @@ router.patch("/trips/:tripId/documents/:travelDocumentId", requireAuth, async (r
   const [item] = await db.update(travelDocumentsTable).set(parsed.data).where(and(
     eq(travelDocumentsTable.id, params.data.travelDocumentId),
     eq(travelDocumentsTable.tripId, params.data.tripId),
-    eq(travelDocumentsTable.userId, req.session!.userId!)
+    eq(travelDocumentsTable.userId, getAuthUserId(req, res)!)
   )).returning();
   if (!item) { res.status(404).json({ error: "Document not found" }); return; }
   res.json(serializeDoc({ ...item, isMine: true }));
@@ -146,7 +146,7 @@ router.delete("/trips/:tripId/documents/:travelDocumentId", requireAuth, async (
   const [item] = await db.delete(travelDocumentsTable).where(and(
     eq(travelDocumentsTable.id, params.data.travelDocumentId),
     eq(travelDocumentsTable.tripId, params.data.tripId),
-    eq(travelDocumentsTable.userId, req.session!.userId!)
+    eq(travelDocumentsTable.userId, getAuthUserId(req, res)!)
   )).returning();
   if (!item) { res.status(404).json({ error: "Document not found" }); return; }
   res.json({ success: true });

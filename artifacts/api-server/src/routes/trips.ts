@@ -14,7 +14,7 @@ import {
   AddTripParticipantParams,
   RemoveTripParticipantParams,
 } from "@workspace/api-zod";
-import { requireAdmin, requireAuth, requireTripAdmin } from "../middlewares/auth";
+import { requireAdmin, requireAuth, requireTripAdmin, getAuthUserId, getAuthRole } from "../middlewares/auth";
 import { fetchDestinationImage } from "../lib/destination-image";
 import { recalcExpenseSplitsForTrip } from "./expenses";
 
@@ -50,7 +50,7 @@ async function resolveIsTripAdmin(userId: number, isGlobalAdmin: boolean, tripId
 
 // Travelers see only their own trips; global admins see all
 router.get("/trips", requireAuth, async (req, res): Promise<void> => {
-  if (req.session!.role === "admin") {
+  if (getAuthRole(req, res) === "admin") {
     const trips = await db.select().from(tripsTable).orderBy(tripsTable.startDate);
     res.json(trips.map(serializeTrip));
   } else {
@@ -59,7 +59,7 @@ router.get("/trips", requireAuth, async (req, res): Promise<void> => {
       .from(tripsTable)
       .innerJoin(tripParticipantsTable, and(
         eq(tripParticipantsTable.tripId, tripsTable.id),
-        eq(tripParticipantsTable.userId, req.session!.userId!)
+        eq(tripParticipantsTable.userId, getAuthUserId(req, res)!)
       ))
       .orderBy(tripsTable.startDate);
     res.json(trips.map(r => serializeTrip(r.trip)));
@@ -78,7 +78,7 @@ router.post("/trips", requireAuth, async (req, res): Promise<void> => {
 
   // Auto-add the creator as a participant and trip admin
   await db.insert(tripParticipantsTable)
-    .values({ tripId: trip.id, userId: req.session!.userId!, isTripAdmin: true })
+    .values({ tripId: trip.id, userId: getAuthUserId(req, res)!, isTripAdmin: true })
     .onConflictDoNothing();
 
   // Auto-fetch a cover image if none was provided
@@ -107,7 +107,7 @@ router.get("/trips/:tripId", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const isGlobalAdmin = req.session!.role === "admin";
+  const isGlobalAdmin = getAuthRole(req, res) === "admin";
 
   // Check access and resolve per-trip admin status in one query for non-global admins
   if (!isGlobalAdmin) {
@@ -116,7 +116,7 @@ router.get("/trips/:tripId", requireAuth, async (req, res): Promise<void> => {
       .from(tripParticipantsTable)
       .where(and(
         eq(tripParticipantsTable.tripId, params.data.tripId),
-        eq(tripParticipantsTable.userId, req.session!.userId!)
+        eq(tripParticipantsTable.userId, getAuthUserId(req, res)!)
       ));
     if (!participant) {
       res.status(403).json({ error: "Access denied" });

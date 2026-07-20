@@ -68,7 +68,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthUser"
+                $ref: "#/components/schemas/LoginResponse"
         "401":
           description: Invalid credentials
           content:
@@ -1459,6 +1459,25 @@ components:
           type: string
         password:
           type: string
+
+    LoginResponse:
+      type: object
+      required: [id, username, name, role, email]
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [admin, traveler]
+        email:
+          type: string
+        token:
+          type: string
+          description: Signed JWT for use as a bearer token by native clients (e.g. Expo Go). Web clients should ignore this and rely on session cookies instead.
 
     AuthUser:
       type: object

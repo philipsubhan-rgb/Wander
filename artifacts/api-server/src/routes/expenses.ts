@@ -10,7 +10,7 @@ import {
   GetExpenseBalanceParams,
   ReimburseExpenseSplitParams,
 } from "@workspace/api-zod";
-import { requireTripParticipant } from "../middlewares/auth";
+import { requireTripParticipant, getAuthUserId, getAuthRole } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -423,8 +423,8 @@ router.post(
     if (!expense) { res.status(404).json({ error: "Expense not found" }); return; }
 
     // Authorization: the debtor themselves OR a trip/global admin may mark as reimbursed
-    const requestingUserId = req.session!.userId!;
-    const isGlobalAdmin    = req.session!.role === "admin";
+    const requestingUserId = getAuthUserId(req, res)!;
+    const isGlobalAdmin    = getAuthRole(req, res) === "admin";
 
     if (!isGlobalAdmin && requestingUserId !== userId) {
       const [tripAdmin] = await db

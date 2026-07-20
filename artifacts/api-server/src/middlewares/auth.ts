@@ -1,25 +1,80 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { eq, and } from "drizzle-orm";
 import { db, tripParticipantsTable } from "@workspace/db";
+import { verifyAuthToken } from "../routes/auth";
+
+// ---------------------------------------------------------------------------
+// Extend Express locals to carry bearer-auth context (request-scoped only,
+// never written to the session store).
+// ---------------------------------------------------------------------------
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Locals {
+      bearerAuth?: { userId: number; role: string };
+    }
+  }
+}
+
+/**
+ * Populate res.locals.bearerAuth from a Bearer token when no session cookie
+ * is present. This lets native Expo Go clients authenticate with a JWT
+ * without creating or touching any session-store records.
+ */
+async function applyBearerToken(req: Request, res: Response): Promise<void> {
+  if (req.session?.userId) return; // session already authenticated — nothing to do
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) return;
+
+  const token = authHeader.slice(7);
+  const payload = verifyAuthToken(token);
+  if (!payload) return;
+
+  // Store on res.locals — request-scoped, never persisted to the session table
+  res.locals.bearerAuth = { userId: payload.userId, role: payload.role };
+}
+
+/** Resolve the authenticated userId from session OR bearer token. */
+export function getAuthUserId(req: Request, res: Response): number | undefined {
+  return req.session?.userId ?? res.locals.bearerAuth?.userId;
+}
+
+/** Resolve the authenticated role from session OR bearer token. */
+export function getAuthRole(req: Request, res: Response): string | undefined {
+  return req.session?.role ?? res.locals.bearerAuth?.role;
+}
+
+// Keep private aliases so the middleware code below stays readable
+const resolvedUserId = getAuthUserId;
+const resolvedRole = getAuthRole;
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  if (!req.session?.userId) {
-    res.status(401).json({ error: "Not authenticated" });
-    return;
-  }
-  next();
+  applyBearerToken(req, res).then(() => {
+    if (!resolvedUserId(req, res)) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+    next();
+  }).catch(() => {
+    res.status(500).json({ error: "Internal server error" });
+  });
 }
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  if (!req.session?.userId) {
-    res.status(401).json({ error: "Not authenticated" });
-    return;
-  }
-  if (req.session.role !== "admin") {
-    res.status(403).json({ error: "Admin access required" });
-    return;
-  }
-  next();
+  applyBearerToken(req, res).then(() => {
+    if (!resolvedUserId(req, res)) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+    if (resolvedRole(req, res) !== "admin") {
+      res.status(403).json({ error: "Admin access required" });
+      return;
+    }
+    next();
+  }).catch(() => {
+    res.status(500).json({ error: "Internal server error" });
+  });
 }
 
 /**
@@ -31,11 +86,14 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
  */
 export function requireTripParticipant(tripIdParam = "tripId") {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    if (!req.session?.userId) {
+    await applyBearerToken(req, res);
+
+    const userId = resolvedUserId(req, res);
+    if (!userId) {
       res.status(401).json({ error: "Not authenticated" });
       return;
     }
-    if (req.session.role === "admin") { next(); return; }
+    if (resolvedRole(req, res) === "admin") { next(); return; }
 
     const rawParam = req.params[tripIdParam];
     const tripId = parseInt(Array.isArray(rawParam) ? rawParam[0] : rawParam);
@@ -47,7 +105,7 @@ export function requireTripParticipant(tripIdParam = "tripId") {
         .from(tripParticipantsTable)
         .where(and(
           eq(tripParticipantsTable.tripId, tripId),
-          eq(tripParticipantsTable.userId, req.session.userId!),
+          eq(tripParticipantsTable.userId, userId),
         ));
       if (!participant) { res.status(403).json({ error: "Trip access required" }); return; }
       next();
@@ -67,13 +125,16 @@ export function requireTripParticipant(tripIdParam = "tripId") {
  */
 export function requireTripAdmin(tripIdParam = "tripId") {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    if (!req.session?.userId) {
+    await applyBearerToken(req, res);
+
+    const userId = resolvedUserId(req, res);
+    if (!userId) {
       res.status(401).json({ error: "Not authenticated" });
       return;
     }
 
     // Global admins always pass
-    if (req.session.role === "admin") {
+    if (resolvedRole(req, res) === "admin") {
       next();
       return;
     }
@@ -92,7 +153,7 @@ export function requireTripAdmin(tripIdParam = "tripId") {
         .where(
           and(
             eq(tripParticipantsTable.tripId, tripId),
-            eq(tripParticipantsTable.userId, req.session.userId!),
+            eq(tripParticipantsTable.userId, userId),
             eq(tripParticipantsTable.isTripAdmin, true),
           )
         );
