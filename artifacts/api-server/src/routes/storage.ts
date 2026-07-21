@@ -4,12 +4,14 @@ import {
   RequestUploadUrlResponse,
 } from '@workspace/api-zod';
 import { Router, type IRouter, type Request, type Response } from 'express';
+import { eq, and } from 'drizzle-orm';
 
-import { requireAuth, getAuthUserId } from '../middlewares/auth';
+import { requireAuth, getAuthUserId, getAuthRole } from '../middlewares/auth';
 import {
   ObjectNotFoundError,
   ObjectStorageService,
 } from '../lib/objectStorage';
+import { db, tripExpensesTable, tripParticipantsTable } from '@workspace/db';
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -57,7 +59,8 @@ router.post(
  * GET /storage/objects/*
  *
  * Serve object entities from PRIVATE_OBJECT_DIR.
- * Any authenticated trip participant can read receipt images.
+ * Callers must be authenticated AND be a participant of the trip that owns
+ * the receipt. Global admins bypass the trip-membership check.
  */
 router.get(
   '/storage/objects/*path',
@@ -67,6 +70,42 @@ router.get(
       const raw = req.params.path;
       const wildcardPath = Array.isArray(raw) ? raw.join('/') : raw;
       const objectPath = `/objects/${wildcardPath}`;
+
+      // ── Trip-ownership check ──────────────────────────────────────────────
+      // Look up which trip this receipt URL belongs to, then verify that the
+      // requesting user is actually a participant of that trip.
+      // Fail closed: if the path isn't associated with any expense, deny access.
+      const userId = getAuthUserId(req, res)!;
+      const role = getAuthRole(req, res);
+
+      if (role !== 'admin') {
+        const [expense] = await db
+          .select({ tripId: tripExpensesTable.tripId })
+          .from(tripExpensesTable)
+          .where(eq(tripExpensesTable.receiptUrl, objectPath));
+
+        if (!expense) {
+          res.status(403).json({ error: 'Trip access required' });
+          return;
+        }
+
+        const [participant] = await db
+          .select()
+          .from(tripParticipantsTable)
+          .where(
+            and(
+              eq(tripParticipantsTable.tripId, expense.tripId),
+              eq(tripParticipantsTable.userId, userId),
+            ),
+          );
+
+        if (!participant) {
+          res.status(403).json({ error: 'Trip access required' });
+          return;
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       const objectFile =
         await objectStorageService.getObjectEntityFile(objectPath);
 
