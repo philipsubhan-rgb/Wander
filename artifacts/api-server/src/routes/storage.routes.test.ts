@@ -77,6 +77,8 @@ let mockDownloadFn: () => Promise<Response> = async () =>
     status: 200,
     headers: { "Content-Type": "image/jpeg", "Content-Length": "11" },
   });
+let mockUploadURLFn: () => Promise<string> = async () =>
+  "https://storage.googleapis.com/bucket/uploads/new-object-uuid";
 
 vi.mock("../lib/objectStorage.js", () => {
   class ObjectNotFoundError extends Error {
@@ -94,8 +96,8 @@ vi.mock("../lib/objectStorage.js", () => {
     async downloadObject(_file: unknown) {
       return mockDownloadFn();
     }
-    getObjectEntityUploadURL() {
-      return Promise.resolve("https://storage.googleapis.com/bucket/obj");
+    async getObjectEntityUploadURL() {
+      return mockUploadURLFn();
     }
     normalizeObjectEntityPath(rawPath: string) {
       return rawPath;
@@ -204,6 +206,8 @@ beforeEach(() => {
       status: 200,
       headers: { "Content-Type": "image/jpeg", "Content-Length": "11" },
     });
+  mockUploadURLFn = async () =>
+    "https://storage.googleapis.com/bucket/uploads/new-object-uuid";
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -322,5 +326,151 @@ describe("GET /storage/objects/:path — downstream storage error", () => {
 
     const res = await fetch(`${authBase}/storage/objects/uploads/some-receipt`);
     expect(res.status).toBe(500);
+  });
+});
+
+// ── POST /storage/uploads/request-url ────────────────────────────────────────
+
+const VALID_UPLOAD_BODY = {
+  name: "receipt.jpg",
+  size: 204800,
+  contentType: "image/jpeg",
+};
+
+describe("POST /storage/uploads/request-url — authentication guard", () => {
+  it("returns 401 when the caller has no session", async () => {
+    const res = await fetch(`${noAuthBase}/storage/uploads/request-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(VALID_UPLOAD_BODY),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("returns a JSON error body on 401", async () => {
+    const res = await fetch(`${noAuthBase}/storage/uploads/request-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(VALID_UPLOAD_BODY),
+    });
+    const body = await res.json() as Record<string, unknown>;
+    expect(typeof body.error).toBe("string");
+  });
+});
+
+describe("POST /storage/uploads/request-url — input validation", () => {
+  it("returns 400 when the request body is empty", async () => {
+    const res = await fetch(`${authBase}/storage/uploads/request-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when name is missing", async () => {
+    const res = await fetch(`${authBase}/storage/uploads/request-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ size: 1024, contentType: "image/jpeg" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when size is missing", async () => {
+    const res = await fetch(`${authBase}/storage/uploads/request-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "file.jpg", contentType: "image/jpeg" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when contentType is missing", async () => {
+    const res = await fetch(`${authBase}/storage/uploads/request-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "file.jpg", size: 1024 }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("400 response includes a JSON error field", async () => {
+    const res = await fetch(`${authBase}/storage/uploads/request-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const body = await res.json() as Record<string, unknown>;
+    expect(typeof body.error).toBe("string");
+  });
+});
+
+describe("POST /storage/uploads/request-url — happy path", () => {
+  it("returns 200 for an authenticated request with a valid body", async () => {
+    const res = await fetch(`${authBase}/storage/uploads/request-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(VALID_UPLOAD_BODY),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("response body contains an uploadURL field", async () => {
+    const res = await fetch(`${authBase}/storage/uploads/request-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(VALID_UPLOAD_BODY),
+    });
+    const body = await res.json() as Record<string, unknown>;
+    expect(typeof body.uploadURL).toBe("string");
+    expect((body.uploadURL as string).length).toBeGreaterThan(0);
+  });
+
+  it("response body contains an objectPath field", async () => {
+    const res = await fetch(`${authBase}/storage/uploads/request-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(VALID_UPLOAD_BODY),
+    });
+    const body = await res.json() as Record<string, unknown>;
+    expect(typeof body.objectPath).toBe("string");
+    expect((body.objectPath as string).length).toBeGreaterThan(0);
+  });
+
+  it("uploadURL value matches what the storage service returned", async () => {
+    const expectedURL = "https://storage.googleapis.com/bucket/uploads/new-object-uuid";
+    const res = await fetch(`${authBase}/storage/uploads/request-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(VALID_UPLOAD_BODY),
+    });
+    const body = await res.json() as Record<string, unknown>;
+    expect(body.uploadURL).toBe(expectedURL);
+  });
+});
+
+describe("POST /storage/uploads/request-url — storage service failure", () => {
+  it("returns 500 when the storage service throws an unexpected error", async () => {
+    mockUploadURLFn = async () => { throw new Error("PRIVATE_OBJECT_DIR is not set"); };
+
+    const res = await fetch(`${authBase}/storage/uploads/request-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(VALID_UPLOAD_BODY),
+    });
+    expect(res.status).toBe(500);
+  });
+
+  it("500 response body contains a JSON error field", async () => {
+    mockUploadURLFn = async () => { throw new Error("sidecar unreachable"); };
+
+    const res = await fetch(`${authBase}/storage/uploads/request-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(VALID_UPLOAD_BODY),
+    });
+    const body = await res.json() as Record<string, unknown>;
+    expect(typeof body.error).toBe("string");
   });
 });
