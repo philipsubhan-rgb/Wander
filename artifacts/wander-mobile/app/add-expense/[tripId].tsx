@@ -26,6 +26,7 @@ import {
 } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
+import { DatePickerField } from '@/components/DatePickerField';
 
 type Category = 'travel' | 'activity' | 'restaurant' | 'car_rental' | 'accommodation' | 'other';
 
@@ -63,6 +64,7 @@ export default function AddExpenseScreen() {
   const [amountRaw, setAmountRaw] = useState('');
   const [category, setCategory] = useState<Category>('restaurant');
   const [description, setDescription] = useState('');
+  const [date, setDate] = useState(isoToday());
   const [paidByUserId, setPaidByUserId] = useState<number | null>(user?.id ?? null);
   const [receiptUri, setReceiptUri] = useState<string | null>(null);
   const [receiptObjectPath, setReceiptObjectPath] = useState<string | null>(null);
@@ -238,7 +240,7 @@ export default function AddExpenseScreen() {
         currency: 'USD',
         description: description.trim(),
         category,
-        date: isoToday(),
+        date,
         receiptUrl: receiptObjectPath ?? undefined,
       },
     });
@@ -356,6 +358,15 @@ export default function AddExpenseScreen() {
             testID="description-input"
           />
         </View>
+
+        {/* Date */}
+        <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>DATE</Text>
+        <DatePickerField
+          value={date}
+          onChange={setDate}
+          colors={colors}
+          testID="date-input"
+        />
 
         {/* Receipt photo */}
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>RECEIPT</Text>

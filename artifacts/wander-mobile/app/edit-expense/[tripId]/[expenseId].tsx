@@ -26,6 +26,7 @@ import {
 } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 import { getBaseUrl } from '@/lib/api';
+import { DatePickerField } from '@/components/DatePickerField';
 
 type Category = 'travel' | 'activity' | 'restaurant' | 'car_rental' | 'accommodation' | 'other';
 
@@ -263,8 +264,8 @@ export default function EditExpenseScreen() {
       Alert.alert('Missing description', 'Please enter a description for this expense.');
       return;
     }
-    if (!date.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      Alert.alert('Invalid date', 'Please use the format YYYY-MM-DD.');
+    if (!date) {
+      Alert.alert('Missing date', 'Please select a date for this expense.');
       return;
     }
 
@@ -445,18 +446,12 @@ export default function EditExpenseScreen() {
 
         {/* ── Date ── */}
         <Text style={[s.sectionLabel, { color: colors.mutedForeground }]}>DATE</Text>
-        <View style={[s.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <TextInput
-            style={[s.input, { color: colors.foreground }]}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.mutedForeground}
-            value={date}
-            onChangeText={setDate}
-            returnKeyType="done"
-            keyboardType="numbers-and-punctuation"
-            testID="date-input"
-          />
-        </View>
+        <DatePickerField
+          value={date}
+          onChange={setDate}
+          colors={colors}
+          testID="date-input"
+        />
 
         {/* ── Receipt photo ── */}
         <Text style={[s.sectionLabel, { color: colors.mutedForeground }]}>RECEIPT PHOTO</Text>
