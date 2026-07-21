@@ -10,6 +10,7 @@ export type UserLookupResultRole = typeof UserLookupResultRole[keyof typeof User
 
 
 export const UserLookupResultRole = {
+  super_admin: 'super_admin',
   admin: 'admin',
   traveler: 'traveler',
 } as const;

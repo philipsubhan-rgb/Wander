@@ -67,8 +67,8 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
       res.status(401).json({ error: "Not authenticated" });
       return;
     }
-    if (resolvedRole(req, res) !== "admin") {
-      res.status(403).json({ error: "Admin access required" });
+    if (resolvedRole(req, res) !== "super_admin") {
+      res.status(403).json({ error: "Super-admin access required" });
       return;
     }
     next();
@@ -93,7 +93,7 @@ export function requireTripParticipant(tripIdParam = "tripId") {
       res.status(401).json({ error: "Not authenticated" });
       return;
     }
-    if (resolvedRole(req, res) === "admin") { next(); return; }
+    if (resolvedRole(req, res) === "super_admin") { next(); return; }
 
     const rawParam = req.params[tripIdParam];
     const tripId = parseInt(Array.isArray(rawParam) ? rawParam[0] : rawParam);
@@ -133,8 +133,8 @@ export function requireTripAdmin(tripIdParam = "tripId") {
       return;
     }
 
-    // Global admins always pass
-    if (resolvedRole(req, res) === "admin") {
+    // Super admins always pass
+    if (resolvedRole(req, res) === "super_admin") {
       next();
       return;
     }

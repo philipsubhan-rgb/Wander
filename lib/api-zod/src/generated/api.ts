@@ -68,7 +68,7 @@ export const LoginResponse = zod.object({
   "id": zod.number(),
   "username": zod.string(),
   "name": zod.string(),
-  "role": zod.enum(['admin', 'traveler']),
+  "role": zod.enum(['super_admin', 'admin', 'traveler']),
   "email": zod.string(),
   "token": zod.string().optional().describe('Signed JWT for use as a bearer token by native clients (e.g. Expo Go). Web clients should ignore this and rely on session cookies instead.')
 })
@@ -89,7 +89,7 @@ export const GetMeResponse = zod.object({
   "id": zod.number(),
   "username": zod.string(),
   "name": zod.string(),
-  "role": zod.enum(['admin', 'traveler']),
+  "role": zod.enum(['super_admin', 'admin', 'traveler']),
   "email": zod.string()
 })
 
@@ -106,19 +106,19 @@ export const LookupUserByEmailResponse = zod.object({
   "username": zod.string(),
   "name": zod.string(),
   "email": zod.string(),
-  "role": zod.enum(['admin', 'traveler']),
+  "role": zod.enum(['super_admin', 'admin', 'traveler']),
   "otherTripsCount": zod.number()
 })
 
 
 /**
- * @summary List all users (admin only)
+ * @summary List all users (super_admin only)
  */
 export const ListUsersResponseItem = zod.object({
   "id": zod.number(),
   "username": zod.string(),
   "name": zod.string(),
-  "role": zod.enum(['admin', 'traveler']),
+  "role": zod.enum(['super_admin', 'admin', 'traveler']),
   "email": zod.string(),
   "createdAt": zod.string().optional()
 })
@@ -126,21 +126,20 @@ export const ListUsersResponse = zod.array(ListUsersResponseItem)
 
 
 /**
- * @summary Create a new traveler (admin only)
+ * @summary Create a new traveler (super_admin only)
  */
 export const CreateUserBody = zod.object({
-  "username": zod.string(),
   "name": zod.string(),
   "password": zod.string(),
   "email": zod.string(),
-  "role": zod.enum(['admin', 'traveler']).optional()
+  "role": zod.enum(['super_admin', 'admin', 'traveler']).optional()
 })
 
 export const CreateUserResponse = zod.object({
   "id": zod.number(),
   "username": zod.string(),
   "name": zod.string(),
-  "role": zod.enum(['admin', 'traveler']),
+  "role": zod.enum(['super_admin', 'admin', 'traveler']),
   "email": zod.string(),
   "createdAt": zod.string().optional()
 })
@@ -154,7 +153,7 @@ export const GetUserResponse = zod.object({
   "id": zod.number(),
   "username": zod.string(),
   "name": zod.string(),
-  "role": zod.enum(['admin', 'traveler']),
+  "role": zod.enum(['super_admin', 'admin', 'traveler']),
   "email": zod.string(),
   "createdAt": zod.string().optional()
 })
@@ -166,14 +165,15 @@ export const UpdateUserParams = zod.object({
 
 export const UpdateUserBody = zod.object({
   "name": zod.string().optional(),
-  "email": zod.string().optional()
+  "email": zod.string().optional(),
+  "role": zod.enum(['super_admin', 'admin', 'traveler']).optional()
 })
 
 export const UpdateUserResponse = zod.object({
   "id": zod.number(),
   "username": zod.string(),
   "name": zod.string(),
-  "role": zod.enum(['admin', 'traveler']),
+  "role": zod.enum(['super_admin', 'admin', 'traveler']),
   "email": zod.string(),
   "createdAt": zod.string().optional()
 })

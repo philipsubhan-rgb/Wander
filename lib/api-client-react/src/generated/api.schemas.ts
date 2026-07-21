@@ -26,6 +26,7 @@ export type LoginResponseRole = typeof LoginResponseRole[keyof typeof LoginRespo
 
 
 export const LoginResponseRole = {
+  super_admin: 'super_admin',
   admin: 'admin',
   traveler: 'traveler',
 } as const;
@@ -44,6 +45,7 @@ export type AuthUserRole = typeof AuthUserRole[keyof typeof AuthUserRole];
 
 
 export const AuthUserRole = {
+  super_admin: 'super_admin',
   admin: 'admin',
   traveler: 'traveler',
 } as const;
@@ -60,6 +62,7 @@ export type UserRole = typeof UserRole[keyof typeof UserRole];
 
 
 export const UserRole = {
+  super_admin: 'super_admin',
   admin: 'admin',
   traveler: 'traveler',
 } as const;
@@ -77,6 +80,7 @@ export type UserLookupResultRole = typeof UserLookupResultRole[keyof typeof User
 
 
 export const UserLookupResultRole = {
+  super_admin: 'super_admin',
   admin: 'admin',
   traveler: 'traveler',
 } as const;
@@ -94,12 +98,12 @@ export type UserInputRole = typeof UserInputRole[keyof typeof UserInputRole];
 
 
 export const UserInputRole = {
+  super_admin: 'super_admin',
   admin: 'admin',
   traveler: 'traveler',
 } as const;
 
 export interface UserInput {
-  username: string;
   name: string;
   password: string;
   email: string;
@@ -109,6 +113,7 @@ export interface UserInput {
 export interface UserUpdate {
   name?: string;
   email?: string;
+  role?: UserInputRole;
 }
 
 export interface ChangePasswordInput {

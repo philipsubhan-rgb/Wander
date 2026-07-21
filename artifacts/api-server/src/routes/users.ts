@@ -73,12 +73,14 @@ router.post("/users", requireAdmin, async (req, res): Promise<void> => {
     return;
   }
 
-  const { username, name, password, email, role } = parsed.data;
+  const { name, password, email, role } = parsed.data;
+  // username is always the email address (normalised to lowercase)
+  const username = email.toLowerCase();
   const passwordHash = await bcrypt.hash(password, 10);
 
   const [user] = await db
     .insert(usersTable)
-    .values({ username, name, email: email ?? null, role: role ?? "traveler", passwordHash })
+    .values({ username, name, email: email.toLowerCase(), role: (role ?? "traveler") as "super_admin" | "admin" | "traveler", passwordHash })
     .returning();
 
   res.status(201).json(serializeUser(user));
@@ -129,9 +131,19 @@ router.patch("/users/:userId", requireAdmin, async (req, res): Promise<void> => 
     return;
   }
 
+  // Keep username in sync with email whenever email is updated
+  const { name: updName, email: updEmail, role: updRole } = parsed.data;
+  const updateData: Record<string, unknown> = {};
+  if (updName !== undefined) updateData.name = updName;
+  if (updRole !== undefined) updateData.role = updRole;
+  if (updEmail !== undefined) {
+    updateData.email = updEmail.toLowerCase();
+    updateData.username = updEmail.toLowerCase();
+  }
+
   const [user] = await db
     .update(usersTable)
-    .set(parsed.data)
+    .set(updateData as Parameters<ReturnType<typeof db.update>['set']>[0])
     .where(eq(usersTable.id, params.data.userId))
     .returning();
 

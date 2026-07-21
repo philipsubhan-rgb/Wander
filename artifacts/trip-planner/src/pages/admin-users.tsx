@@ -20,28 +20,54 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
-import { Copy, MoreVertical, Key, Trash2, Shield, Pencil, Plus, Plane, UserCheck, UserX } from 'lucide-react';
+import { Copy, MoreVertical, Key, Trash2, Shield, Pencil, Plus, Plane, UserCheck, UserX, ShieldCheck } from 'lucide-react';
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
 const newUserSchema = z.object({
   name: z.string().min(1, 'Name is required'),
-  username: z.string().min(1, 'Username is required'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   email: z.string().email('Valid email is required'),
-  role: z.enum(['admin', 'traveler']),
+  role: z.enum(['super_admin', 'admin', 'traveler']),
 });
 
 const editUserSchema = z.object({
   name: z.string().min(1, 'Name is required'),
-  username: z.string().min(1, 'Username is required'),
   email: z.string().email('Valid email is required'),
-  role: z.enum(['admin', 'traveler']),
+  role: z.enum(['super_admin', 'admin', 'traveler']),
 });
 
 const passwordSchema = z.object({
   newPassword: z.string().min(6, 'Password must be at least 6 characters'),
 });
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function RoleBadge({ role }: { role: string }) {
+  if (role === 'super_admin') return (
+    <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-xs">
+      <ShieldCheck className="h-3 w-3 mr-1" />Super Admin
+    </Badge>
+  );
+  if (role === 'admin') return (
+    <Badge className="bg-primary/10 text-primary border-primary/20 text-xs">
+      <Shield className="h-3 w-3 mr-1" />Admin
+    </Badge>
+  );
+  return null;
+}
+
+function AvatarCircle({ name, role }: { name: string; role: string }) {
+  const bg =
+    role === 'super_admin' ? 'bg-purple-100 text-purple-700' :
+    role === 'admin' ? 'bg-primary/20 text-primary' :
+    'bg-secondary text-secondary-foreground';
+  return (
+    <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-sm ${bg}`}>
+      {name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
@@ -53,9 +79,9 @@ export default function AdminUsers() {
 
   if (isLoading) return <div className="p-8">Loading travelers...</div>;
 
-  const handleCopyCredentials = (username: string) => {
-    navigator.clipboard.writeText(`Username: ${username}`);
-    toast.success('Username copied to clipboard');
+  const handleCopyEmail = (email: string) => {
+    navigator.clipboard.writeText(email);
+    toast.success('Email copied to clipboard');
   };
 
   return (
@@ -81,22 +107,17 @@ export default function AdminUsers() {
           {users?.map(user => (
             <div key={user.id} className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors">
               <div className="flex items-center gap-4">
-                <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-sm ${user.role === 'admin' ? 'bg-primary/20 text-primary' : 'bg-secondary text-secondary-foreground'}`}>
-                  {user.name.charAt(0).toUpperCase()}
-                </div>
+                <AvatarCircle name={user.name} role={user.role} />
                 <div>
                   <p className="font-medium flex items-center gap-2">
                     {user.name}
-                    {user.role === 'admin' && <Shield className="h-3.5 w-3.5 text-primary" />}
+                    <RoleBadge role={user.role} />
                   </p>
-                  <div className="flex items-center text-sm text-muted-foreground gap-2">
-                    <span>@{user.username}</span>
-                    {user.email && <><span>•</span><span>{user.email}</span></>}
-                  </div>
+                  <p className="text-sm text-muted-foreground">{user.email}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="ghost" size="sm" onClick={() => handleCopyCredentials(user.username)} title="Copy username">
+                <Button variant="ghost" size="sm" onClick={() => handleCopyEmail(user.email)} title="Copy email">
                   <Copy className="h-4 w-4" />
                 </Button>
                 <DropdownMenu>
@@ -158,15 +179,14 @@ function EditUserForm({ user, onSuccess }: { user: any; onSuccess: () => void })
     resolver: zodResolver(editUserSchema),
     defaultValues: {
       name: user.name,
-      username: user.username,
       email: user.email ?? '',
-      role: user.role as 'admin' | 'traveler',
+      role: user.role as 'super_admin' | 'admin' | 'traveler',
     },
   });
 
   const onSubmit = (values: z.infer<typeof editUserSchema>) => {
     updateUser.mutate(
-      { userId: user.id, data: { ...values, email: values.email || undefined } },
+      { userId: user.id, data: values },
       {
         onSuccess: () => {
           toast.success('Traveler updated');
@@ -186,11 +206,8 @@ function EditUserForm({ user, onSuccess }: { user: any; onSuccess: () => void })
           <FormField control={form.control} name="name" render={({ field }) => (
             <FormItem><FormLabel>Full Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
           )} />
-          <FormField control={form.control} name="username" render={({ field }) => (
-            <FormItem><FormLabel>Username</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
           <FormField control={form.control} name="email" render={({ field }) => (
-            <FormItem><FormLabel>Email</FormLabel><FormControl><Input type="email" {...field} /></FormControl><FormMessage /></FormItem>
+            <FormItem><FormLabel>Email (used to log in)</FormLabel><FormControl><Input type="email" {...field} /></FormControl><FormMessage /></FormItem>
           )} />
           <FormField control={form.control} name="role" render={({ field }) => (
             <FormItem>
@@ -200,6 +217,7 @@ function EditUserForm({ user, onSuccess }: { user: any; onSuccess: () => void })
                 <SelectContent>
                   <SelectItem value="traveler">Traveler</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="super_admin">Super Admin</SelectItem>
                 </SelectContent>
               </Select>
               <FormMessage />
@@ -293,7 +311,7 @@ function NewUserForm({ onSuccess }: { onSuccess: () => void }) {
 
   const form = useForm<z.infer<typeof newUserSchema>>({
     resolver: zodResolver(newUserSchema),
-    defaultValues: { name: '', username: '', password: '', email: '', role: 'traveler' },
+    defaultValues: { name: '', password: '', email: '', role: 'traveler' },
   });
 
   const onSubmit = (values: z.infer<typeof newUserSchema>) => {
@@ -313,16 +331,11 @@ function NewUserForm({ onSuccess }: { onSuccess: () => void }) {
         <FormField control={form.control} name="name" render={({ field }) => (
           <FormItem><FormLabel>Full Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
         )} />
-        <div className="grid grid-cols-2 gap-4">
-          <FormField control={form.control} name="username" render={({ field }) => (
-            <FormItem><FormLabel>Username</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="password" render={({ field }) => (
-            <FormItem><FormLabel>Password</FormLabel><FormControl><Input type="password" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
         <FormField control={form.control} name="email" render={({ field }) => (
-          <FormItem><FormLabel>Email</FormLabel><FormControl><Input type="email" {...field} /></FormControl><FormMessage /></FormItem>
+          <FormItem><FormLabel>Email (used to log in)</FormLabel><FormControl><Input type="email" {...field} /></FormControl><FormMessage /></FormItem>
+        )} />
+        <FormField control={form.control} name="password" render={({ field }) => (
+          <FormItem><FormLabel>Temporary Password</FormLabel><FormControl><Input type="password" {...field} /></FormControl><FormMessage /></FormItem>
         )} />
         <FormField control={form.control} name="role" render={({ field }) => (
           <FormItem>
@@ -332,6 +345,7 @@ function NewUserForm({ onSuccess }: { onSuccess: () => void }) {
               <SelectContent>
                 <SelectItem value="traveler">Traveler</SelectItem>
                 <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="super_admin">Super Admin</SelectItem>
               </SelectContent>
             </Select>
             <FormMessage />

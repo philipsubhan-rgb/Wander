@@ -32,7 +32,7 @@ function serializeTrip(trip: typeof tripsTable.$inferSelect) {
 
 // Helper: resolve whether the calling user is a trip admin (global admin OR per-trip admin participant)
 async function resolveIsTripAdmin(userId: number, isGlobalAdmin: boolean, tripId: number): Promise<boolean> {
-  if (isGlobalAdmin) return true;
+  if (isGlobalAdmin) return true; // super_admin always passes
   const [participant] = await db
     .select()
     .from(tripParticipantsTable)
@@ -48,9 +48,9 @@ async function resolveIsTripAdmin(userId: number, isGlobalAdmin: boolean, tripId
 // Trips CRUD
 // ──────────────────────────────────────────────────────────────────
 
-// Travelers see only their own trips; global admins see all
+// Travelers and trip-admins see only their own trips; super_admins see all
 router.get("/trips", requireAuth, async (req, res): Promise<void> => {
-  if (getAuthRole(req, res) === "admin") {
+  if (getAuthRole(req, res) === "super_admin") {
     const trips = await db.select().from(tripsTable).orderBy(tripsTable.startDate);
     res.json(trips.map(serializeTrip));
   } else {
@@ -107,7 +107,7 @@ router.get("/trips/:tripId", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const isGlobalAdmin = getAuthRole(req, res) === "admin";
+  const isGlobalAdmin = getAuthRole(req, res) === "super_admin";
 
   // Check access and resolve per-trip admin status in one query for non-global admins
   if (!isGlobalAdmin) {

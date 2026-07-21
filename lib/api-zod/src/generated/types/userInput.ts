@@ -8,7 +8,6 @@
 import type { UserInputRole } from './userInputRole';
 
 export interface UserInput {
-  username: string;
   name: string;
   password: string;
   email: string;

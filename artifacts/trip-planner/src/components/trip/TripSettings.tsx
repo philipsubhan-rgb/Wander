@@ -365,7 +365,7 @@ export function TripSettings({ trip }: { trip: any }) {
                   <div>
                     <p className="font-medium text-sm flex items-center gap-1">
                       {user.name}
-                      {user.role === 'admin' && <Shield className="h-3 w-3 text-primary" />}
+                      {(['admin', 'super_admin'] as string[]).includes(user.role) && <Shield className="h-3 w-3 text-primary" />}
                     </p>
                     <p className="text-xs text-muted-foreground">{user.email ?? `@${user.username}`}</p>
                   </div>

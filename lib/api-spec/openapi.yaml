@@ -1531,7 +1531,7 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, traveler]
+          enum: [super_admin, admin, traveler]
         email:
           type: string
         token:
@@ -1550,7 +1550,7 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, traveler]
+          enum: [super_admin, admin, traveler]
         email:
           type: string
 
@@ -1566,7 +1566,7 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, traveler]
+          enum: [super_admin, admin, traveler]
         email:
           type: string
         createdAt:
@@ -1586,16 +1586,14 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, traveler]
+          enum: [super_admin, admin, traveler]
         otherTripsCount:
           type: integer
 
     UserInput:
       type: object
-      required: [username, name, password, email]
+      required: [name, password, email]
       properties:
-        username:
-          type: string
         name:
           type: string
         password:
@@ -1604,7 +1602,7 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, traveler]
+          enum: [super_admin, admin, traveler]
 
     UserUpdate:
       type: object
@@ -1613,6 +1611,9 @@ components:
           type: string
         email:
           type: string
+        role:
+          type: string
+          enum: [super_admin, admin, traveler]
 
     ChangePasswordInput:
       type: object
