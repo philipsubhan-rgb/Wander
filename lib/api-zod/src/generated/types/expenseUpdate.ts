@@ -15,6 +15,9 @@ export interface ExpenseUpdate {
   category?: ExpenseUpdateCategory;
   date?: string;
   notes?: string;
-  /** Object path for the attached receipt photo */
-  receiptUrl?: string;
+  /**
+     * Object path for the attached receipt photo. Pass null to remove an existing receipt.
+     * @nullable
+     */
+  receiptUrl?: string | null;
 }

@@ -1360,7 +1360,7 @@ export const UpdateExpenseBody = zod.object({
   "category": zod.enum(['travel', 'activity', 'restaurant', 'car_rental', 'accommodation', 'other']).optional(),
   "date": zod.string().optional(),
   "notes": zod.string().optional(),
-  "receiptUrl": zod.string().optional().describe('Object path for the attached receipt photo')
+  "receiptUrl": zod.string().nullish().describe('Object path for the attached receipt photo. Pass null to remove an existing receipt.')
 })
 
 export const UpdateExpenseResponse = zod.object({

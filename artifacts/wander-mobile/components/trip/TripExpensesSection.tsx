@@ -34,8 +34,8 @@ function receiptImageUrl(objectPath: string): string {
   return `${base}/api/storage/objects/${withoutPrefix}`;
 }
 
-function ExpenseRow({ expense, colors, onDelete }: {
-  expense: TripExpense; colors: ReturnType<typeof useColors>; onDelete: (id: number) => void;
+function ExpenseRow({ expense, colors, onDelete, onEdit }: {
+  expense: TripExpense; colors: ReturnType<typeof useColors>; onDelete: (id: number) => void; onEdit: (id: number) => void;
 }) {
   const color = CAT_COLORS[(expense.category as Category)] ?? '#6B7FA3';
   const icon = CAT_ICONS[(expense.category as Category)] ?? 'tag';
@@ -77,9 +77,14 @@ function ExpenseRow({ expense, colors, onDelete }: {
       </View>
       <View style={er.right}>
         <Text style={[er.amount, { color: colors.foreground }]}>{expense.currency} {amount.toFixed(2)}</Text>
-        <TouchableOpacity onPress={confirmDelete} hitSlop={8} style={{ marginTop: 4 }}>
-          <Feather name="trash-2" size={13} color={colors.mutedForeground} />
-        </TouchableOpacity>
+        <View style={er.rowActions}>
+          <TouchableOpacity onPress={() => onEdit(expense.id)} hitSlop={8}>
+            <Feather name="edit-2" size={13} color={colors.mutedForeground} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={confirmDelete} hitSlop={8}>
+            <Feather name="trash-2" size={13} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -95,7 +100,8 @@ const er = StyleSheet.create({
   payer: { fontSize: 12, fontFamily: 'Inter_400Regular' },
   dot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#6B7FA3' },
   date: { fontSize: 12, fontFamily: 'Inter_400Regular' },
-  right: { alignItems: 'flex-end', gap: 2 },
+  right: { alignItems: 'flex-end', gap: 4 },
+  rowActions: { flexDirection: 'row', gap: 10 },
   amount: { fontSize: 15, fontFamily: 'Inter_700Bold' },
 });
 
@@ -128,7 +134,12 @@ export function TripExpensesSection({ tripId, bottomPad = 16 }: { tripId: number
       data={expenses ?? []}
       keyExtractor={(e) => String(e.id)}
       renderItem={({ item }) => (
-        <ExpenseRow expense={item} colors={colors} onDelete={(id) => deleteExpense({ tripId, expenseId: id })} />
+        <ExpenseRow
+          expense={item}
+          colors={colors}
+          onDelete={(id) => deleteExpense({ tripId, expenseId: id })}
+          onEdit={(id) => router.push(`/edit-expense/${tripId}/${id}` as never)}
+        />
       )}
       contentContainerStyle={[es.list, { paddingBottom: bottomPad + 16 }]}
       showsVerticalScrollIndicator={false}

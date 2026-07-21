@@ -2523,8 +2523,8 @@ components:
         notes:
           type: string
         receiptUrl:
-          type: string
-          description: Object path for the attached receipt photo
+          type: ["string", "null"]
+          description: Object path for the attached receipt photo. Pass null to remove an existing receipt.
 
     ExpenseBalanceEntry:
       type: object
