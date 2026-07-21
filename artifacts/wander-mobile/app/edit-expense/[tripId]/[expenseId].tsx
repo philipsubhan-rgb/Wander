@@ -20,6 +20,7 @@ import * as ImagePicker from 'expo-image-picker';
 import {
   useListExpenses,
   useUpdateExpense,
+  useListTripParticipants,
   getListExpensesQueryKey,
   getGetExpenseBalanceQueryKey,
   requestUploadUrl,
@@ -79,7 +80,12 @@ export default function EditExpenseScreen() {
   const [category, setCategory] = useState<Category>('restaurant');
   const [date, setDate] = useState('');
   const [currency, setCurrency] = useState('USD');
+  const [paidByUserId, setPaidByUserId] = useState<number | null>(null);
   const [initialized, setInitialized] = useState(false);
+
+  const { data: participants } = useListTripParticipants(tripId, {
+    query: { enabled: !!tripId },
+  });
 
   // Receipt state
   const [receiptUri, setReceiptUri] = useState<string | null>(null);
@@ -95,6 +101,7 @@ export default function EditExpenseScreen() {
       setCategory((expense.category as Category) ?? 'other');
       setDate(expense.date ? expense.date.slice(0, 10) : '');
       setCurrency(expense.currency ?? 'USD');
+      setPaidByUserId(expense.paidByUserId ?? null);
       setInitialized(true);
     }
   }, [expense, initialized]);
@@ -285,6 +292,7 @@ export default function EditExpenseScreen() {
         currency,
         category,
         date,
+        ...(paidByUserId !== null ? { paidByUserId } : {}),
         ...receiptUrlPatch,
       },
     });
@@ -504,6 +512,49 @@ export default function EditExpenseScreen() {
             <Feather name="camera" size={18} color={colors.primary} />
             <Text style={[s.receiptBtnText, { color: colors.primary }]}>Attach Receipt</Text>
           </TouchableOpacity>
+        )}
+
+        {/* ── Paid by ── */}
+        {participants && participants.length > 0 && (
+          <>
+            <Text style={[s.sectionLabel, { color: colors.mutedForeground }]}>PAID BY</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.paidByScroll}>
+              {participants.map((p) => {
+                const active = paidByUserId === p.id;
+                const initials = p.name
+                  .split(' ')
+                  .map((w: string) => w[0])
+                  .slice(0, 2)
+                  .join('')
+                  .toUpperCase();
+                return (
+                  <TouchableOpacity
+                    key={p.id}
+                    style={[
+                      s.paidByChip,
+                      {
+                        backgroundColor: active ? colors.primary : colors.card,
+                        borderColor: active ? colors.primary : colors.border,
+                      },
+                    ]}
+                    onPress={() => {
+                      setPaidByUserId(p.id);
+                      Haptics.selectionAsync();
+                    }}
+                  >
+                    <View style={[s.chipAvatar, { backgroundColor: active ? '#fff3' : colors.muted }]}>
+                      <Text style={[s.chipAvatarText, { color: active ? '#fff' : colors.primary }]}>
+                        {initials}
+                      </Text>
+                    </View>
+                    <Text style={[s.chipName, { color: active ? '#fff' : colors.foreground }]}>
+                      {p.name.split(' ')[0]}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
         )}
 
         {/* ── Save button ── */}
@@ -728,6 +779,31 @@ const s = StyleSheet.create({
     gap: 8,
   },
   receiptBtnText: { fontSize: 14, fontFamily: 'Inter_500Medium' },
+
+  // Paid by
+  paidByScroll: {
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  paidByChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 24,
+    borderWidth: 1,
+    marginRight: 8,
+  },
+  chipAvatar: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipAvatarText: { fontSize: 11, fontFamily: 'Inter_700Bold' },
+  chipName: { fontSize: 13, fontFamily: 'Inter_500Medium' },
 
   // Save button
   saveBtn: {
