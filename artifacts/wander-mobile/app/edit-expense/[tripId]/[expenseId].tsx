@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -28,14 +29,23 @@ import { getBaseUrl } from '@/lib/api';
 
 type Category = 'travel' | 'activity' | 'restaurant' | 'car_rental' | 'accommodation' | 'other';
 
-const CAT_COLORS: Record<Category, string> = {
-  travel: '#2F7CE0', activity: '#10B981', restaurant: '#F59E0B',
-  car_rental: '#8B5CF6', accommodation: '#EC4899', other: '#6B7FA3',
-};
-const CAT_ICONS: Record<Category, keyof typeof Feather.glyphMap> = {
-  travel: 'navigation', activity: 'zap', restaurant: 'coffee',
-  car_rental: 'truck', accommodation: 'home', other: 'tag',
-};
+const CATEGORIES: { key: Category; label: string; icon: keyof typeof Feather.glyphMap; color: string }[] = [
+  { key: 'restaurant', label: 'Food', icon: 'coffee', color: '#F59E0B' },
+  { key: 'travel', label: 'Travel', icon: 'navigation', color: '#2F7CE0' },
+  { key: 'accommodation', label: 'Stay', icon: 'home', color: '#EC4899' },
+  { key: 'activity', label: 'Activity', icon: 'zap', color: '#10B981' },
+  { key: 'car_rental', label: 'Car', icon: 'truck', color: '#8B5CF6' },
+  { key: 'other', label: 'Other', icon: 'tag', color: '#6B7FA3' },
+];
+
+const PAD_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'];
+
+function formatDisplay(raw: string): string {
+  if (!raw || raw === '0') return '0.00';
+  const num = parseFloat(raw);
+  if (isNaN(num)) return '0.00';
+  return num.toFixed(2);
+}
 
 /** Convert a stored objectPath to a full serving URL (same logic as TripExpensesSection). */
 function receiptImageUrl(objectPath: string): string {
@@ -44,7 +54,7 @@ function receiptImageUrl(objectPath: string): string {
   return `${base}/api/storage/objects/${withoutPrefix}`;
 }
 
-export default function EditExpenseReceiptScreen() {
+export default function EditExpenseScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { tripId: tripIdParam, expenseId: expenseIdParam } = useLocalSearchParams<{
@@ -62,14 +72,31 @@ export default function EditExpenseReceiptScreen() {
   });
   const expense = expenses?.find((e) => e.id === expenseId);
 
+  // Expense detail fields — initialized from the loaded expense
+  const [description, setDescription] = useState('');
+  const [amountRaw, setAmountRaw] = useState('');
+  const [category, setCategory] = useState<Category>('restaurant');
+  const [date, setDate] = useState('');
+  const [currency, setCurrency] = useState('USD');
+  const [initialized, setInitialized] = useState(false);
+
   // Receipt state
-  // - receiptUri: local preview URI (null = no preview / use existing)
-  // - pendingObjectPath: freshly uploaded objectPath (null = not yet uploaded)
-  // - removeReceipt: user explicitly wants to clear it
   const [receiptUri, setReceiptUri] = useState<string | null>(null);
   const [pendingObjectPath, setPendingObjectPath] = useState<string | null>(null);
   const [removeReceipt, setRemoveReceipt] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+
+  // Once the expense loads, seed the editable fields
+  useEffect(() => {
+    if (expense && !initialized) {
+      setDescription(expense.description ?? '');
+      setAmountRaw(parseFloat(expense.amount).toFixed(2));
+      setCategory((expense.category as Category) ?? 'other');
+      setDate(expense.date ? expense.date.slice(0, 10) : '');
+      setCurrency(expense.currency ?? 'USD');
+      setInitialized(true);
+    }
+  }, [expense, initialized]);
 
   const { mutate: updateExpense, isPending } = useUpdateExpense({
     mutation: {
@@ -85,6 +112,27 @@ export default function EditExpenseReceiptScreen() {
     },
   });
 
+  // ── Numpad ─────────────────────────────────────────────────────────────────
+  function handlePad(key: string) {
+    Haptics.selectionAsync();
+    if (key === '⌫') {
+      setAmountRaw((prev) => prev.slice(0, -1));
+      return;
+    }
+    if (key === '.' && amountRaw.includes('.')) return;
+    if (amountRaw.includes('.')) {
+      const decimals = amountRaw.split('.')[1] ?? '';
+      if (decimals.length >= 2) return;
+    }
+    if (key !== '.' && amountRaw === '') {
+      if (key === '0') return;
+      setAmountRaw(key);
+      return;
+    }
+    setAmountRaw((prev) => prev + key);
+  }
+
+  // ── Receipt helpers ────────────────────────────────────────────────────────
   async function uploadReceipt(uri: string, fileName: string, mimeType: string): Promise<string | null> {
     setIsUploading(true);
     try {
@@ -202,50 +250,65 @@ export default function EditExpenseReceiptScreen() {
     ]);
   }
 
+  // ── Save ───────────────────────────────────────────────────────────────────
   function handleSave() {
     if (!expense) return;
 
-    // Determine the new receiptUrl value:
-    // - If a new photo was uploaded → use pendingObjectPath
-    // - If user removed → send null (empty string clears it on the server)
-    // - Otherwise → no-op (don't send receiptUrl at all, keep existing)
-    const hasNewPhoto = pendingObjectPath !== null;
-    const hasClearIntent = removeReceipt;
-
-    if (!hasNewPhoto && !hasClearIntent) {
-      // Nothing changed — just go back
-      router.back();
+    const numericAmount = parseFloat(amountRaw || '0');
+    if (!numericAmount || numericAmount <= 0) {
+      Alert.alert('Invalid amount', 'Please enter a valid amount greater than 0.');
       return;
+    }
+    if (!description.trim()) {
+      Alert.alert('Missing description', 'Please enter a description for this expense.');
+      return;
+    }
+    if (!date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      Alert.alert('Invalid date', 'Please use the format YYYY-MM-DD.');
+      return;
+    }
+
+    const receiptUrlPatch: { receiptUrl?: string | null } = {};
+    if (pendingObjectPath !== null) {
+      receiptUrlPatch.receiptUrl = pendingObjectPath;
+    } else if (removeReceipt) {
+      receiptUrlPatch.receiptUrl = null;
     }
 
     updateExpense({
       tripId,
       expenseId,
       data: {
-        receiptUrl: hasNewPhoto ? pendingObjectPath! : null,
+        description: description.trim(),
+        amount: numericAmount.toFixed(2),
+        currency,
+        category,
+        date,
+        ...receiptUrlPatch,
       },
     });
   }
 
-  // Determine what to show in the receipt area
+  // ── Derived ────────────────────────────────────────────────────────────────
   const existingReceiptUrl = expense?.receiptUrl ? receiptImageUrl(expense.receiptUrl) : null;
   const previewUri = receiptUri ?? (removeReceipt ? null : existingReceiptUrl);
   const hasReceipt = previewUri !== null;
 
-  const isDirty = pendingObjectPath !== null || removeReceipt;
-  const canSave = !isPending && !isUploading;
+  const catSelected = CATEGORIES.find((c) => c.key === category) ?? CATEGORIES[5];
 
-  if (isLoading || !expense) {
+  const canSave =
+    !isPending &&
+    !isUploading &&
+    description.trim().length > 0 &&
+    parseFloat(amountRaw || '0') > 0;
+
+  if (isLoading || !expense || !initialized) {
     return (
       <View style={[s.center, { backgroundColor: colors.background }]}>
         <ActivityIndicator color={colors.primary} size="large" />
       </View>
     );
   }
-
-  const color = CAT_COLORS[(expense.category as Category)] ?? '#6B7FA3';
-  const icon = CAT_ICONS[(expense.category as Category)] ?? 'tag';
-  const amount = parseFloat(expense.amount);
 
   return (
     <View
@@ -261,7 +324,7 @@ export default function EditExpenseReceiptScreen() {
       <View style={[s.header, { paddingTop: isWeb ? 67 : insets.top > 0 ? insets.top + 8 : 20 }]}>
         <View style={[s.handle, { backgroundColor: colors.border }]} />
         <View style={s.headerRow}>
-          <Text style={[s.headerTitle, { color: colors.foreground }]}>Edit Receipt</Text>
+          <Text style={[s.headerTitle, { color: colors.foreground }]}>Edit Expense</Text>
           <TouchableOpacity onPress={() => router.back()} hitSlop={8}>
             <Feather name="x" size={22} color={colors.mutedForeground} />
           </TouchableOpacity>
@@ -269,22 +332,133 @@ export default function EditExpenseReceiptScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        {/* Expense summary card */}
-        <View style={[s.summaryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={[s.catIcon, { backgroundColor: color + '18' }]}>
-            <Feather name={icon} size={18} color={color} />
+
+        {/* ── Amount display ── */}
+        <View style={s.amountArea}>
+          <View style={[s.catBadge, { backgroundColor: catSelected.color + '20' }]}>
+            <Feather name={catSelected.icon} size={14} color={catSelected.color} />
+            <Text style={[s.catLabel, { color: catSelected.color }]}>{catSelected.label}</Text>
           </View>
-          <View style={s.summaryBody}>
-            <Text style={[s.summaryDesc, { color: colors.foreground }]} numberOfLines={1}>
-              {expense.description}
-            </Text>
-            <Text style={[s.summaryMeta, { color: colors.mutedForeground }]}>
-              {expense.currency} {amount.toFixed(2)} · {expense.payerName ?? 'Unknown'}
-            </Text>
-          </View>
+          <Text style={[s.amountDisplay, { color: colors.foreground }]}>
+            <Text style={[s.currencySign, { color: colors.mutedForeground }]}>{currency} </Text>
+            {amountRaw ? formatDisplay(amountRaw) : '0.00'}
+          </Text>
         </View>
 
-        {/* Receipt section */}
+        {/* ── Numpad ── */}
+        <View style={s.numpad}>
+          {PAD_KEYS.map((key) => (
+            <TouchableOpacity
+              key={key}
+              style={[
+                s.padKey,
+                {
+                  backgroundColor: key === '⌫' ? colors.muted : colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={() => handlePad(key)}
+              activeOpacity={0.7}
+              testID={`pad-${key}`}
+            >
+              {key === '⌫' ? (
+                <Feather name="delete" size={18} color={colors.foreground} />
+              ) : (
+                <Text style={[s.padKeyText, { color: colors.foreground }]}>{key}</Text>
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* ── Currency ── */}
+        <Text style={[s.sectionLabel, { color: colors.mutedForeground }]}>CURRENCY</Text>
+        <View style={s.currencyRow}>
+          {['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD'].map((cur) => {
+            const active = currency === cur;
+            return (
+              <TouchableOpacity
+                key={cur}
+                style={[
+                  s.currencyChip,
+                  {
+                    backgroundColor: active ? colors.primary : colors.card,
+                    borderColor: active ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={() => {
+                  setCurrency(cur);
+                  Haptics.selectionAsync();
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={[s.currencyChipText, { color: active ? '#fff' : colors.foreground }]}>
+                  {cur}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* ── Category ── */}
+        <Text style={[s.sectionLabel, { color: colors.mutedForeground }]}>CATEGORY</Text>
+        <View style={s.catGrid}>
+          {CATEGORIES.map((cat) => {
+            const active = category === cat.key;
+            return (
+              <TouchableOpacity
+                key={cat.key}
+                style={[
+                  s.catChip,
+                  {
+                    backgroundColor: active ? cat.color : colors.card,
+                    borderColor: active ? cat.color : colors.border,
+                  },
+                ]}
+                onPress={() => {
+                  setCategory(cat.key);
+                  Haptics.selectionAsync();
+                }}
+                activeOpacity={0.8}
+              >
+                <Feather name={cat.icon} size={14} color={active ? '#fff' : cat.color} />
+                <Text style={[s.catChipText, { color: active ? '#fff' : colors.foreground }]}>
+                  {cat.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* ── Description ── */}
+        <Text style={[s.sectionLabel, { color: colors.mutedForeground }]}>DESCRIPTION</Text>
+        <View style={[s.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <TextInput
+            style={[s.input, { color: colors.foreground }]}
+            placeholder="e.g. Dinner at Nobu"
+            placeholderTextColor={colors.mutedForeground}
+            value={description}
+            onChangeText={setDescription}
+            returnKeyType="done"
+            testID="description-input"
+          />
+        </View>
+
+        {/* ── Date ── */}
+        <Text style={[s.sectionLabel, { color: colors.mutedForeground }]}>DATE</Text>
+        <View style={[s.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <TextInput
+            style={[s.input, { color: colors.foreground }]}
+            placeholder="YYYY-MM-DD"
+            placeholderTextColor={colors.mutedForeground}
+            value={date}
+            onChangeText={setDate}
+            returnKeyType="done"
+            keyboardType="numbers-and-punctuation"
+            testID="date-input"
+          />
+        </View>
+
+        {/* ── Receipt photo ── */}
         <Text style={[s.sectionLabel, { color: colors.mutedForeground }]}>RECEIPT PHOTO</Text>
 
         {hasReceipt ? (
@@ -337,16 +511,16 @@ export default function EditExpenseReceiptScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Save button */}
+        {/* ── Save button ── */}
         <TouchableOpacity
           style={[
             s.saveBtn,
-            { backgroundColor: isDirty && canSave ? colors.primary : colors.muted },
+            { backgroundColor: canSave ? colors.primary : colors.muted },
           ]}
           onPress={handleSave}
           disabled={!canSave}
           activeOpacity={0.85}
-          testID="save-receipt"
+          testID="save-expense"
         >
           {isPending || isUploading ? (
             <ActivityIndicator color="#fff" />
@@ -355,15 +529,15 @@ export default function EditExpenseReceiptScreen() {
               <Feather
                 name="check"
                 size={16}
-                color={isDirty && canSave ? '#fff' : colors.mutedForeground}
+                color={canSave ? '#fff' : colors.mutedForeground}
               />
               <Text
                 style={[
                   s.saveBtnText,
-                  { color: isDirty && canSave ? '#fff' : colors.mutedForeground },
+                  { color: canSave ? '#fff' : colors.mutedForeground },
                 ]}
               >
-                {isDirty ? 'Save Changes' : 'No Changes'}
+                Save Changes
               </Text>
             </>
           )}
@@ -391,27 +565,52 @@ const s = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontFamily: 'Inter_700Bold' },
 
-  summaryCard: {
+  // Amount area
+  amountArea: {
+    alignItems: 'center',
+    paddingVertical: 16,
+    gap: 8,
+  },
+  catBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 20,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: 14,
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
   },
-  catIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 11,
+  catLabel: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  amountDisplay: {
+    fontSize: 52,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: -1,
+  },
+  currencySign: {
+    fontSize: 28,
+    fontFamily: 'Inter_400Regular',
+  },
+
+  // Numpad
+  numpad: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    gap: 8,
+    marginBottom: 16,
+  },
+  padKey: {
+    width: '30%',
+    flexGrow: 1,
+    aspectRatio: 1.8,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  summaryBody: { flex: 1, gap: 3 },
-  summaryDesc: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
-  summaryMeta: { fontSize: 13, fontFamily: 'Inter_400Regular' },
+  padKeyText: {
+    fontSize: 22,
+    fontFamily: 'Inter_400Regular',
+  },
 
   sectionLabel: {
     fontSize: 11,
@@ -421,6 +620,58 @@ const s = StyleSheet.create({
     marginBottom: 8,
   },
 
+  // Currency chips
+  currencyRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    gap: 8,
+    marginBottom: 16,
+  },
+  currencyChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  currencyChipText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+
+  // Category
+  catGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    gap: 8,
+    marginBottom: 16,
+  },
+  catChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  catChipText: { fontSize: 12, fontFamily: 'Inter_500Medium' },
+
+  // Description / date inputs
+  inputWrap: {
+    marginHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  input: {
+    fontSize: 15,
+    fontFamily: 'Inter_400Regular',
+    padding: 0,
+    margin: 0,
+  },
+
+  // Receipt
   receiptWrap: {
     marginHorizontal: 16,
     marginBottom: 16,
@@ -469,7 +720,6 @@ const s = StyleSheet.create({
     borderRadius: 20,
   },
   receiptActionText: { color: '#fff', fontSize: 12, fontFamily: 'Inter_600SemiBold' },
-
   receiptBtn: {
     marginHorizontal: 16,
     marginBottom: 16,
@@ -484,6 +734,7 @@ const s = StyleSheet.create({
   },
   receiptBtnText: { fontSize: 14, fontFamily: 'Inter_500Medium' },
 
+  // Save button
   saveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
