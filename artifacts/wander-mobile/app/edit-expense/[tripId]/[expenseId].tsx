@@ -309,7 +309,8 @@ export default function EditExpenseScreen() {
     !isPending &&
     !isUploading &&
     description.trim().length > 0 &&
-    parseFloat(amountRaw || '0') > 0;
+    parseFloat(amountRaw || '0') > 0 &&
+    paidByUserId !== null;
 
   if (isLoading || !expense || !initialized) {
     return (
@@ -554,6 +555,12 @@ export default function EditExpenseScreen() {
                 );
               })}
             </ScrollView>
+            {paidByUserId === null && (
+              <View style={s.payerHintRow}>
+                <Feather name="alert-circle" size={13} color="#F59E0B" />
+                <Text style={s.payerHintText}>Select who paid for this expense.</Text>
+              </View>
+            )}
           </>
         )}
 
@@ -804,6 +811,19 @@ const s = StyleSheet.create({
   },
   chipAvatarText: { fontSize: 11, fontFamily: 'Inter_700Bold' },
   chipName: { fontSize: 13, fontFamily: 'Inter_500Medium' },
+  payerHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginHorizontal: 20,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  payerHintText: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    color: '#F59E0B',
+  },
 
   // Save button
   saveBtn: {
