@@ -443,6 +443,16 @@ export default function AddExpenseScreen() {
           </>
         ) : null}
 
+        {/* Payer hint */}
+        {participants && participants.length > 0 && !paidByUserId && (
+          <View style={[styles.hintRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Feather name="alert-circle" size={14} color={colors.mutedForeground} />
+            <Text style={[styles.hintText, { color: colors.mutedForeground }]}>
+              Select who paid above before saving.
+            </Text>
+          </View>
+        )}
+
         {/* Submit */}
         <TouchableOpacity
           style={[
@@ -668,4 +678,16 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   submitText: { fontSize: 16, fontFamily: 'Inter_600SemiBold' },
+  hintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  hintText: { fontSize: 13, fontFamily: 'Inter_400Regular', flex: 1 },
 });
