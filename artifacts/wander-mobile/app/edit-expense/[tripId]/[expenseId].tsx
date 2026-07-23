@@ -25,6 +25,7 @@ import {
   getGetExpenseBalanceQueryKey,
   requestUploadUrl,
 } from '@workspace/api-client-react';
+import type { TripExpense } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 import { getBaseUrl } from '@/lib/api';
 import { DatePickerField } from '@/components/DatePickerField';
@@ -108,7 +109,14 @@ export default function EditExpenseScreen() {
 
   const { mutate: updateExpense, isPending } = useUpdateExpense({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (updatedExpense) => {
+        // Immediately update the cached expense list so the new payer name is
+        // visible as soon as the user navigates back — no stale-data flicker.
+        queryClient.setQueryData<TripExpense[]>(
+          getListExpensesQueryKey(tripId),
+          (old) => old?.map((e) => (e.id === expenseId ? updatedExpense : e)) ?? [updatedExpense],
+        );
+        // Invalidate both queries so they refetch fresh server data in the background.
         queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey(tripId) });
         queryClient.invalidateQueries({ queryKey: getGetExpenseBalanceQueryKey(tripId) });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
