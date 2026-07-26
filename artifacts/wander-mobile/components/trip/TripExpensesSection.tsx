@@ -112,7 +112,11 @@ export function TripExpensesSection({ tripId, bottomPad = 16 }: { tripId: number
   const { data: expenses, isLoading, isError, refetch, isRefetching } = useListExpenses(tripId, { query: { enabled: !!tripId } });
   const { mutate: deleteExpense } = useDeleteExpense({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (_data, variables) => {
+        queryClient.setQueryData<TripExpense[]>(
+          getListExpensesQueryKey(tripId),
+          (prev) => prev ? prev.filter((e) => e.id !== variables.expenseId) : prev,
+        );
         queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey(tripId) });
         queryClient.invalidateQueries({ queryKey: getGetExpenseBalanceQueryKey(tripId) });
       },
