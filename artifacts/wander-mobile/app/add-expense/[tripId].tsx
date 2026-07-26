@@ -24,6 +24,7 @@ import {
   getGetExpenseBalanceQueryKey,
   requestUploadUrl,
 } from '@workspace/api-client-react';
+import type { TripExpense } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
 import { DatePickerField } from '@/components/DatePickerField';
@@ -76,7 +77,13 @@ export default function AddExpenseScreen() {
 
   const { mutate: createExpense, isPending } = useCreateExpense({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (newExpense) => {
+        // Immediately prepend the new expense to the cached list so the user
+        // sees it as soon as they navigate back — no stale-data flicker.
+        queryClient.setQueryData<TripExpense[]>(
+          getListExpensesQueryKey(tripId),
+          (old) => (old ? [newExpense, ...old] : [newExpense]),
+        );
         queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey(tripId) });
         queryClient.invalidateQueries({ queryKey: getGetExpenseBalanceQueryKey(tripId) });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
