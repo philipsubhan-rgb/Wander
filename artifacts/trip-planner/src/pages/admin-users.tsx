@@ -280,19 +280,26 @@ function TripAccessSection({ userId }: { userId: number }) {
                   <p className="text-xs text-muted-foreground truncate">{trip.destination}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {isOn && <Badge variant="secondary" className="text-xs">Assigned</Badge>}
                   <Button
-                    variant={isOn ? 'outline' : 'default'}
+                    variant="default"
                     size="sm"
-                    disabled={isPending}
-                    onClick={() => handleToggle(trip.id, isOn)}
+                    disabled={isOn || isPending}
+                    onClick={() => handleToggle(trip.id, false)}
                     className="h-7 text-xs"
                   >
-                    {isOn
-                      ? <><UserX className="h-3 w-3 mr-1" />Remove</>
-                      : <><UserCheck className="h-3 w-3 mr-1" />Assign</>
-                    }
+                    <UserCheck className="h-3 w-3 mr-1" />Assign
                   </Button>
+                  {isOn && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isPending}
+                      onClick={() => handleToggle(trip.id, true)}
+                      className="h-7 text-xs"
+                    >
+                      <UserX className="h-3 w-3 mr-1" />Remove
+                    </Button>
+                  )}
                 </div>
               </div>
             );

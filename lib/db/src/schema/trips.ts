@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, pgEnum, integer, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, pgEnum, integer, boolean, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
@@ -23,7 +23,9 @@ export const tripParticipantsTable = pgTable("trip_participants", {
   userId: integer("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   // true = this user is the admin/owner of the trip (can add travelers, edit trip details, etc.)
   isTripAdmin: boolean("is_trip_admin").notNull().default(false),
-});
+}, (t) => [
+  uniqueIndex("trip_participants_trip_id_user_id_unique").on(t.tripId, t.userId),
+]);
 
 export const insertTripSchema = createInsertSchema(tripsTable).omit({ id: true, createdAt: true });
 export type InsertTrip = z.infer<typeof insertTripSchema>;
