@@ -64,7 +64,7 @@ const PgStore = ConnectPgSimple(session);
 
 app.use(
   session({
-    store: new PgStore({ pool, tableName: "session", createTableIfMissing: true }),
+    store: new PgStore({ pool, tableName: "session", createTableIfMissing: false }),
     secret: process.env.SESSION_SECRET || "trip-planner-secret-key",
     resave: false,
     saveUninitialized: false,
