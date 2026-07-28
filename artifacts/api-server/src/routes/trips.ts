@@ -391,6 +391,38 @@ router.post("/trips/:tripId/participants", requireTripAdmin(), async (req, res):
   res.json({ success: true, splitsRecalculated });
 });
 
+// Trip admins can promote / demote another participant as trip admin
+router.patch("/trips/:tripId/participants/:userId", requireTripAdmin(), async (req, res): Promise<void> => {
+  const tripId = parseInt(req.params.tripId);
+  const userId = parseInt(req.params.userId);
+  if (isNaN(tripId) || isNaN(userId)) {
+    res.status(400).json({ error: "Invalid params" });
+    return;
+  }
+
+  const { isTripAdmin } = req.body;
+  if (typeof isTripAdmin !== "boolean") {
+    res.status(400).json({ error: "isTripAdmin must be a boolean" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(tripParticipantsTable)
+    .set({ isTripAdmin })
+    .where(and(
+      eq(tripParticipantsTable.tripId, tripId),
+      eq(tripParticipantsTable.userId, userId),
+    ))
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Participant not found" });
+    return;
+  }
+
+  res.json({ success: true, isTripAdmin: updated.isTripAdmin });
+});
+
 // Trip admins can remove travelers from their trip
 router.delete("/trips/:tripId/participants/:userId", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = RemoveTripParticipantParams.safeParse(req.params);

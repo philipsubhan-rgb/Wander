@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { toast } from 'sonner';
-import { Users, Trash2, Shield, TriangleAlert, Search, UserCheck, AlertCircle } from 'lucide-react';
+import { Users, Trash2, Shield, TriangleAlert, Search, UserCheck, AlertCircle, Crown } from 'lucide-react';
 
 const tripSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -289,6 +289,31 @@ export function TripSettings({ trip }: { trip: any }) {
     });
   };
 
+  const [togglingAdminId, setTogglingAdminId] = useState<number | null>(null);
+
+  const handleToggleTripAdmin = async (userId: number, currentlyAdmin: boolean) => {
+    setTogglingAdminId(userId);
+    try {
+      const res = await fetch(`/api/trips/${trip.id}/participants/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ isTripAdmin: !currentlyAdmin }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err?.error || 'Failed to update role');
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: getListTripParticipantsQueryKey(trip.id) });
+      toast.success(currentlyAdmin ? 'Trip admin role removed' : 'Made trip admin');
+    } catch {
+      toast.error('Failed to update role');
+    } finally {
+      setTogglingAdminId(null);
+    }
+  };
+
   const startDate = form.watch('startDate');
   const currentParticipantIds = participants?.map(p => p.id) ?? [];
 
@@ -356,25 +381,43 @@ export function TripSettings({ trip }: { trip: any }) {
             <p className="text-sm font-medium text-muted-foreground">
               {participants?.length ?? 0} traveler{(participants?.length ?? 0) !== 1 ? 's' : ''} on this trip
             </p>
-            {participants?.map(user => (
-              <div key={user.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 bg-primary/20 text-primary font-bold rounded-full flex items-center justify-center text-xs">
-                    {user.name.charAt(0)}
+            {participants?.map(user => {
+              const isTripAdmin = !!(user as any).isTripAdmin;
+              return (
+                <div key={user.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="h-8 w-8 bg-primary/20 text-primary font-bold rounded-full flex items-center justify-center text-xs">
+                      {user.name.charAt(0)}
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm flex items-center gap-1">
+                        {user.name}
+                        {(['admin', 'super_admin'] as string[]).includes(user.role) && <Shield className="h-3 w-3 text-primary" />}
+                        {isTripAdmin && <Crown className="h-3 w-3 text-amber-500" title="Trip admin" />}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{user.email ?? `@${user.username}`}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-medium text-sm flex items-center gap-1">
-                      {user.name}
-                      {(['admin', 'super_admin'] as string[]).includes(user.role) && <Shield className="h-3 w-3 text-primary" />}
-                    </p>
-                    <p className="text-xs text-muted-foreground">{user.email ?? `@${user.username}`}</p>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleToggleTripAdmin(user.id, isTripAdmin)}
+                      disabled={togglingAdminId === user.id}
+                      className={`h-8 w-8 ${isTripAdmin ? 'text-amber-500 hover:text-amber-600' : 'text-muted-foreground hover:text-amber-500'}`}
+                      title={isTripAdmin ? 'Remove trip admin role' : 'Make trip admin'}
+                    >
+                      {togglingAdminId === user.id
+                        ? <span className="h-3 w-3 animate-spin inline-block border-2 border-current border-t-transparent rounded-full" />
+                        : <Crown className="h-4 w-4" />}
+                    </Button>
+                    <Button variant="ghost" size="icon" onClick={() => handleRemoveParticipant(user.id, user.name)} className="h-8 w-8 text-destructive hover:text-destructive">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => handleRemoveParticipant(user.id, user.name)} className="h-8 w-8 text-destructive hover:text-destructive">
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
