@@ -376,6 +376,28 @@ export const AddTripParticipantResponse = zod.object({
 
 
 /**
+ * @summary Create a new traveler account and immediately add them to the trip (trip admin only)
+ */
+export const InviteTripParticipantParams = zod.object({
+  "tripId": zod.coerce.number()
+})
+
+export const InviteTripParticipantBody = zod.object({
+  "name": zod.string(),
+  "email": zod.string().email()
+})
+
+export const InviteTripParticipantResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string(),
+  "username": zod.string(),
+  "role": zod.string(),
+  "splitsRecalculated": zod.number()
+})
+
+
+/**
  * @summary Remove a traveler from a trip (admin only)
  */
 export const RemoveTripParticipantParams = zod.object({

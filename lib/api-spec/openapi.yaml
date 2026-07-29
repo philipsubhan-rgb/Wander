@@ -476,6 +476,52 @@ paths:
               schema:
                 $ref: "#/components/schemas/SuccessResponse"
 
+  /trips/{tripId}/participants/invite:
+    post:
+      operationId: inviteTripParticipant
+      tags: [trips]
+      summary: Create a new traveler account and immediately add them to the trip (trip admin only)
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email]
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+      responses:
+        "201":
+          description: Traveler created and added to trip
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, email, username, role, splitsRecalculated]
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  email:
+                    type: string
+                  username:
+                    type: string
+                  role:
+                    type: string
+                  splitsRecalculated:
+                    type: integer
+
   /trips/{tripId}/participants/{userId}:
     delete:
       operationId: removeTripParticipant

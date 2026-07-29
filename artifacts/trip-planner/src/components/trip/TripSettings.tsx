@@ -51,6 +51,8 @@ function AddTravelerByEmail({
   const [found, setFound] = useState<LookupResult | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [inviteName, setInviteName] = useState('');
+  const [inviting, setInviting] = useState(false);
   const addParticipant = useAddTripParticipant();
   const queryClient = useQueryClient();
 
@@ -67,6 +69,7 @@ function AddTravelerByEmail({
       });
       if (res.status === 404) {
         setNotFound(true);
+        setInviteName('');
       } else if (res.ok) {
         const user: LookupResult = await res.json();
         if (currentParticipantIds.includes(user.id)) {
@@ -116,6 +119,49 @@ function AddTravelerByEmail({
     );
   };
 
+  const handleInvite = async () => {
+    const trimmedName = inviteName.trim();
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedName || !trimmedEmail) return;
+    setInviting(true);
+    try {
+      const res = await fetch(`/api/trips/${tripId}/participants/invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ name: trimmedName, email: trimmedEmail }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        // Race condition: someone else created the account; prompt to search again
+        toast.info('An account with that email was just created — searching again…');
+        setNotFound(false);
+        setInviteName('');
+        handleSearch();
+        return;
+      }
+      if (!res.ok) {
+        toast.error(data?.error || 'Failed to create traveler');
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: getListTripParticipantsQueryKey(tripId) });
+      queryClient.invalidateQueries({ queryKey: getListExpensesQueryKey(tripId) });
+      queryClient.invalidateQueries({ queryKey: getGetExpenseBalanceQueryKey(tripId) });
+      setEmail('');
+      setInviteName('');
+      setNotFound(false);
+      const recalc = data?.splitsRecalculated ?? 0;
+      if (recalc > 0) {
+        toast.success(`${trimmedName} added — ${recalc} expense${recalc !== 1 ? 's' : ''} recalculated`);
+      } else {
+        toast.success(`${trimmedName} added to trip`);
+      }
+      onAdded();
+    } finally {
+      setInviting(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex gap-2">
@@ -142,9 +188,35 @@ function AddTravelerByEmail({
       </div>
 
       {notFound && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>No traveler found with that email. Ask an admin to create an account first.</span>
+        <div className="space-y-3 bg-muted/40 border rounded-lg px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <AlertCircle className="h-4 w-4 shrink-0 text-amber-500" />
+            <span>No account found for <span className="font-semibold">{email.trim()}</span></span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Create a basic traveler account and add them to this trip right now.
+            They can set a password later.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              placeholder="Full name"
+              value={inviteName}
+              onChange={e => setInviteName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && inviteName.trim()) handleInvite(); }}
+              className="flex-1"
+              autoFocus
+            />
+            <Button
+              type="button"
+              onClick={handleInvite}
+              disabled={!inviteName.trim() || inviting}
+              size="sm"
+            >
+              {inviting ? (
+                <span className="h-4 w-4 animate-spin inline-block border-2 border-current border-t-transparent rounded-full" />
+              ) : 'Create & Add'}
+            </Button>
+          </div>
         </div>
       )}
 

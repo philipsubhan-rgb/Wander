@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, sql } from "drizzle-orm";
+import bcrypt from "bcryptjs";
 import { db, tripsTable, tripParticipantsTable, usersTable, flightsTable, accommodationsTable, activitiesTable, itineraryDaysTable, packingItemsTable, carRentalsTable, tripExpensesTable } from "@workspace/db";
 import {
   CreateTripBody,
@@ -389,6 +390,72 @@ router.post("/trips/:tripId/participants", requireTripAdmin(), async (req, res):
   const splitsRecalculated = await recalcExpenseSplitsForTrip(params.data.tripId);
 
   res.json({ success: true, splitsRecalculated });
+});
+
+// Trip admins can create a brand-new traveler account and immediately add them to the trip.
+// This is the "not registered yet" path — no super_admin involvement needed.
+router.post("/trips/:tripId/participants/invite", requireTripAdmin(), async (req, res): Promise<void> => {
+  const tripId = parseInt(req.params.tripId);
+  if (isNaN(tripId)) {
+    res.status(400).json({ error: "Invalid tripId" });
+    return;
+  }
+
+  const { name, email } = req.body as { name?: unknown; email?: unknown };
+  if (!name || typeof name !== "string" || !name.trim()) {
+    res.status(400).json({ error: "name is required" });
+    return;
+  }
+  if (!email || typeof email !== "string" || !email.trim()) {
+    res.status(400).json({ error: "email is required" });
+    return;
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+
+  // Reject if someone already has this email — the caller should use the normal add-by-email flow
+  const [existing] = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(eq(usersTable.email, normalizedEmail));
+
+  if (existing) {
+    res.status(409).json({ error: "A traveler with that email already exists. Search by email to add them." });
+    return;
+  }
+
+  // Create a new traveler account with a random throwaway password
+  // (they can reset it later; we never return this value)
+  const randomPassword = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  const passwordHash = await bcrypt.hash(randomPassword, 10);
+
+  const [newUser] = await db
+    .insert(usersTable)
+    .values({
+      username: normalizedEmail,
+      name: name.trim(),
+      email: normalizedEmail,
+      role: "traveler",
+      passwordHash,
+    })
+    .returning();
+
+  // Add to the trip
+  await db
+    .insert(tripParticipantsTable)
+    .values({ tripId, userId: newUser.id, isTripAdmin: false })
+    .onConflictDoNothing();
+
+  const splitsRecalculated = await recalcExpenseSplitsForTrip(tripId);
+
+  res.status(201).json({
+    id: newUser.id,
+    name: newUser.name,
+    email: newUser.email,
+    username: newUser.username,
+    role: newUser.role,
+    splitsRecalculated,
+  });
 });
 
 // Trip admins can promote / demote another participant as trip admin
