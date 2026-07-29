@@ -107,6 +107,30 @@ vi.mock("../lib/destination-image.js", () => ({
   fetchDestinationImage: async () => null,
 }));
 
+// ── Mock email sender ─────────────────────────────────────────────────────────
+// Capture calls so tests can assert on them without a real SMTP server.
+
+export const sentEmails: Array<{
+  to: string;
+  name: string;
+  username: string;
+  temporaryPassword: string;
+  tripTitle?: string;
+}> = [];
+
+vi.mock("../lib/email.js", () => ({
+  sendWelcomeEmail: async (opts: {
+    to: string;
+    name: string;
+    username: string;
+    temporaryPassword: string;
+    tripTitle?: string;
+  }) => {
+    sentEmails.push(opts);
+    return { sent: true };
+  },
+}));
+
 // ── Test app ──────────────────────────────────────────────────────────────────
 //
 // Session: userId=1, role="super_admin" so requireTripAdmin() passes without
@@ -146,6 +170,7 @@ afterAll(() => server.close());
 
 beforeEach(() => {
   resultQueue.length = 0;
+  sentEmails.length = 0;
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -173,10 +198,12 @@ async function get(path: string) {
  *   1. select users where email = ?       → [] (no existing account)
  *   2. insert users returning             → [newUser]
  *   3. insert tripParticipants (no return — onConflictDoNothing)
+ *   4. select trips (title lookup for welcome email)  → [{ title: "Test Trip" }]
  *
- * recalcExpenseSplitsForTrip then runs two parallel selects:
- *   4. select tripParticipants (Promise.all[0])  → [{ userId: 1 }, { userId: 99 }]
- *   5. select tripExpenses     (Promise.all[1])  → [] (no expenses → early return 0)
+ * Promise.all([recalcExpenseSplitsForTrip, sendWelcomeEmail]) then fires;
+ * sendWelcomeEmail is mocked (no DB calls), recalc runs two parallel selects:
+ *   5. select tripParticipants (Promise.all[0])  → [{ userId: 1 }, { userId: 99 }]
+ *   6. select tripExpenses     (Promise.all[1])  → [] (no expenses → early return 0)
  */
 function enqueueSuccessfulInvite(
   newUser = {
@@ -187,14 +214,16 @@ function enqueueSuccessfulInvite(
     role: "traveler",
     createdAt: new Date(),
     passwordHash: "hashed-password",
-  }
+  },
+  tripTitle = "Test Trip"
 ) {
   enqueue(
     [],             // 1. no existing user with that email
     [newUser],      // 2. insert user returning
     [],             // 3. insert participant (onConflictDoNothing — ignored result)
-    [{ userId: 1 }, { userId: newUser.id }],  // 4. recalc: participants
-    [],             // 5. recalc: expenses (empty → early exit, returns 0)
+    [{ title: tripTitle }],  // 4. select trip title for welcome email
+    [{ userId: 1 }, { userId: newUser.id }],  // 5. recalc: participants
+    [],             // 6. recalc: expenses (empty → early exit, returns 0)
   );
   return newUser;
 }
@@ -239,6 +268,57 @@ describe("POST /trips/:tripId/participants/invite — happy path", () => {
     expect(status).toBe(201);
     // The route normalises on the way in; what comes back is the stored row
     expect(body.email).toBe("bob@example.com");
+  });
+
+  it("sends a welcome email to the invited traveler", async () => {
+    enqueueSuccessfulInvite();
+
+    await post("/trips/1/participants/invite", {
+      name: "Alice",
+      email: "alice@example.com",
+    });
+
+    // The mock sendWelcomeEmail should have been called once with the right data
+    expect(sentEmails).toHaveLength(1);
+    expect(sentEmails[0].to).toBe("alice@example.com");
+    expect(sentEmails[0].username).toBe("alice@example.com");
+    expect(sentEmails[0].name).toBe("Alice");
+    expect(typeof sentEmails[0].temporaryPassword).toBe("string");
+    expect(sentEmails[0].temporaryPassword.length).toBeGreaterThan(0);
+  });
+
+  it("includes emailSent: true in the response when the mailer succeeds", async () => {
+    enqueueSuccessfulInvite();
+
+    const { status, body } = await post("/trips/1/participants/invite", {
+      name: "Alice",
+      email: "alice@example.com",
+    });
+
+    expect(status).toBe(201);
+    expect(body.emailSent).toBe(true);
+  });
+
+  it("passes the trip title to the welcome email", async () => {
+    enqueueSuccessfulInvite(
+      {
+        id: 99,
+        username: "alice@example.com",
+        name: "Alice",
+        email: "alice@example.com",
+        role: "traveler",
+        createdAt: new Date(),
+        passwordHash: "hashed-password",
+      },
+      "Paris Adventure"
+    );
+
+    await post("/trips/1/participants/invite", {
+      name: "Alice",
+      email: "alice@example.com",
+    });
+
+    expect(sentEmails[0].tripTitle).toBe("Paris Adventure");
   });
 });
 

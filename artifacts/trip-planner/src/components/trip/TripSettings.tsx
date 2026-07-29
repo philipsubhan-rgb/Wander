@@ -53,7 +53,7 @@ function AddTravelerByEmail({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [inviteName, setInviteName] = useState('');
   const [inviting, setInviting] = useState(false);
-  const [tempPassword, setTempPassword] = useState<{ name: string; email: string; password: string } | null>(null);
+  const [tempPassword, setTempPassword] = useState<{ name: string; email: string; password: string; emailSent: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
   const addParticipant = useAddTripParticipant();
   const queryClient = useQueryClient();
@@ -162,7 +162,7 @@ function AddTravelerByEmail({
       setNotFound(false);
       // Show the temporary password to the admin so they can relay it
       if (data?.temporaryPassword) {
-        setTempPassword({ name: trimmedName, email: trimmedEmail, password: data.temporaryPassword });
+        setTempPassword({ name: trimmedName, email: trimmedEmail, password: data.temporaryPassword, emailSent: !!data?.emailSent });
         setCopied(false);
       } else {
         const recalc = data?.splitsRecalculated ?? 0;
@@ -283,11 +283,19 @@ function AddTravelerByEmail({
             </DialogTitle>
             <DialogDescription asChild>
               <div className="space-y-4 pt-1">
-                <p className="text-sm">
-                  A new account was created. Share these credentials with{' '}
-                  <span className="font-semibold">{tempPassword?.name}</span> so they can sign in.
-                  They should change their password after their first login.
-                </p>
+                {tempPassword?.emailSent ? (
+                  <p className="text-sm">
+                    A welcome email with login credentials was sent to{' '}
+                    <span className="font-semibold">{tempPassword?.email}</span>.
+                    The credentials are also shown below as a backup in case the email doesn't arrive.
+                  </p>
+                ) : (
+                  <p className="text-sm">
+                    A new account was created. Share these credentials with{' '}
+                    <span className="font-semibold">{tempPassword?.name}</span> so they can sign in.
+                    They should change their password after their first login.
+                  </p>
+                )}
                 <div className="bg-muted rounded-lg px-4 py-3 space-y-3">
                   <div>
                     <p className="text-xs text-muted-foreground mb-1">Email (username)</p>

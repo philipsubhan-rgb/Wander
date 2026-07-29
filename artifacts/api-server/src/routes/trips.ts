@@ -18,6 +18,7 @@ import {
 import { requireAdmin, requireAuth, requireTripAdmin, getAuthUserId, getAuthRole } from "../middlewares/auth";
 import { fetchDestinationImage } from "../lib/destination-image";
 import { recalcExpenseSplitsForTrip } from "./expenses";
+import { sendWelcomeEmail } from "../lib/email";
 
 const router: IRouter = Router();
 
@@ -446,7 +447,22 @@ router.post("/trips/:tripId/participants/invite", requireTripAdmin(), async (req
     .values({ tripId, userId: newUser.id, isTripAdmin: false })
     .onConflictDoNothing();
 
-  const splitsRecalculated = await recalcExpenseSplitsForTrip(tripId);
+  // Fetch the trip title for the welcome email (best-effort — non-fatal)
+  const [trip] = await db
+    .select({ title: tripsTable.title })
+    .from(tripsTable)
+    .where(eq(tripsTable.id, tripId));
+
+  const [splitsResult, emailResult] = await Promise.all([
+    recalcExpenseSplitsForTrip(tripId),
+    sendWelcomeEmail({
+      to: normalizedEmail,
+      name: name.trim(),
+      username: normalizedEmail,
+      temporaryPassword: randomPassword,
+      tripTitle: trip?.title,
+    }),
+  ]);
 
   res.status(201).json({
     id: newUser.id,
@@ -454,7 +470,8 @@ router.post("/trips/:tripId/participants/invite", requireTripAdmin(), async (req
     email: newUser.email,
     username: newUser.username,
     role: newUser.role,
-    splitsRecalculated,
+    splitsRecalculated: splitsResult,
+    emailSent: emailResult.sent,
     // Returned once so the trip admin can relay it; the traveler should change it on first login
     temporaryPassword: randomPassword,
   });
