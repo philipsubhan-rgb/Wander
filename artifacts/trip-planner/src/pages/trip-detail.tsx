@@ -23,6 +23,7 @@ import { TripItinerary } from '@/components/trip/TripItinerary';
 import { TripPackingList } from '@/components/trip/TripPackingList';
 import { TripNotes, TripDocuments } from '@/components/trip/TripPrivate';
 import { TripSettings } from '@/components/trip/TripSettings';
+import { TripTravelers } from '@/components/trip/TripTravelers';
 import { TripExpenses } from '@/components/trip/TripExpenses';
 
 function getGradientForDestination(destination: string) {
@@ -199,6 +200,9 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
               <TabsTrigger value="packing" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Packing List</TabsTrigger>
               <TabsTrigger value="notes" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">My Notes</TabsTrigger>
               <TabsTrigger value="documents" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Documents</TabsTrigger>
+              {canAdmin && (
+                <TabsTrigger value="travelers" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Travelers</TabsTrigger>
+              )}
               {editMode && canAdmin && (
                 <TabsTrigger value="settings" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Settings</TabsTrigger>
               )}
@@ -217,6 +221,9 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
             <TabsContent value="packing" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripPackingList tripId={tripId} /></TabsContent>
             <TabsContent value="notes" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripNotes tripId={tripId} /></TabsContent>
             <TabsContent value="documents" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripDocuments tripId={tripId} /></TabsContent>
+            {canAdmin && (
+              <TabsContent value="travelers" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripTravelers tripId={tripId} /></TabsContent>
+            )}
             {editMode && canAdmin && (
               <TabsContent value="settings" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripSettings trip={trip} /></TabsContent>
             )}
