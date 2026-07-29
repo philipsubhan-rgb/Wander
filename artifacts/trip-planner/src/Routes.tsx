@@ -32,7 +32,7 @@ export default function Routes() {
       </Route>
       
       <Route path="/trips/:id/edit">
-        <ProtectedRoute adminOnly>
+        <ProtectedRoute>
           <AppShell>
             <TripDetail editMode />
           </AppShell>
