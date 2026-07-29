@@ -406,6 +406,31 @@ router.patch("/trips/:tripId/participants/:userId", requireTripAdmin(), async (r
     return;
   }
 
+  // Guard: block demoting the last trip admin (super_admin is exempt)
+  if (isTripAdmin === false && getAuthRole(req, res) !== "super_admin") {
+    const [target] = await db
+      .select()
+      .from(tripParticipantsTable)
+      .where(and(
+        eq(tripParticipantsTable.tripId, tripId),
+        eq(tripParticipantsTable.userId, userId),
+        eq(tripParticipantsTable.isTripAdmin, true),
+      ));
+    if (target) {
+      const [adminCount] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(tripParticipantsTable)
+        .where(and(
+          eq(tripParticipantsTable.tripId, tripId),
+          eq(tripParticipantsTable.isTripAdmin, true),
+        ));
+      if (Number(adminCount?.count ?? 0) <= 1) {
+        res.status(409).json({ error: "Cannot demote the last trip admin. Promote another participant first." });
+        return;
+      }
+    }
+  }
+
   const [updated] = await db
     .update(tripParticipantsTable)
     .set({ isTripAdmin })
@@ -432,6 +457,31 @@ router.delete("/trips/:tripId/participants/:userId", requireTripAdmin(), async (
   }
 
   const { tripId, userId } = params.data;
+
+  // Guard: block removing the last trip admin (super_admin is exempt)
+  if (getAuthRole(req, res) !== "super_admin") {
+    const [target] = await db
+      .select()
+      .from(tripParticipantsTable)
+      .where(and(
+        eq(tripParticipantsTable.tripId, tripId),
+        eq(tripParticipantsTable.userId, userId),
+        eq(tripParticipantsTable.isTripAdmin, true),
+      ));
+    if (target) {
+      const [adminCount] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(tripParticipantsTable)
+        .where(and(
+          eq(tripParticipantsTable.tripId, tripId),
+          eq(tripParticipantsTable.isTripAdmin, true),
+        ));
+      if (Number(adminCount?.count ?? 0) <= 1) {
+        res.status(409).json({ error: "Cannot remove the last trip admin. Promote another participant first." });
+        return;
+      }
+    }
+  }
 
   // Count how many expenses in this trip this user paid for, so the admin can be warned
   const [payerExpenseCount] = await db
