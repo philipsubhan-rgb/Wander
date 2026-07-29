@@ -129,6 +129,16 @@ export interface ChangePasswordInput {
   newPassword: string;
 }
 
+export interface ForgotPasswordInput {
+  email: string;
+}
+
+export interface ResetPasswordInput {
+  token: string;
+  /** @minLength 8 */
+  newPassword: string;
+}
+
 export interface ChangeOwnPasswordInput {
   currentPassword: string;
   /** @minLength 8 */

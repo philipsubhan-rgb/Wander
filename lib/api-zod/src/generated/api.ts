@@ -75,6 +75,36 @@ export const LoginResponse = zod.object({
 
 
 /**
+ * Accepts an email address and sends a time-limited reset link. Always returns 200 to avoid leaking whether an account exists.
+ * @summary Request a password reset email
+ */
+export const ForgotPasswordBody = zod.object({
+  "email": zod.string()
+})
+
+export const ForgotPasswordResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
+/**
+ * @summary Set a new password using a reset token
+ */
+export const resetPasswordBodyNewPasswordMin = 8;
+
+
+
+export const ResetPasswordBody = zod.object({
+  "token": zod.string(),
+  "newPassword": zod.string().min(resetPasswordBodyNewPasswordMin)
+})
+
+export const ResetPasswordResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
+/**
  * @summary Change the current user's own password (requires current password)
  */
 export const changeOwnPasswordBodyNewPasswordMin = 8;

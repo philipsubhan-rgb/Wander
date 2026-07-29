@@ -37,6 +37,52 @@ function buildTransport() {
   });
 }
 
+export async function sendPasswordResetEmail(opts: {
+  to: string;
+  name: string;
+  resetUrl: string;
+}): Promise<SendResult> {
+  const { to, name, resetUrl } = opts;
+
+  const subject = "Reset your Wander password";
+
+  const html = `
+<p>Hi ${name},</p>
+<p>We received a request to reset your Wander password. Click the link below to set a new password. This link expires in 1 hour.</p>
+<p><a href="${resetUrl}">Reset my password</a></p>
+<p>If you didn't request a password reset, you can safely ignore this email — your password won't change.</p>
+<p>— The Wander team</p>
+`.trim();
+
+  const text = `Hi ${name},\n\nWe received a request to reset your Wander password. Visit the link below to set a new password (expires in 1 hour):\n\n${resetUrl}\n\nIf you didn't request this, you can safely ignore this email.\n\n— The Wander team`;
+
+  const transport = buildTransport();
+
+  if (!transport) {
+    // Do NOT log the reset URL — it contains a credential (the raw token).
+    // In development, configure SMTP or retrieve the token from the DB directly.
+    logger.info(
+      { to },
+      "SMTP not configured — password reset email not sent; configure SMTP vars to enable sending"
+    );
+    return { sent: false };
+  }
+
+  try {
+    await transport.sendMail({
+      from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+      to,
+      subject,
+      text,
+      html,
+    });
+    return { sent: true };
+  } catch (err) {
+    logger.error({ err, to }, "Failed to send password reset email");
+    return { sent: false };
+  }
+}
+
 export async function sendWelcomeEmail(opts: {
   to: string;
   name: string;

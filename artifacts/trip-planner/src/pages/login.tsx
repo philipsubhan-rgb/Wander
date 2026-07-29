@@ -109,6 +109,14 @@ export default function Login() {
                 ) : null}
                 Sign in
               </Button>
+              <div className="flex justify-center">
+                <a
+                  href="/forgot-password"
+                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Forgot password?
+                </a>
+              </div>
               <p className="text-center text-sm text-muted-foreground">
                 New traveler?{' '}
                 <span className="text-foreground">
