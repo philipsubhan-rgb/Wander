@@ -5,10 +5,12 @@ import {
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Separator } from '@/components/ui/separator';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Search, UserCheck, AlertCircle, Crown, Shield, Trash2, TriangleAlert, Users } from 'lucide-react';
+import { Search, UserCheck, AlertCircle, Crown, Shield, Trash2, TriangleAlert, Users, Pencil, Eye, EyeOff } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -235,6 +237,203 @@ function AddTravelerByEmail({
   );
 }
 
+// ── Edit Traveler Dialog ──────────────────────────────────────────────────────
+
+type EditTarget = { id: number; name: string; email: string | null; role: string };
+
+function EditTravelerDialog({
+  tripId,
+  traveler,
+  onClose,
+}: {
+  tripId: number;
+  traveler: EditTarget;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+
+  // Profile fields
+  const [name, setName] = useState(traveler.name);
+  const [email, setEmail] = useState(traveler.email ?? '');
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  // Password fields
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
+
+  const isSuperAdmin = traveler.role === 'super_admin';
+
+  const handleSaveProfile = async () => {
+    if (!name.trim()) { toast.error('Name is required'); return; }
+    setSavingProfile(true);
+    try {
+      const res = await fetch(`/api/trips/${tripId}/participants/${traveler.id}/details`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ name: name.trim(), email: email.trim() || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(data?.error || 'Failed to save profile'); return; }
+      queryClient.invalidateQueries({ queryKey: getListTripParticipantsQueryKey(tripId) });
+      toast.success('Traveler profile updated');
+      onClose();
+    } catch {
+      toast.error('Failed to save profile');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleSetPassword = async () => {
+    if (newPassword.length < 6) { toast.error('Password must be at least 6 characters'); return; }
+    if (newPassword !== confirmPassword) { toast.error('Passwords do not match'); return; }
+    setSavingPassword(true);
+    try {
+      const res = await fetch(`/api/trips/${tripId}/participants/${traveler.id}/set-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ newPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(data?.error || 'Failed to set password'); return; }
+      setNewPassword('');
+      setConfirmPassword('');
+      toast.success('Password updated');
+    } catch {
+      toast.error('Failed to set password');
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Pencil className="h-4 w-4 text-primary" />
+            Edit Traveler
+          </DialogTitle>
+          <DialogDescription>
+            Update profile details or set a new password for {traveler.name}.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-6 py-2">
+          {/* Profile section */}
+          <div className="space-y-4">
+            <p className="text-sm font-semibold text-foreground">Profile Details</p>
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Full Name</Label>
+              <Input
+                id="edit-name"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="Full name"
+                disabled={isSuperAdmin}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-email">Email Address</Label>
+              <Input
+                id="edit-email"
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="email@example.com"
+                disabled={isSuperAdmin}
+              />
+            </div>
+            {isSuperAdmin && (
+              <p className="text-xs text-muted-foreground">
+                Global admin profiles cannot be edited by trip admins.
+              </p>
+            )}
+          </div>
+
+          <Separator />
+
+          {/* Password section */}
+          <div className="space-y-4">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Set Password</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Use this to set or reset the traveler's login password.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-password">New Password</Label>
+              <div className="relative">
+                <Input
+                  id="edit-password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  disabled={isSuperAdmin}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-confirm-password">Confirm Password</Label>
+              <Input
+                id="edit-confirm-password"
+                type={showPassword ? 'text' : 'password'}
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                placeholder="Repeat password"
+                disabled={isSuperAdmin}
+              />
+            </div>
+            {!isSuperAdmin && (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={handleSetPassword}
+                disabled={savingPassword || !newPassword || !confirmPassword}
+              >
+                {savingPassword
+                  ? <span className="h-4 w-4 animate-spin inline-block border-2 border-current border-t-transparent rounded-full mr-2" />
+                  : null}
+                {savingPassword ? 'Setting password…' : 'Set Password'}
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveProfile}
+            disabled={savingProfile || isSuperAdmin || !name.trim()}
+          >
+            {savingProfile
+              ? <span className="h-4 w-4 animate-spin inline-block border-2 border-current border-t-transparent rounded-full mr-2" />
+              : null}
+            {savingProfile ? 'Saving…' : 'Save Profile'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main TripTravelers component ──────────────────────────────────────────────
 
 export function TripTravelers({ tripId }: { tripId: number }) {
@@ -243,6 +442,7 @@ export function TripTravelers({ tripId }: { tripId: number }) {
   const removeParticipant = useRemoveTripParticipant();
   const [removeWarning, setRemoveWarning] = useState<{ userId: number; name: string } | null>(null);
   const [togglingAdminId, setTogglingAdminId] = useState<number | null>(null);
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
 
   const currentParticipantIds = participants?.map(p => p.id) ?? [];
 
@@ -339,32 +539,50 @@ export function TripTravelers({ tripId }: { tripId: number }) {
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleToggleTripAdmin(user.id, isTripAdmin)}
-                  disabled={togglingAdminId === user.id}
-                  className={`h-8 w-8 ${isTripAdmin ? 'text-amber-500 hover:text-amber-600' : 'text-muted-foreground hover:text-amber-500'}`}
-                  title={isTripAdmin ? 'Remove trip admin role' : 'Make trip admin'}
-                >
-                  {togglingAdminId === user.id
-                    ? <span className="h-3 w-3 animate-spin inline-block border-2 border-current border-t-transparent rounded-full" />
-                    : <Crown className="h-4 w-4" />}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setRemoveWarning({ userId: user.id, name: user.name })}
-                  className="h-8 w-8 text-destructive/60 hover:text-destructive"
-                  title="Remove from trip"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setEditTarget({ id: user.id, name: user.name, email: (user as any).email ?? null, role: user.role })}
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                    title="Edit traveler"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleToggleTripAdmin(user.id, isTripAdmin)}
+                    disabled={togglingAdminId === user.id}
+                    className={`h-8 w-8 ${isTripAdmin ? 'text-amber-500 hover:text-amber-600' : 'text-muted-foreground hover:text-amber-500'}`}
+                    title={isTripAdmin ? 'Remove trip admin role' : 'Make trip admin'}
+                  >
+                    {togglingAdminId === user.id
+                      ? <span className="h-3 w-3 animate-spin inline-block border-2 border-current border-t-transparent rounded-full" />
+                      : <Crown className="h-4 w-4" />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setRemoveWarning({ userId: user.id, name: user.name })}
+                    className="h-8 w-8 text-destructive/60 hover:text-destructive"
+                    title="Remove from trip"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
             </div>
           );
         })}
       </div>
+
+      {/* Edit traveler dialog */}
+      {editTarget && (
+        <EditTravelerDialog
+          tripId={tripId}
+          traveler={editTarget}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
 
       {/* Remove confirmation */}
       <Dialog open={!!removeWarning} onOpenChange={open => { if (!open) setRemoveWarning(null); }}>

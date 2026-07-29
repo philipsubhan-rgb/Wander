@@ -515,6 +515,95 @@ router.patch("/trips/:tripId/participants/:userId", requireTripAdmin(), async (r
   res.json({ success: true, isTripAdmin: updated.isTripAdmin });
 });
 
+// Trip admins can edit a participant's name / email
+router.patch("/trips/:tripId/participants/:userId/details", requireTripAdmin(), async (req, res): Promise<void> => {
+  const tripId = parseInt(req.params.tripId);
+  const userId = parseInt(req.params.userId);
+  if (isNaN(tripId) || isNaN(userId)) {
+    res.status(400).json({ error: "Invalid params" });
+    return;
+  }
+
+  const { name, email } = req.body as { name?: string; email?: string };
+  if (!name && !email) {
+    res.status(400).json({ error: "At least one of name or email is required" });
+    return;
+  }
+
+  // Verify the target is actually a participant of this trip
+  const [participant] = await db
+    .select()
+    .from(tripParticipantsTable)
+    .where(and(eq(tripParticipantsTable.tripId, tripId), eq(tripParticipantsTable.userId, userId)));
+  if (!participant) {
+    res.status(404).json({ error: "Participant not found in this trip" });
+    return;
+  }
+
+  // Trip admins cannot edit global super_admins
+  const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+  if (!targetUser) { res.status(404).json({ error: "User not found" }); return; }
+  if (targetUser.role === "super_admin" && getAuthRole(req, res) !== "super_admin") {
+    res.status(403).json({ error: "Cannot edit a global admin's profile" });
+    return;
+  }
+
+  const updateData: Record<string, unknown> = {};
+  if (name?.trim()) updateData.name = name.trim();
+  if (email?.trim()) {
+    const normalised = email.trim().toLowerCase();
+    updateData.email = normalised;
+    updateData.username = normalised;
+  }
+
+  const [updated] = await db
+    .update(usersTable)
+    .set(updateData as Parameters<ReturnType<typeof db.update>['set']>[0])
+    .where(eq(usersTable.id, userId))
+    .returning();
+
+  res.json({ id: updated.id, name: updated.name, email: updated.email, username: updated.username });
+});
+
+// Trip admins can set / reset a participant's password
+router.post("/trips/:tripId/participants/:userId/set-password", requireTripAdmin(), async (req, res): Promise<void> => {
+  const tripId = parseInt(req.params.tripId);
+  const userId = parseInt(req.params.userId);
+  if (isNaN(tripId) || isNaN(userId)) {
+    res.status(400).json({ error: "Invalid params" });
+    return;
+  }
+
+  const { newPassword } = req.body as { newPassword?: string };
+  if (!newPassword || newPassword.length < 6) {
+    res.status(400).json({ error: "newPassword must be at least 6 characters" });
+    return;
+  }
+
+  // Verify the target is a participant of this trip
+  const [participant] = await db
+    .select()
+    .from(tripParticipantsTable)
+    .where(and(eq(tripParticipantsTable.tripId, tripId), eq(tripParticipantsTable.userId, userId)));
+  if (!participant) {
+    res.status(404).json({ error: "Participant not found in this trip" });
+    return;
+  }
+
+  // Trip admins cannot change a super_admin's password
+  const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+  if (!targetUser) { res.status(404).json({ error: "User not found" }); return; }
+  if (targetUser.role === "super_admin" && getAuthRole(req, res) !== "super_admin") {
+    res.status(403).json({ error: "Cannot change a global admin's password" });
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, userId));
+
+  res.json({ success: true });
+});
+
 // Trip admins can remove travelers from their trip
 router.delete("/trips/:tripId/participants/:userId", requireTripAdmin(), async (req, res): Promise<void> => {
   const params = RemoveTripParticipantParams.safeParse(req.params);
