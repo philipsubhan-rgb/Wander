@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { toast } from 'sonner';
-import { Users, Trash2, Shield, TriangleAlert, Search, UserCheck, AlertCircle, Crown } from 'lucide-react';
+import { Users, Trash2, Shield, TriangleAlert, Search, UserCheck, AlertCircle, Crown, Copy, Check, KeyRound } from 'lucide-react';
 
 const tripSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -53,8 +53,18 @@ function AddTravelerByEmail({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [inviteName, setInviteName] = useState('');
   const [inviting, setInviting] = useState(false);
+  const [tempPassword, setTempPassword] = useState<{ name: string; email: string; password: string } | null>(null);
+  const [copied, setCopied] = useState(false);
   const addParticipant = useAddTripParticipant();
   const queryClient = useQueryClient();
+
+  const copyTempPassword = () => {
+    if (!tempPassword) return;
+    navigator.clipboard.writeText(tempPassword.password).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   const handleSearch = async () => {
     const trimmed = email.trim().toLowerCase();
@@ -150,11 +160,17 @@ function AddTravelerByEmail({
       setEmail('');
       setInviteName('');
       setNotFound(false);
-      const recalc = data?.splitsRecalculated ?? 0;
-      if (recalc > 0) {
-        toast.success(`${trimmedName} added — ${recalc} expense${recalc !== 1 ? 's' : ''} recalculated`);
+      // Show the temporary password to the admin so they can relay it
+      if (data?.temporaryPassword) {
+        setTempPassword({ name: trimmedName, email: trimmedEmail, password: data.temporaryPassword });
+        setCopied(false);
       } else {
-        toast.success(`${trimmedName} added to trip`);
+        const recalc = data?.splitsRecalculated ?? 0;
+        if (recalc > 0) {
+          toast.success(`${trimmedName} added — ${recalc} expense${recalc !== 1 ? 's' : ''} recalculated`);
+        } else {
+          toast.success(`${trimmedName} added to trip`);
+        }
       }
       onAdded();
     } finally {
@@ -256,6 +272,55 @@ function AddTravelerByEmail({
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Temporary password dialog — shown once after a new traveler is created */}
+      <Dialog open={!!tempPassword} onOpenChange={(open) => { if (!open) setTempPassword(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-primary" />
+              Share login details with {tempPassword?.name}
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-4 pt-1">
+                <p className="text-sm">
+                  A new account was created. Share these credentials with{' '}
+                  <span className="font-semibold">{tempPassword?.name}</span> so they can sign in.
+                  They should change their password after their first login.
+                </p>
+                <div className="bg-muted rounded-lg px-4 py-3 space-y-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Email (username)</p>
+                    <p className="text-sm font-mono font-medium">{tempPassword?.email}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Temporary password</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-mono font-medium flex-1 break-all">{tempPassword?.password}</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-7 w-7 shrink-0"
+                        onClick={copyTempPassword}
+                        title="Copy password"
+                      >
+                        {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  This password will not be shown again. Once they log in, they can change it from the account menu.
+                </p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setTempPassword(null)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

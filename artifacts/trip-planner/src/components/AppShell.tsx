@@ -1,17 +1,125 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useLocation } from 'wouter';
 import { useAuth } from '@/hooks/use-auth';
-import { Compass, Map, Users, LogOut, Loader2, PlaneTakeoff } from 'lucide-react';
+import { Compass, Users, LogOut, Loader2, PlaneTakeoff, KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { useChangeOwnPassword } from '@workspace/api-client-react';
+import { toast } from 'sonner';
 
 interface AppShellProps {
   children: React.ReactNode;
 }
 
+function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const changePassword = useChangeOwnPassword();
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 8) {
+      toast.error('New password must be at least 8 characters');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+    changePassword.mutate(
+      { data: { currentPassword, newPassword } },
+      {
+        onSuccess: () => {
+          toast.success('Password changed successfully');
+          setCurrentPassword('');
+          setNewPassword('');
+          setConfirmPassword('');
+          onClose();
+        },
+        onError: (err: any) => {
+          toast.error(err?.error ?? err?.message ?? 'Failed to change password');
+        },
+      }
+    );
+  };
+
+  const handleOpenChange = (open: boolean) => {
+    if (!open) {
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      onClose();
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <KeyRound className="h-5 w-5 text-primary" />
+            Change password
+          </DialogTitle>
+          <DialogDescription>
+            Enter your current password, then choose a new one (minimum 8 characters).
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          <div className="space-y-1">
+            <label className="text-sm font-medium">Current password</label>
+            <Input
+              type="password"
+              placeholder="••••••••"
+              value={currentPassword}
+              onChange={e => setCurrentPassword(e.target.value)}
+              required
+              autoFocus
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium">New password</label>
+            <Input
+              type="password"
+              placeholder="••••••••"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              required
+              minLength={8}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium">Confirm new password</label>
+            <Input
+              type="password"
+              placeholder="••••••••"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              required
+            />
+          </div>
+          <DialogFooter className="pt-2">
+            <Button type="button" variant="outline" onClick={() => handleOpenChange(false)} disabled={changePassword.isPending}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={changePassword.isPending || !currentPassword || !newPassword || !confirmPassword}>
+              {changePassword.isPending ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Saving…</>
+              ) : 'Change password'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function AppShell({ children }: AppShellProps) {
   const { user, isAdmin, logout } = useAuth();
   const [location] = useLocation();
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   if (!user) {
     return (
@@ -34,7 +142,10 @@ export function AppShell({ children }: AppShellProps) {
           <PlaneTakeoff className="h-6 w-6" />
           <span className="font-serif font-bold text-lg">Wander</span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon" onClick={() => setChangePasswordOpen(true)} title="Change password">
+            <KeyRound className="h-5 w-5" />
+          </Button>
           <Button variant="ghost" size="icon" onClick={logout} title="Log out">
             <LogOut className="h-5 w-5" />
           </Button>
@@ -50,8 +161,6 @@ export function AppShell({ children }: AppShellProps) {
         
         <nav className="flex-1 px-4 py-6 space-y-2">
           {navItems.map((item) => {
-            const active = location.startsWith(item.href) && (item.href !== '/trips' || location === '/trips' || location.startsWith('/trips/'));
-            // Wait, better active logic:
             const isActive = location === item.href || (location.startsWith(item.href + '/') && item.href !== '/');
             return (
               <Link key={item.name} href={item.href} className={cn(
@@ -77,6 +186,14 @@ export function AppShell({ children }: AppShellProps) {
               <span className="text-xs text-muted-foreground capitalize">{user.role}</span>
             </div>
           </div>
+          <Button
+            variant="ghost"
+            className="w-full justify-start text-muted-foreground hover:text-foreground mb-1"
+            onClick={() => setChangePasswordOpen(true)}
+          >
+            <KeyRound className="h-4 w-4 mr-2" />
+            Change password
+          </Button>
           <Button variant="ghost" className="w-full justify-start text-muted-foreground hover:text-foreground" onClick={logout}>
             <LogOut className="h-4 w-4 mr-2" />
             Log out
@@ -104,6 +221,8 @@ export function AppShell({ children }: AppShellProps) {
           );
         })}
       </div>
+
+      <ChangePasswordDialog open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
     </div>
   );
 }

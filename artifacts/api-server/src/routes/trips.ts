@@ -424,8 +424,8 @@ router.post("/trips/:tripId/participants/invite", requireTripAdmin(), async (req
     return;
   }
 
-  // Create a new traveler account with a random throwaway password
-  // (they can reset it later; we never return this value)
+  // Create a new traveler account with a random temporary password.
+  // We return it once in the response so the trip admin can relay it to the traveler.
   const randomPassword = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
   const passwordHash = await bcrypt.hash(randomPassword, 10);
 
@@ -455,6 +455,8 @@ router.post("/trips/:tripId/participants/invite", requireTripAdmin(), async (req
     username: newUser.username,
     role: newUser.role,
     splitsRecalculated,
+    // Returned once so the trip admin can relay it; the traveler should change it on first login
+    temporaryPassword: randomPassword,
   });
 });
 

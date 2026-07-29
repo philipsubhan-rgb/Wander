@@ -5,11 +5,10 @@
  * Trip Planner API
  * OpenAPI spec version: 0.1.0
  */
-
-import type { UserRole } from './userRole';
+import type { UserUpdateRole } from './userUpdateRole';
 
 export interface UserUpdate {
   name?: string;
   email?: string;
-  role?: UserRole;
+  role?: UserUpdateRole;
 }

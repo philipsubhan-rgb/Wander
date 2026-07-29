@@ -135,6 +135,37 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /auth/change-password:
+    post:
+      operationId: changeOwnPassword
+      tags: [auth]
+      summary: Change the current user's own password (requires current password)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeOwnPasswordInput"
+      responses:
+        "200":
+          description: Password changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Current password incorrect or invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /auth/logout:
     post:
       operationId: logout
@@ -507,7 +538,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [id, name, email, username, role, splitsRecalculated]
+                required: [id, name, email, username, role, splitsRecalculated, temporaryPassword]
                 properties:
                   id:
                     type: integer
@@ -521,6 +552,9 @@ paths:
                     type: string
                   splitsRecalculated:
                     type: integer
+                  temporaryPassword:
+                    type: string
+                    description: One-time temporary password to relay to the new traveler; they should change it on first login
 
   /trips/{tripId}/participants/{userId}:
     delete:
@@ -1667,6 +1701,16 @@ components:
       properties:
         newPassword:
           type: string
+
+    ChangeOwnPasswordInput:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+        newPassword:
+          type: string
+          minLength: 8
 
     Trip:
       type: object

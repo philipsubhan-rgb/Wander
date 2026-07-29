@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type LoginResponseRole = typeof LoginResponseRole[keyof typeof LoginResponseRole];
+export type UserUpdateRole = typeof UserUpdateRole[keyof typeof UserUpdateRole];
 
 
-export const LoginResponseRole = {
+export const UserUpdateRole = {
   super_admin: 'super_admin',
   admin: 'admin',
   traveler: 'traveler',

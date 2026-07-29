@@ -109,6 +109,12 @@ export default function Login() {
                 ) : null}
                 Sign in
               </Button>
+              <p className="text-center text-sm text-muted-foreground">
+                New traveler?{' '}
+                <span className="text-foreground">
+                  Sign in with the temporary password your trip admin shared, then change it from the account menu.
+                </span>
+              </p>
             </form>
           </Form>
         </div>

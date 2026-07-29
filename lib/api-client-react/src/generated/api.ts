@@ -30,6 +30,7 @@ import type {
   CarRental,
   CarRentalInput,
   CarRentalUpdate,
+  ChangeOwnPasswordInput,
   ChangePasswordInput,
   ErrorResponse,
   ExpenseBalanceSummary,
@@ -40,6 +41,8 @@ import type {
   FlightInput,
   FlightUpdate,
   HealthStatus,
+  InviteTripParticipant201,
+  InviteTripParticipantBody,
   ItineraryDay,
   ItineraryDayInput,
   ItineraryDayUpdate,
@@ -396,6 +399,77 @@ export const useLogin = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getLoginMutationOptions(options));
+    }
+
+export const getChangeOwnPasswordUrl = () => {
+
+
+
+
+  return `/api/auth/change-password`
+}
+
+/**
+ * @summary Change the current user's own password (requires current password)
+ */
+export const changeOwnPassword = async (changeOwnPasswordInput: ChangeOwnPasswordInput, options?: RequestInit): Promise<SuccessResponse> => {
+
+  return customFetch<SuccessResponse>(getChangeOwnPasswordUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(changeOwnPasswordInput)
+  }
+);}
+
+
+
+
+
+export const getChangeOwnPasswordMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeOwnPassword>>, TError,{data: BodyType<ChangeOwnPasswordInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof changeOwnPassword>>, TError,{data: BodyType<ChangeOwnPasswordInput>}, TContext> => {
+
+const mutationKey = ['changeOwnPassword'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof changeOwnPassword>>, {data: BodyType<ChangeOwnPasswordInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  changeOwnPassword(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ChangeOwnPasswordMutationResult = NonNullable<Awaited<ReturnType<typeof changeOwnPassword>>>
+    export type ChangeOwnPasswordMutationBody = BodyType<ChangeOwnPasswordInput>
+    export type ChangeOwnPasswordMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Change the current user's own password (requires current password)
+ */
+export const useChangeOwnPassword = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeOwnPassword>>, TError,{data: BodyType<ChangeOwnPasswordInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof changeOwnPassword>>,
+        TError,
+        {data: BodyType<ChangeOwnPasswordInput>},
+        TContext
+      > => {
+      return useMutation(getChangeOwnPasswordMutationOptions(options));
     }
 
 export const getLogoutUrl = () => {
@@ -1697,6 +1771,78 @@ export const useAddTripParticipant = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getAddTripParticipantMutationOptions(options));
+    }
+
+export const getInviteTripParticipantUrl = (tripId: number,) => {
+
+
+
+
+  return `/api/trips/${tripId}/participants/invite`
+}
+
+/**
+ * @summary Create a new traveler account and immediately add them to the trip (trip admin only)
+ */
+export const inviteTripParticipant = async (tripId: number,
+    inviteTripParticipantBody: InviteTripParticipantBody, options?: RequestInit): Promise<InviteTripParticipant201> => {
+
+  return customFetch<InviteTripParticipant201>(getInviteTripParticipantUrl(tripId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(inviteTripParticipantBody)
+  }
+);}
+
+
+
+
+
+export const getInviteTripParticipantMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof inviteTripParticipant>>, TError,{tripId: number;data: BodyType<InviteTripParticipantBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof inviteTripParticipant>>, TError,{tripId: number;data: BodyType<InviteTripParticipantBody>}, TContext> => {
+
+const mutationKey = ['inviteTripParticipant'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof inviteTripParticipant>>, {tripId: number;data: BodyType<InviteTripParticipantBody>}> = (props) => {
+          const {tripId,data} = props ?? {};
+
+          return  inviteTripParticipant(tripId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type InviteTripParticipantMutationResult = NonNullable<Awaited<ReturnType<typeof inviteTripParticipant>>>
+    export type InviteTripParticipantMutationBody = BodyType<InviteTripParticipantBody>
+    export type InviteTripParticipantMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create a new traveler account and immediately add them to the trip (trip admin only)
+ */
+export const useInviteTripParticipant = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof inviteTripParticipant>>, TError,{tripId: number;data: BodyType<InviteTripParticipantBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof inviteTripParticipant>>,
+        TError,
+        {tripId: number;data: BodyType<InviteTripParticipantBody>},
+        TContext
+      > => {
+      return useMutation(getInviteTripParticipantMutationOptions(options));
     }
 
 export const getRemoveTripParticipantUrl = (tripId: number,

@@ -110,13 +110,28 @@ export interface UserInput {
   role?: UserInputRole;
 }
 
+export type UserUpdateRole = typeof UserUpdateRole[keyof typeof UserUpdateRole];
+
+
+export const UserUpdateRole = {
+  super_admin: 'super_admin',
+  admin: 'admin',
+  traveler: 'traveler',
+} as const;
+
 export interface UserUpdate {
   name?: string;
   email?: string;
-  role?: UserInputRole;
+  role?: UserUpdateRole;
 }
 
 export interface ChangePasswordInput {
+  newPassword: string;
+}
+
+export interface ChangeOwnPasswordInput {
+  currentPassword: string;
+  /** @minLength 8 */
   newPassword: string;
 }
 
@@ -973,6 +988,22 @@ export interface ExpenseBalanceSummary {
 
 export type LookupUserByEmailParams = {
 email: string;
+};
+
+export type InviteTripParticipantBody = {
+  name: string;
+  email: string;
+};
+
+export type InviteTripParticipant201 = {
+  id: number;
+  name: string;
+  email: string;
+  username: string;
+  role: string;
+  splitsRecalculated: number;
+  /** One-time temporary password to relay to the new traveler; they should change it on first login */
+  temporaryPassword: string;
 };
 
 export type RemoveTripParticipant200 = {

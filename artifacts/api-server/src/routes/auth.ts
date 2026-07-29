@@ -87,4 +87,37 @@ router.get("/auth/me", requireAuth, async (req, res): Promise<void> => {
   });
 });
 
+// Self-service password change — any authenticated traveler can change their own password.
+// Requires the current password to prevent account takeover from an unattended session.
+router.post("/auth/change-password", requireAuth, async (req, res): Promise<void> => {
+  const { currentPassword, newPassword } = req.body as { currentPassword?: unknown; newPassword?: unknown };
+
+  if (!currentPassword || typeof currentPassword !== "string" || !currentPassword.trim()) {
+    res.status(400).json({ error: "Current password is required" });
+    return;
+  }
+  if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
+    res.status(400).json({ error: "New password must be at least 8 characters" });
+    return;
+  }
+
+  const userId = getAuthUserId(req, res)!;
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+  if (!user) {
+    res.status(401).json({ error: "User not found" });
+    return;
+  }
+
+  const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!valid) {
+    res.status(400).json({ error: "Current password is incorrect" });
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, userId));
+
+  res.json({ success: true });
+});
+
 export default router;

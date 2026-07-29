@@ -75,6 +75,23 @@ export const LoginResponse = zod.object({
 
 
 /**
+ * @summary Change the current user's own password (requires current password)
+ */
+export const changeOwnPasswordBodyNewPasswordMin = 8;
+
+
+
+export const ChangeOwnPasswordBody = zod.object({
+  "currentPassword": zod.string(),
+  "newPassword": zod.string().min(changeOwnPasswordBodyNewPasswordMin)
+})
+
+export const ChangeOwnPasswordResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
+/**
  * @summary Logout
  */
 export const LogoutResponse = zod.object({
@@ -112,7 +129,7 @@ export const LookupUserByEmailResponse = zod.object({
 
 
 /**
- * @summary List all users (super_admin only)
+ * @summary List all users (admin only)
  */
 export const ListUsersResponseItem = zod.object({
   "id": zod.number(),
@@ -126,7 +143,7 @@ export const ListUsersResponse = zod.array(ListUsersResponseItem)
 
 
 /**
- * @summary Create a new traveler (super_admin only)
+ * @summary Create a new traveler (admin only)
  */
 export const CreateUserBody = zod.object({
   "name": zod.string(),
@@ -352,7 +369,7 @@ export const ListTripParticipantsResponseItem = zod.object({
   "id": zod.number(),
   "username": zod.string(),
   "name": zod.string(),
-  "role": zod.enum(['admin', 'traveler']),
+  "role": zod.enum(['super_admin', 'admin', 'traveler']),
   "email": zod.string(),
   "createdAt": zod.string().optional()
 })
@@ -393,7 +410,8 @@ export const InviteTripParticipantResponse = zod.object({
   "email": zod.string(),
   "username": zod.string(),
   "role": zod.string(),
-  "splitsRecalculated": zod.number()
+  "splitsRecalculated": zod.number(),
+  "temporaryPassword": zod.string().describe('One-time temporary password to relay to the new traveler; they should change it on first login')
 })
 
 
