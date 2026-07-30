@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useGetTripSummary, useGetTripTimeline } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
@@ -61,6 +61,23 @@ const TYPE_COLOR: Record<string, string> = {
   reservation: '#F97316',
 };
 
+function AirlineLogoMini({ code }: { code: string }) {
+  const [err, setErr] = useState(false);
+  if (err) return null;
+  return (
+    <Image
+      source={{ uri: `https://pics.avs.io/200/80/${code}.png` }}
+      style={tlLogoStyles.img}
+      resizeMode="contain"
+      onError={() => setErr(true)}
+    />
+  );
+}
+
+const tlLogoStyles = StyleSheet.create({
+  img: { width: 54, height: 22 },
+});
+
 function TimelineEvent({ event, colors }: { event: any; colors: ReturnType<typeof useColors> }) {
   const icon = TYPE_ICON[event.type] ?? 'circle';
   const color = TYPE_COLOR[event.type] ?? colors.primary;
@@ -82,7 +99,9 @@ function TimelineEvent({ event, colors }: { event: any; colors: ReturnType<typeo
           <Text style={[timelineStyles.title, { color: colors.foreground }]} numberOfLines={1}>
             {event.title}
           </Text>
-          {date ? (
+          {event.type === 'flight' && event.carrierCode ? (
+            <AirlineLogoMini code={event.carrierCode} />
+          ) : date ? (
             <View style={[timelineStyles.dateBadge, { backgroundColor: colors.muted }]}>
               <Text style={[timelineStyles.dateText, { color: colors.mutedForeground }]}>{date}</Text>
             </View>

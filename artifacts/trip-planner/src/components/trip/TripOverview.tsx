@@ -96,7 +96,7 @@ function EventThumbnail({ event }: { event: any }) {
       return (
         <div className="w-20 shrink-0 bg-muted/50 flex items-center justify-center">
           <img
-            src={`https://pics.avs.io/200/80/${event.carrierCode}.png`}
+            src={`https://pics.avs.io/200/80/${event.carrierCode!.toUpperCase()}.png`}
             alt=""
             className="w-16 h-auto object-contain p-1"
             onError={() => setLogoError(true)}

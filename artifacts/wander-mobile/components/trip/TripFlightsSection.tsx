@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Modal, TextInput, Alert, RefreshControl, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Modal, TextInput, Alert, RefreshControl, KeyboardAvoidingView, Platform, Image,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
@@ -14,11 +14,33 @@ import { useColors } from '@/hooks/useColors';
 const DIRECTIONS = ['outbound', 'return', 'connecting'] as const;
 type Direction = typeof DIRECTIONS[number];
 
+function AirlineLogo({ code }: { code: string }) {
+  const [err, setErr] = useState(false);
+  if (err) {
+    return (
+      <View style={[cardStyles.iconWrap, { backgroundColor: '#2F7CE018' }]}>
+        <Feather name="navigation" size={16} color="#2F7CE0" />
+      </View>
+    );
+  }
+  return (
+    <View style={cardStyles.logoWrap}>
+      <Image
+        source={{ uri: `https://pics.avs.io/200/80/${code}.png` }}
+        style={cardStyles.logoImg}
+        resizeMode="contain"
+        onError={() => setErr(true)}
+      />
+    </View>
+  );
+}
+
 function FlightCard({ tripId, flight, colors, onDelete }: {
   tripId: number; flight: any; colors: ReturnType<typeof useColors>; onDelete: (id: number) => void;
 }) {
   const dep = flight.departureDatetime ? new Date(flight.departureDatetime) : null;
   const arr = flight.arrivalDatetime ? new Date(flight.arrivalDatetime) : null;
+  const carrierCode = (flight.flightNumber ?? '').toUpperCase().match(/^([A-Z0-9]{2,3})\s*\d/)?.[1] ?? null;
 
   const fmt = (d: Date | null) =>
     d ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : '–';
@@ -38,9 +60,13 @@ function FlightCard({ tripId, flight, colors, onDelete }: {
   return (
     <View style={[cardStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <View style={cardStyles.header}>
-        <View style={[cardStyles.iconWrap, { backgroundColor: '#2F7CE018' }]}>
-          <Feather name="navigation" size={16} color="#2F7CE0" />
-        </View>
+        {carrierCode ? (
+          <AirlineLogo code={carrierCode} />
+        ) : (
+          <View style={[cardStyles.iconWrap, { backgroundColor: '#2F7CE018' }]}>
+            <Feather name="navigation" size={16} color="#2F7CE0" />
+          </View>
+        )}
         <View style={{ flex: 1 }}>
           <Text style={[cardStyles.airline, { color: colors.foreground }]}>{flight.airline}</Text>
           <Text style={[cardStyles.sub, { color: colors.mutedForeground }]}>{flight.flightNumber}</Text>
@@ -82,6 +108,8 @@ const cardStyles = StyleSheet.create({
   card: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, padding: 14, gap: 12 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   iconWrap: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  logoWrap: { width: 64, height: 36, borderRadius: 8, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  logoImg:  { width: 56, height: 28 },
   airline: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
   sub: { fontSize: 12, fontFamily: 'Inter_400Regular' },
   dirBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
