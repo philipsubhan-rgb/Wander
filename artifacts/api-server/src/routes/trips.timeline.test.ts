@@ -1379,4 +1379,75 @@ describe("GET /trips/:tripId/timeline — day-boundary flights (23:59 vs 00:00 n
     expect(flights[0].date).toBe("2025-09-10");
     expect(flights[1].date).toBe("2025-09-11");
   });
+
+  /**
+   * After-midnight arrival edge case:
+   *
+   * A flight departs at 23:00 on day D (2025-11-15) and arrives at 01:30 on
+   * day D+1 (2025-11-16). The timeline entry must be placed on the departure
+   * date (day D), not the arrival date. The arrival crosses midnight but the
+   * event should not "leak" onto 2025-11-16.
+   *
+   * Additionally, if the server ever exposes arrivalDate as a distinct field,
+   * it must equal "2025-11-16" (day D+1) — not the departure date.
+   */
+  it("places a flight with an after-midnight arrival on the departure date, not the arrival date", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 50, tripId: 1,
+          airline: "Red Eye Air", flightNumber: "RE123",
+          departureAirport: "LAX", arrivalAirport: "JFK",
+          departureDatetime: "2025-11-15T23:00:00",
+          arrivalDatetime:   "2025-11-16T01:30:00",
+          notes: null, confirmationCode: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+    expect(status).toBe(200);
+
+    // The flight must appear exactly once, on the departure date (day D).
+    const nov15 = body.filter((e: any) => e.date === "2025-11-15");
+    const nov16 = body.filter((e: any) => e.date === "2025-11-16");
+
+    expect(nov15).toHaveLength(1);
+    expect(nov15[0].type).toBe("flight");
+    expect(nov15[0].title).toBe("Red Eye Air RE123: LAX → JFK");
+
+    // The arrival crosses midnight but must NOT produce an event on day D+1.
+    expect(nov16).toHaveLength(0);
+  });
+
+  it("preserves the departure time (23:00) for a flight that arrives after midnight", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 51, tripId: 1,
+          airline: "Red Eye Air", flightNumber: "RE123",
+          departureAirport: "LAX", arrivalAirport: "JFK",
+          departureDatetime: "2025-11-15T23:00:00",
+          arrivalDatetime:   "2025-11-16T01:30:00",
+          notes: null, confirmationCode: null,
+        },
+      ],
+    });
+
+    const { body } = await get("/trips/1/timeline");
+
+    const flight = body.find((e: any) => e.type === "flight");
+    expect(flight).toBeDefined();
+
+    // date must be the departure date, not the arrival date.
+    expect(flight.date).toBe("2025-11-15");
+
+    // time must be the departure time extracted from departureDatetime.
+    expect(flight.time).toBe("23:00");
+
+    // If arrivalDate is ever exposed as a separate field, it must be day D+1.
+    if ("arrivalDate" in flight) {
+      expect(flight.arrivalDate).toBe("2025-11-16");
+    }
+  });
 });
