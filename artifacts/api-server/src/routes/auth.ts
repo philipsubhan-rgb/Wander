@@ -41,7 +41,10 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
-  const { username, password } = parsed.data;
+  const { username: rawUsername, password } = parsed.data;
+  // Usernames are stored as lowercase email addresses. Normalise before lookup so
+  // that mobile keyboards which auto-capitalise the first letter still succeed.
+  const username = rawUsername.trim().toLowerCase();
   const [user] = await db.select().from(usersTable).where(eq(usersTable.username, username));
 
   if (!user) {
