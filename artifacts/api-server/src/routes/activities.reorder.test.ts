@@ -1,0 +1,466 @@
+/**
+ * Integration tests: drag-and-drop sort order persistence
+ *
+ * Covers:
+ *   1. POST /trips/:tripId/activities/reorder — verifies the reorder endpoint
+ *      writes sort_order values to every activity in the supplied id list.
+ *   2. GET /trips/:tripId/timeline sort-order tiebreaker — verifies that after
+ *      a reorder (simulated by activities carrying different sortOrder values)
+ *      the timeline returns activities in the expected sequence rather than by
+ *      insertion order or id.
+ *   3. Reservations are covered by the same sort logic (_sortOrder tiebreaker).
+ *   4. The id fallback fires when every activity has a null sort_order.
+ *
+ * Strategy: mock @workspace/db with the lazy-dequeue chainable fake used
+ * across all route tests. Mount the relevant router on a minimal Express app
+ * that injects a fake session, then drive requests with Node's built-in fetch.
+ */
+
+import http from "node:http";
+import express from "express";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+
+// ── Mock drizzle-orm operators ────────────────────────────────────────────────
+
+vi.mock("drizzle-orm", () => ({
+  eq:  (...args: unknown[]) => args,
+  and: (...args: unknown[]) => args,
+  sql: (...args: unknown[]) => args,
+}));
+
+// ── Chainable DB mock ─────────────────────────────────────────────────────────
+//
+// Lazy dequeue: the promise is not created (and the queue not drained) until
+// the chain is first awaited.  This is critical for Promise.all — all chains
+// are constructed before any resolves, so dequeue order matches construction
+// order inside the route.
+
+const resultQueue: unknown[] = [];
+
+function enqueue(...items: unknown[]) {
+  resultQueue.push(...items);
+}
+
+// Track every db.update() call so the reorder tests can inspect arguments.
+const updateCalls: { setArgs: unknown; whereArgs: unknown }[] = [];
+
+function makeChain(captureSet = false): any {
+  let p: Promise<unknown> | null = null;
+  let capturedSet: unknown;
+  let capturedWhere: unknown;
+
+  function promise() {
+    if (!p) p = Promise.resolve(resultQueue.shift() ?? []);
+    return p;
+  }
+
+  const chain: any = {
+    then:    (res: any, rej: any) => promise().then(res, rej),
+    catch:   (rej: any)           => promise().catch(rej),
+    finally: (fin: any)           => promise().finally(fin),
+  };
+
+  for (const m of ["from", "innerJoin", "leftJoin", "orderBy", "values", "returning"]) {
+    chain[m] = () => chain;
+  }
+
+  chain.set = (args: unknown) => {
+    capturedSet = args;
+    return chain;
+  };
+  chain.where = (args: unknown) => {
+    capturedWhere = args;
+    if (captureSet) {
+      updateCalls.push({ setArgs: capturedSet, whereArgs: capturedWhere });
+    }
+    return chain;
+  };
+
+  return chain;
+}
+
+const fakeTable = new Proxy({}, { get: (_t, p) => p });
+
+const mockDb = {
+  select: vi.fn(() => makeChain()),
+  insert: vi.fn(() => makeChain()),
+  update: vi.fn(() => makeChain(/* captureSet = */ true)),
+  delete: vi.fn(() => makeChain()),
+};
+
+vi.mock("@workspace/db", () => ({
+  db: mockDb,
+  tripsTable:            fakeTable,
+  tripParticipantsTable: fakeTable,
+  usersTable:            fakeTable,
+  flightsTable:          fakeTable,
+  accommodationsTable:   fakeTable,
+  activitiesTable:       fakeTable,
+  itineraryDaysTable:    fakeTable,
+  packingItemsTable:     fakeTable,
+  carRentalsTable:       fakeTable,
+  tripExpensesTable:     fakeTable,
+  reservationsTable:     fakeTable,
+  pool:                  { query: vi.fn(), end: vi.fn() },
+}));
+
+// ── Minimal Express apps ──────────────────────────────────────────────────────
+
+async function buildActivitiesApp() {
+  const { default: activitiesRouter } = await import("./activities.js");
+  const app = express();
+  app.use(express.json());
+  app.use((req: any, _res, next) => {
+    // super_admin role so requireTripParticipant short-circuits without a DB hit
+    req.session = { userId: 1, role: "super_admin" };
+    next();
+  });
+  app.use("/api", activitiesRouter);
+  return app;
+}
+
+async function buildTripsApp() {
+  const { default: tripsRouter } = await import("./trips.js");
+  const app = express();
+  app.use(express.json());
+  app.use((req: any, _res, next) => {
+    req.session = { userId: 1, role: "super_admin" };
+    next();
+  });
+  app.use("/api", tripsRouter);
+  return app;
+}
+
+// ── Server lifecycle ──────────────────────────────────────────────────────────
+
+let activitiesServer: http.Server;
+let activitiesBase: string;
+
+let tripsServer: http.Server;
+let tripsBase: string;
+
+beforeAll(async () => {
+  const [actApp, trpApp] = await Promise.all([
+    buildActivitiesApp(),
+    buildTripsApp(),
+  ]);
+
+  await Promise.all([
+    new Promise<void>(resolve => {
+      activitiesServer = http.createServer(actApp).listen(0, resolve);
+    }),
+    new Promise<void>(resolve => {
+      tripsServer = http.createServer(trpApp).listen(0, resolve);
+    }),
+  ]);
+
+  activitiesBase = `http://localhost:${(activitiesServer.address() as { port: number }).port}/api`;
+  tripsBase      = `http://localhost:${(tripsServer.address()      as { port: number }).port}/api`;
+});
+
+afterAll(() => {
+  activitiesServer.close();
+  tripsServer.close();
+});
+
+beforeEach(() => {
+  resultQueue.length = 0;
+  updateCalls.length = 0;
+  mockDb.update.mockClear();
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+async function postReorder(tripId: number, ids: number[]) {
+  const res = await fetch(`${activitiesBase}/trips/${tripId}/activities/reorder`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ ids }),
+  });
+  return { status: res.status, body: await res.json() as any };
+}
+
+async function getTimeline(tripId = 1) {
+  const res = await fetch(`${tripsBase}/trips/${tripId}/timeline`);
+  return { status: res.status, body: await res.json() as any[] };
+}
+
+/**
+ * Enqueue the six results that GET /trips/:tripId/timeline fetches via Promise.all:
+ *   1. flights  2. accommodations  3. activities  4. itinerary days
+ *   5. car rentals  6. reservations
+ */
+function enqueueTimeline({
+  flights        = [] as any[],
+  accommodations = [] as any[],
+  activities     = [] as any[],
+  itinerary      = [] as any[],
+  carRentals     = [] as any[],
+  reservations   = [] as any[],
+} = {}) {
+  enqueue(flights, accommodations, activities, itinerary, carRentals, reservations);
+}
+
+// ── 1. Reorder endpoint ───────────────────────────────────────────────────────
+
+describe("POST /trips/:tripId/activities/reorder — persists sort_order", () => {
+  it("returns 200 { success: true } for a valid reorder request", async () => {
+    // Each db.update() in the Promise.all resolves to [] (default from resultQueue)
+    const { status, body } = await postReorder(1, [3, 1, 2]);
+
+    expect(status).toBe(200);
+    expect(body).toEqual({ success: true });
+  });
+
+  it("calls db.update once per id in the supplied list", async () => {
+    await postReorder(1, [10, 20, 30]);
+
+    // One update() per activity id
+    expect(mockDb.update).toHaveBeenCalledTimes(3);
+  });
+
+  it("sets sort_order to the positional index of each id (0-based)", async () => {
+    await postReorder(1, [7, 3, 5]);
+
+    // updateCalls are captured in chain.where(), which fires after .set()
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0, 1, 2]);
+  });
+
+  it("assigns sort_order 0 to the first id regardless of its numeric value", async () => {
+    // The new first position is id=99 (was last); its sort_order must be 0
+    await postReorder(1, [99, 1, 2, 3]);
+
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders[0]).toBe(0);
+    expect(sortOrders[3]).toBe(3);
+  });
+
+  it("returns 400 when ids is missing from the body", async () => {
+    const res = await fetch(`${activitiesBase}/trips/1/activities/reorder`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when ids contains a non-numeric value", async () => {
+    const res = await fetch(`${activitiesBase}/trips/1/activities/reorder`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ ids: [1, "two", 3] }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+// ── 2. Timeline sort — activities respect sort_order after reorder ────────────
+
+describe("GET /trips/:tripId/timeline — sort_order tiebreaker for activities", () => {
+  /**
+   * Three null-time activities on the same date.  They carry explicit
+   * sort_order values that are intentionally out of id order (lower id has a
+   * higher sort_order).  The timeline must return them in sort_order sequence,
+   * not id sequence — confirming that a drag-and-drop reorder is honoured on
+   * the next fetch.
+   */
+  it("returns activities in sort_order sequence when sort_order differs from id order", async () => {
+    enqueueTimeline({
+      activities: [
+        // DB rows in id order — sort_order is deliberately inverted
+        { id: 1, tripId: 1, title: "Activity A", date: "2025-08-10", time: null, sortOrder: 2, description: null, location: null, imageUrl: null },
+        { id: 2, tripId: 1, title: "Activity B", date: "2025-08-10", time: null, sortOrder: 0, description: null, location: null, imageUrl: null },
+        { id: 3, tripId: 1, title: "Activity C", date: "2025-08-10", time: null, sortOrder: 1, description: null, location: null, imageUrl: null },
+      ],
+    });
+
+    const { status, body } = await getTimeline();
+
+    expect(status).toBe(200);
+    const aug10 = body.filter((e: any) => e.date === "2025-08-10");
+    expect(aug10).toHaveLength(3);
+
+    // Must be B (0) → C (1) → A (2), not id order A → B → C
+    expect(aug10[0].title).toBe("Activity B");
+    expect(aug10[1].title).toBe("Activity C");
+    expect(aug10[2].title).toBe("Activity A");
+  });
+
+  /**
+   * Simulates a page-reload check after a reorder:
+   *
+   * Before drag: order was A, B, C (sort_order 0, 1, 2)
+   * After drag:  user moves A to last position  → sort_order 2, 0, 1 for A, B, C
+   *
+   * The fresh fetch must reflect the new order: B → C → A.
+   */
+  it("reflects the post-drag order on a fresh fetch (simulated page reload)", async () => {
+    enqueueTimeline({
+      activities: [
+        // sort_order reflects what the reorder endpoint would have written
+        { id: 10, tripId: 1, title: "Museum visit",   date: "2025-09-05", time: null, sortOrder: 2, description: null, location: null, imageUrl: null },
+        { id: 11, tripId: 1, title: "Lunch break",    date: "2025-09-05", time: null, sortOrder: 0, description: null, location: null, imageUrl: null },
+        { id: 12, tripId: 1, title: "City walk",      date: "2025-09-05", time: null, sortOrder: 1, description: null, location: null, imageUrl: null },
+      ],
+    });
+
+    const { status, body } = await getTimeline();
+
+    expect(status).toBe(200);
+    const sep5 = body.filter((e: any) => e.date === "2025-09-05");
+    expect(sep5).toHaveLength(3);
+
+    expect(sep5[0].title).toBe("Lunch break");   // sortOrder 0
+    expect(sep5[1].title).toBe("City walk");      // sortOrder 1
+    expect(sep5[2].title).toBe("Museum visit");   // sortOrder 2
+  });
+
+  /**
+   * Two activities share the same explicit time on the same date.  The
+   * sort_order must break the tie within the same type bucket even when both
+   * events carry a real time value.
+   */
+  it("uses sort_order to break ties between two timed activities that share date and time", async () => {
+    enqueueTimeline({
+      activities: [
+        { id: 20, tripId: 1, title: "Tour A", date: "2025-07-20", time: "10:00", sortOrder: 1, description: null, location: null, imageUrl: null },
+        { id: 21, tripId: 1, title: "Tour B", date: "2025-07-20", time: "10:00", sortOrder: 0, description: null, location: null, imageUrl: null },
+      ],
+    });
+
+    const { body } = await getTimeline();
+    const jul20 = body.filter((e: any) => e.date === "2025-07-20" && e.type === "activity");
+    expect(jul20).toHaveLength(2);
+
+    expect(jul20[0].title).toBe("Tour B");  // sortOrder 0
+    expect(jul20[1].title).toBe("Tour A");  // sortOrder 1
+  });
+
+  /**
+   * An activity with an explicit sort_order must sort before one without
+   * (null sort_order), regardless of id.
+   */
+  it("places an activity with an explicit sort_order before one with null sort_order", async () => {
+    enqueueTimeline({
+      activities: [
+        // Higher id but explicit sort_order 0 — must come first
+        { id: 30, tripId: 1, title: "Explicit order", date: "2025-07-25", time: null, sortOrder: 0, description: null, location: null, imageUrl: null },
+        // Lower id but null sort_order — must come last
+        { id: 29, tripId: 1, title: "No order set",   date: "2025-07-25", time: null, sortOrder: null, description: null, location: null, imageUrl: null },
+      ],
+    });
+
+    const { body } = await getTimeline();
+    const jul25 = body.filter((e: any) => e.date === "2025-07-25" && e.type === "activity");
+    expect(jul25).toHaveLength(2);
+
+    expect(jul25[0].title).toBe("Explicit order");
+    expect(jul25[1].title).toBe("No order set");
+  });
+
+  /**
+   * Fallback: when every activity has a null sort_order the final tiebreaker
+   * is id (as a string comparison via String(a.id).localeCompare(String(b.id))).
+   * Lower ids must appear first.
+   */
+  it("falls back to id order when all activities have null sort_order", async () => {
+    enqueueTimeline({
+      activities: [
+        // Enqueued in reverse id order to prove DB row order is irrelevant
+        { id: 5, tripId: 1, title: "C activity", date: "2025-06-15", time: null, sortOrder: null, description: null, location: null, imageUrl: null },
+        { id: 3, tripId: 1, title: "A activity", date: "2025-06-15", time: null, sortOrder: null, description: null, location: null, imageUrl: null },
+        { id: 4, tripId: 1, title: "B activity", date: "2025-06-15", time: null, sortOrder: null, description: null, location: null, imageUrl: null },
+      ],
+    });
+
+    const { body } = await getTimeline();
+    const jun15 = body.filter((e: any) => e.date === "2025-06-15" && e.type === "activity");
+    expect(jun15).toHaveLength(3);
+
+    // id 3 < 4 < 5 as strings
+    expect(jun15[0].title).toBe("A activity");  // id 3
+    expect(jun15[1].title).toBe("B activity");  // id 4
+    expect(jun15[2].title).toBe("C activity");  // id 5
+  });
+
+  /**
+   * The internal _sortOrder helper must not appear in the API response.
+   */
+  it("does not expose _sortOrder in the timeline response", async () => {
+    enqueueTimeline({
+      activities: [
+        { id: 40, tripId: 1, title: "Hidden field check", date: "2025-05-01", time: null, sortOrder: 0, description: null, location: null, imageUrl: null },
+      ],
+    });
+
+    const { body } = await getTimeline();
+    const event = body.find((e: any) => e.type === "activity");
+    expect(event).toBeDefined();
+    expect(event).not.toHaveProperty("_sortOrder");
+  });
+});
+
+// ── 3. Timeline sort — reservations also respect sort_order ──────────────────
+
+describe("GET /trips/:tripId/timeline — sort_order tiebreaker for reservations", () => {
+  /**
+   * Three null-time reservations on the same date with sort_order values that
+   * are out of id order.  The timeline must return them in sort_order sequence.
+   */
+  it("returns reservations in sort_order sequence when sort_order differs from id order", async () => {
+    enqueueTimeline({
+      reservations: [
+        { id: 100, tripId: 1, title: "Dinner", date: "2025-10-01", time: null, sortOrder: 1, notes: null, address: null, venue: null, imageUrl: null, confirmationCode: null },
+        { id: 101, tripId: 1, title: "Lunch",  date: "2025-10-01", time: null, sortOrder: 0, notes: null, address: null, venue: null, imageUrl: null, confirmationCode: null },
+        { id: 102, tripId: 1, title: "Brunch", date: "2025-10-01", time: null, sortOrder: 2, notes: null, address: null, venue: null, imageUrl: null, confirmationCode: null },
+      ],
+    });
+
+    const { status, body } = await getTimeline();
+
+    expect(status).toBe(200);
+    const oct1 = body.filter((e: any) => e.date === "2025-10-01" && e.type === "reservation");
+    expect(oct1).toHaveLength(3);
+
+    expect(oct1[0].title).toBe("Lunch");   // sortOrder 0
+    expect(oct1[1].title).toBe("Dinner");  // sortOrder 1
+    expect(oct1[2].title).toBe("Brunch");  // sortOrder 2
+  });
+
+  /**
+   * Cross-type priority is respected even when both an activity and a
+   * reservation are on the same date with the same time and sort_order.
+   * Activity (priority 3) must sort before reservation (priority 4).
+   */
+  it("preserves cross-type priority (activity before reservation) while respecting sort_order within each type", async () => {
+    enqueueTimeline({
+      activities: [
+        { id: 200, tripId: 1, title: "Walk", date: "2025-11-11", time: null, sortOrder: 1, description: null, location: null, imageUrl: null },
+        { id: 201, tripId: 1, title: "Run",  date: "2025-11-11", time: null, sortOrder: 0, description: null, location: null, imageUrl: null },
+      ],
+      reservations: [
+        { id: 202, tripId: 1, title: "Tea",    date: "2025-11-11", time: null, sortOrder: 1, notes: null, address: null, venue: null, imageUrl: null, confirmationCode: null },
+        { id: 203, tripId: 1, title: "Coffee", date: "2025-11-11", time: null, sortOrder: 0, notes: null, address: null, venue: null, imageUrl: null, confirmationCode: null },
+      ],
+    });
+
+    const { status, body } = await getTimeline();
+
+    expect(status).toBe(200);
+    const nov11 = body.filter((e: any) => e.date === "2025-11-11");
+    expect(nov11).toHaveLength(4);
+
+    // All activities must come before any reservation
+    expect(nov11[0].type).toBe("activity");
+    expect(nov11[1].type).toBe("activity");
+    expect(nov11[2].type).toBe("reservation");
+    expect(nov11[3].type).toBe("reservation");
+
+    // Within each type, sort_order determines order
+    expect(nov11[0].title).toBe("Run");     // activity sortOrder 0
+    expect(nov11[1].title).toBe("Walk");    // activity sortOrder 1
+    expect(nov11[2].title).toBe("Coffee");  // reservation sortOrder 0
+    expect(nov11[3].title).toBe("Tea");     // reservation sortOrder 1
+  });
+});
