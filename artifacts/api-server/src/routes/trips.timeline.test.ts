@@ -1718,13 +1718,14 @@ describe("GET /trips/:tripId/timeline — date-only activity sorting", () => {
 
   /**
    * A timed flight (departureDatetime has a real time component, e.g. 08:30)
-   * and a null-time activity on the same calendar date.  The comparator
-   * normalises null to "00:00" and sorts by time first, so the null-time
-   * activity ("00:00") appears BEFORE the 08:30 flight.  Type priority only
-   * acts as a tie-break when both normalised times are equal; it does not
-   * override a genuine time difference.
+   * and a null-time activity on the same calendar date.  When exactly one
+   * event lacks a time, type priority decides the order rather than
+   * normalising null to "00:00" — this prevents a null-time activity from
+   * accidentally appearing before a timed flight.  Flight (priority 0) must
+   * appear before activity (priority 3) even though the flight departs at
+   * 08:30 while the activity carries no time at all.
    */
-  it("sorts a null-time activity before a timed flight when the flight departs later in the day", async () => {
+  it("places a timed flight before a null-time activity on the same date (type priority applied when one side lacks a time)", async () => {
     enqueueTimeline({
       flights: [
         {
@@ -1740,7 +1741,7 @@ describe("GET /trips/:tripId/timeline — date-only activity sorting", () => {
         {
           id: 4, tripId: 1,
           title: "Harbor Tour",
-          date: "2025-09-10", time: null,  // null → normalised to "00:00"
+          date: "2025-09-10", time: null,  // no time → type priority decides
           description: null, location: "San Francisco Bay", imageUrl: null,
         },
       ],
@@ -1752,24 +1753,25 @@ describe("GET /trips/:tripId/timeline — date-only activity sorting", () => {
     const sep10 = body.filter((e: any) => e.date === "2025-09-10");
     expect(sep10).toHaveLength(2);
 
-    // null-time activity normalises to "00:00" < "08:30" → appears first.
-    expect(sep10[0].type).toBe("activity");
-    expect(sep10[0].time).toBeNull();
-    expect(sep10[0].title).toBe("Harbor Tour");
+    // Flight (priority 0) precedes activity (priority 3) — type priority
+    // is applied when exactly one event lacks a time.
+    expect(sep10[0].type).toBe("flight");
+    expect(sep10[0].time).toBe("08:30");
+    expect(sep10[0].title).toBe("Morning Air MA010: BOS → SFO");
 
-    // Timed flight carries its departure time and appears after.
-    expect(sep10[1].type).toBe("flight");
-    expect(sep10[1].time).toBe("08:30");
-    expect(sep10[1].title).toBe("Morning Air MA010: BOS → SFO");
+    // Null-time activity follows the timed flight.
+    expect(sep10[1].type).toBe("activity");
+    expect(sep10[1].time).toBeNull();
+    expect(sep10[1].title).toBe("Harbor Tour");
   });
 
   /**
    * Timed car rental pickup and a null-time activity on the same date.
-   * The comparator normalises null to "00:00"; since "00:00" < "10:00",
-   * the null-time activity appears before the 10:00 car rental.
-   * (Type priority only applies as a tie-break for equal normalised times.)
+   * When exactly one event lacks a time, type priority decides the order.
+   * Car rental (priority 1) must appear before activity (priority 3)
+   * even though the pickup is at 10:00 and the activity carries no time.
    */
-  it("sorts a null-time activity before a timed car rental pickup when the pickup is later in the day", async () => {
+  it("places a timed car rental pickup before a null-time activity on the same date (type priority applied when one side lacks a time)", async () => {
     enqueueTimeline({
       carRentals: [
         {
@@ -1784,7 +1786,7 @@ describe("GET /trips/:tripId/timeline — date-only activity sorting", () => {
         {
           id: 6, tripId: 1,
           title: "City Tour",
-          date: "2025-09-10", time: null,  // null → normalised to "00:00"
+          date: "2025-09-10", time: null,  // no time → type priority decides
           description: null, location: "Downtown", imageUrl: null,
         },
       ],
@@ -1796,13 +1798,14 @@ describe("GET /trips/:tripId/timeline — date-only activity sorting", () => {
     const sep10 = body.filter((e: any) => e.date === "2025-09-10");
     expect(sep10).toHaveLength(2);
 
-    // null-time activity normalises to "00:00" < "10:00" → appears first.
-    expect(sep10[0].type).toBe("activity");
-    expect(sep10[0].time).toBeNull();
+    // Car rental (priority 1) precedes activity (priority 3) — type priority
+    // is applied when exactly one event lacks a time.
+    expect(sep10[0].type).toBe("car_rental");
+    expect(sep10[0].time).toBe("10:00");
 
-    // Timed car rental appears after.
-    expect(sep10[1].type).toBe("car_rental");
-    expect(sep10[1].time).toBe("10:00");
+    // Null-time activity follows the timed car rental.
+    expect(sep10[1].type).toBe("activity");
+    expect(sep10[1].time).toBeNull();
   });
 
   /**
@@ -1993,6 +1996,53 @@ describe("GET /trips/:tripId/timeline — date-only activity sorting", () => {
     // Car rental (priority 1) must precede activity (priority 3).
     expect(sep10[0].type).toBe("car_rental");
     expect(sep10[1].type).toBe("activity");
+  });
+
+  /**
+   * A timed flight (14:30) and a null-time activity share the same date.
+   * The comparator normalises null time to "00:00", which would accidentally
+   * place a null-time activity before the 14:30 flight unless type priority
+   * is applied first.  Flight (priority 0) must always precede activity
+   * (priority 3) regardless of the time values involved.
+   */
+  it("places a timed flight before a null-time activity on the same date (type priority beats null-time normalisation)", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 30, tripId: 1,
+          airline: "Sky Air", flightNumber: "SK500",
+          departureAirport: "LAX", arrivalAirport: "ORD",
+          departureDatetime: "2025-09-10T14:30:00",
+          arrivalDatetime:   null,
+          notes: null, confirmationCode: null,
+        },
+      ],
+      activities: [
+        {
+          id: 31, tripId: 1,
+          title: "Afternoon Walk",
+          date: "2025-09-10", time: null,    // null-time → normalises to "00:00"
+          description: null, location: "Riverwalk", imageUrl: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+    expect(status).toBe(200);
+
+    const sep10 = body.filter((e: any) => e.date === "2025-09-10");
+    expect(sep10).toHaveLength(2);
+
+    // Flight carries its real departure time; activity carries null.
+    expect(sep10[0].type).toBe("flight");
+    expect(sep10[0].time).toBe("14:30");
+    expect(sep10[0].title).toBe("Sky Air SK500: LAX → ORD");
+
+    // Despite null being normalised to "00:00" (< 14:30), type priority
+    // keeps the activity after the flight.
+    expect(sep10[1].type).toBe("activity");
+    expect(sep10[1].time).toBeNull();
+    expect(sep10[1].title).toBe("Afternoon Walk");
   });
 });
 

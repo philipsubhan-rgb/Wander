@@ -450,6 +450,13 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
 
   events.sort((a, b) => {
     if (a.date !== b.date) return a.date.localeCompare(b.date);
+    // When exactly one event lacks a time, type priority decides the order
+    // rather than treating null as "00:00".  This prevents a null-time
+    // activity from accidentally appearing before a timed flight simply
+    // because "00:00" < "14:30".
+    if ((a.time === null) !== (b.time === null)) {
+      return eventPriority(a) - eventPriority(b);
+    }
     const at = a.time ?? "00:00";
     const bt = b.time ?? "00:00";
     if (at !== bt) return at.localeCompare(bt);
