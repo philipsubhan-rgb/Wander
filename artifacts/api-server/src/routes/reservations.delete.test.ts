@@ -1,0 +1,347 @@
+/**
+ * Integration tests: DELETE reservation gap-closing re-index
+ *
+ * Covers:
+ *   1. DELETE /trips/:tripId/reservations/:reservationId — happy path and 404.
+ *   2. Re-index logic: remaining reservations on the same (trip, date) receive
+ *      contiguous 0-based sort_orders after a deletion.
+ *   3. Cross-date isolation: the re-index SELECT is scoped to the deleted
+ *      reservation's date; reservations on other dates are never updated.
+ *
+ * Strategy: mock @workspace/db with the same lazy-dequeue chainable fake used
+ * in activities.reorder.test.ts. Mount the reservations router on a minimal
+ * Express app with a fake session, then drive requests with Node's built-in
+ * fetch.
+ */
+
+import http from "node:http";
+import express from "express";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+
+// ── Mock drizzle-orm operators ────────────────────────────────────────────────
+
+vi.mock("drizzle-orm", () => ({
+  eq:  (...args: unknown[]) => args,
+  and: (...args: unknown[]) => args,
+  asc: (...args: unknown[]) => args,
+}));
+
+// ── Chainable DB mock ─────────────────────────────────────────────────────────
+//
+// Lazy dequeue: the promise is not created (and the queue not drained) until
+// the chain is first awaited.  This is critical for Promise.all — all chains
+// are constructed before any resolves, so dequeue order matches construction
+// order inside the route.
+
+const resultQueue: unknown[] = [];
+
+function enqueue(...items: unknown[]) {
+  resultQueue.push(...items);
+}
+
+// Track every db.update() call so tests can inspect set/where arguments.
+const updateCalls: { setArgs: unknown; whereArgs: unknown }[] = [];
+
+// Track WHERE args passed to db.select() so cross-date isolation tests can
+// assert the date filter is scoped to the correct date.
+const selectWhereCalls: unknown[] = [];
+
+function makeChain(captureSet = false, captureWhere = false): any {
+  let p: Promise<unknown> | null = null;
+  let capturedSet: unknown;
+
+  function promise() {
+    if (!p) p = Promise.resolve(resultQueue.shift() ?? []);
+    return p;
+  }
+
+  const chain: any = {
+    then:    (res: any, rej: any) => promise().then(res, rej),
+    catch:   (rej: any)           => promise().catch(rej),
+    finally: (fin: any)           => promise().finally(fin),
+  };
+
+  for (const m of ["from", "innerJoin", "leftJoin", "orderBy", "values", "returning"]) {
+    chain[m] = () => chain;
+  }
+
+  chain.set = (args: unknown) => {
+    capturedSet = args;
+    return chain;
+  };
+  chain.where = (args: unknown) => {
+    if (captureSet) {
+      updateCalls.push({ setArgs: capturedSet, whereArgs: args });
+    }
+    if (captureWhere) {
+      selectWhereCalls.push(args);
+    }
+    return chain;
+  };
+
+  return chain;
+}
+
+const fakeTable = new Proxy({}, { get: (_t, p) => p });
+
+const mockDb = {
+  select: vi.fn(() => makeChain(/* captureSet = */ false, /* captureWhere = */ true)),
+  insert: vi.fn(() => makeChain()),
+  update: vi.fn(() => makeChain(/* captureSet = */ true)),
+  delete: vi.fn(() => makeChain()),
+};
+
+vi.mock("@workspace/db", () => ({
+  db: mockDb,
+  tripsTable:            fakeTable,
+  tripParticipantsTable: fakeTable,
+  usersTable:            fakeTable,
+  flightsTable:          fakeTable,
+  accommodationsTable:   fakeTable,
+  activitiesTable:       fakeTable,
+  itineraryDaysTable:    fakeTable,
+  packingItemsTable:     fakeTable,
+  carRentalsTable:       fakeTable,
+  tripExpensesTable:     fakeTable,
+  reservationsTable:     fakeTable,
+  pool:                  { query: vi.fn(), end: vi.fn() },
+}));
+
+// ── Minimal Express app ───────────────────────────────────────────────────────
+
+async function buildReservationsApp() {
+  const { default: reservationsRouter } = await import("./reservations.js");
+  const app = express();
+  app.use(express.json());
+  app.use((req: any, _res, next) => {
+    // super_admin role so requireTripParticipant short-circuits without a DB hit
+    req.session = { userId: 1, role: "super_admin" };
+    next();
+  });
+  app.use("/api", reservationsRouter);
+  return app;
+}
+
+// ── Server lifecycle ──────────────────────────────────────────────────────────
+
+let server: http.Server;
+let base: string;
+
+beforeAll(async () => {
+  const app = await buildReservationsApp();
+  await new Promise<void>(resolve => {
+    server = http.createServer(app).listen(0, resolve);
+  });
+  base = `http://localhost:${(server.address() as { port: number }).port}/api`;
+});
+
+afterAll(() => {
+  server.close();
+});
+
+beforeEach(() => {
+  resultQueue.length = 0;
+  updateCalls.length = 0;
+  selectWhereCalls.length = 0;
+  mockDb.update.mockClear();
+  mockDb.select.mockClear();
+  mockDb.delete.mockClear();
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+async function deleteReservation(tripId: number, reservationId: number) {
+  const res = await fetch(
+    `${base}/trips/${tripId}/reservations/${reservationId}`,
+    { method: "DELETE" },
+  );
+  return { status: res.status, body: await res.json() as any };
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+/**
+ * The DELETE handler:
+ *   1. Deletes the reservation (db.delete → dequeues first result)
+ *   2. Fetches remaining reservations on the same (trip, date) ordered by
+ *      sortOrder ASC, id ASC (db.select → dequeues second result)
+ *   3. Writes contiguous 0-based sort_order back to each remaining row
+ *      (one db.update per row → captured in updateCalls)
+ */
+
+describe("DELETE /trips/:tripId/reservations/:reservationId — gap-closing re-index", () => {
+  it("returns 200 { success: true } when the reservation exists", async () => {
+    enqueue(
+      [{ id: 5, tripId: 1, date: "2025-08-10", sortOrder: 1 }], // deleted row
+      [],                                                          // no remaining
+    );
+    const { status, body } = await deleteReservation(1, 5);
+    expect(status).toBe(200);
+    expect(body).toEqual({ success: true });
+  });
+
+  it("returns 404 when the reservation does not belong to the trip", async () => {
+    enqueue([]); // db.delete returns no rows → not found
+    const { status } = await deleteReservation(1, 9999);
+    expect(status).toBe(404);
+  });
+
+  it("re-indexes three remaining reservations to 0, 1, 2 after a middle one is deleted", async () => {
+    // Original order: ids 1,2,3,4 with sort_orders 0,1,2,3.
+    // Deleting id=2 (sortOrder=1) leaves a gap: sort_orders 0,2,3.
+    // After re-index the remaining ids 1,3,4 must receive sort_orders 0,1,2.
+    enqueue(
+      [{ id: 2, tripId: 1, date: "2025-08-10", sortOrder: 1 }], // deleted row
+      [{ id: 1 }, { id: 3 }, { id: 4 }],                        // remaining (DB returns in sortOrder asc)
+    );
+
+    await deleteReservation(1, 2);
+
+    // One db.update() per remaining reservation
+    expect(mockDb.update).toHaveBeenCalledTimes(3);
+
+    // sort_orders must be contiguous 0-based with no gaps
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0, 1, 2]);
+  });
+
+  it("closes gaps even when multiple gaps pre-existed before the delete", async () => {
+    // sort_orders were already non-contiguous: 0, 2, 5, 9
+    // Delete the first (sortOrder=0); remaining: 2, 5, 9 — two-gap sequence
+    // After re-index: 0, 1, 2
+    enqueue(
+      [{ id: 10, tripId: 1, date: "2025-09-01", sortOrder: 0 }],
+      [{ id: 11 }, { id: 12 }, { id: 13 }],
+    );
+
+    await deleteReservation(1, 10);
+
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0, 1, 2]);
+  });
+
+  it("assigns sort_order 0 to the single remaining reservation", async () => {
+    // Two reservations; after deleting one only the other remains.
+    enqueue(
+      [{ id: 20, tripId: 1, date: "2025-10-05", sortOrder: 0 }],
+      [{ id: 21 }],
+    );
+
+    await deleteReservation(1, 20);
+
+    expect(mockDb.update).toHaveBeenCalledTimes(1);
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0]);
+  });
+
+  it("does not call db.update when the deleted reservation was the only one on that date", async () => {
+    enqueue(
+      [{ id: 99, tripId: 1, date: "2025-12-31", sortOrder: 0 }],
+      [], // no remaining reservations on this date
+    );
+
+    await deleteReservation(1, 99);
+
+    expect(mockDb.update).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Cross-date isolation: deleting a reservation from date A must not touch
+   * reservations on date B within the same trip.
+   *
+   * The re-index SELECT filters by both tripId AND date, so the DB only
+   * returns date-A rows.  This test confirms:
+   *   1. The WHERE clause passed to db.select contains the deleted reservation's
+   *      date (date A), not date B.
+   *   2. db.update is called only for the reservations that the select returned
+   *      (date A survivors), never for date B.
+   *   3. The sort_orders written match only the date-A survivors in sequence.
+   *
+   * With the drizzle-orm mock:
+   *   eq(col, val)   → [col, val]
+   *   and(a, b, ...) → [a, b, ...]
+   *
+   * So the WHERE arg for tripId=1, date="2025-08-10" becomes:
+   *   [["tripId", 1], ["date", "2025-08-10"]]
+   */
+  it("re-index SELECT is scoped to the deleted reservation's date, leaving date-B reservations untouched", async () => {
+    const DATE_A = "2025-08-10";
+    const DATE_B = "2025-08-11";
+
+    // db.delete returns the reservation being deleted (on date A)
+    // db.select returns only the two survivors on date A (the route filters by date)
+    // date-B reservations (ids 4, 5) are never returned by the select because the
+    // real DB WHERE clause includes eq(reservationsTable.date, item.date)
+    enqueue(
+      [{ id: 2, tripId: 1, date: DATE_A, sortOrder: 1 }], // deleted row
+      [{ id: 1 }, { id: 3 }],                              // remaining on date A only
+    );
+
+    await deleteReservation(1, 2);
+
+    // ── Assert 1: the SELECT WHERE clause names date A, not date B ────────────
+    // The route issues exactly one db.select for the re-index query.
+    // selectWhereCalls[0] = and(eq(tripId,1), eq(date, DATE_A))
+    //                     = [["tripId", 1], ["date", DATE_A]]
+    expect(selectWhereCalls).toHaveLength(1);
+    const whereArr     = selectWhereCalls[0] as [unknown, unknown][];
+    const tripIdClause = whereArr[0] as [string, number];
+    const dateClause   = whereArr[1] as [string, string];
+
+    expect(tripIdClause[0]).toBe("tripId");
+    expect(tripIdClause[1]).toBe(1);
+
+    expect(dateClause[0]).toBe("date");
+    expect(dateClause[1]).toBe(DATE_A);    // must be date A
+    expect(dateClause[1]).not.toBe(DATE_B); // must NOT be date B
+
+    // ── Assert 2: db.update called only for the two date-A survivors ──────────
+    // The re-index UPDATE uses eq(reservationsTable.id, r.id) without and(),
+    // so whereArgs is ["id", <value>] directly (not a nested array).
+    // date-B reservations (ids 4, 5) are never in the update list.
+    expect(mockDb.update).toHaveBeenCalledTimes(2);
+    const updatedIds = updateCalls.map(c => {
+      const w = c.whereArgs as [string, number];
+      return w[1]; // second element is the reservation id value
+    });
+    expect(updatedIds).toEqual([1, 3]);    // only date-A survivors
+    expect(updatedIds).not.toContain(4);   // date-B reservation never touched
+    expect(updatedIds).not.toContain(5);   // date-B reservation never touched
+
+    // ── Assert 3: sort_orders are compacted for date A only ───────────────────
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0, 1]);
+  });
+
+  it("re-indexes correctly when deleting the last reservation in the list", async () => {
+    // Original order: ids 1,2,3 with sort_orders 0,1,2.
+    // Deleting id=3 (sortOrder=2, the last one); remaining: 0,1 — no gaps but
+    // the re-index must still fire and assign clean 0,1 values.
+    enqueue(
+      [{ id: 3, tripId: 1, date: "2025-11-15", sortOrder: 2 }], // deleted row
+      [{ id: 1 }, { id: 2 }],                                    // remaining
+    );
+
+    await deleteReservation(1, 3);
+
+    expect(mockDb.update).toHaveBeenCalledTimes(2);
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0, 1]);
+  });
+
+  it("re-indexes correctly when deleting the first reservation in the list", async () => {
+    // Original order: ids 1,2,3 with sort_orders 0,1,2.
+    // Deleting id=1 (sortOrder=0, the first); remaining: 1,2 — gap at start.
+    // After re-index: 0,1.
+    enqueue(
+      [{ id: 1, tripId: 1, date: "2025-06-20", sortOrder: 0 }], // deleted row
+      [{ id: 2 }, { id: 3 }],                                    // remaining
+    );
+
+    await deleteReservation(1, 1);
+
+    expect(mockDb.update).toHaveBeenCalledTimes(2);
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0, 1]);
+  });
+});
