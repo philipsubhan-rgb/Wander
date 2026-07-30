@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db, reservationsTable } from "@workspace/db";
 import { requireAuth, requireTripParticipant } from "../middlewares/auth";
 
@@ -24,6 +24,7 @@ function map(r: typeof reservationsTable.$inferSelect) {
     imageUrl:         r.imageUrl          ?? null,
     lat:              r.lat               ?? null,
     lon:              r.lon               ?? null,
+    sortOrder:        r.sortOrder         ?? null,
   };
 }
 
@@ -66,6 +67,24 @@ router.patch("/trips/:tripId/reservations/:reservationId", requireTripParticipan
     .returning();
   if (!row) { res.status(404).json({ error: "Not found" }); return; }
   res.json(map(row));
+});
+
+// POST /api/trips/:tripId/reservations/reorder
+router.post("/trips/:tripId/reservations/reorder", requireTripParticipant(), async (req, res): Promise<void> => {
+  const tripId = Number(req.params.tripId);
+  if (isNaN(tripId)) { res.status(400).json({ error: "Invalid tripId" }); return; }
+  const { ids } = req.body as { ids?: unknown };
+  if (!Array.isArray(ids) || ids.some(id => typeof id !== "number")) {
+    res.status(400).json({ error: "ids must be an array of numbers" }); return;
+  }
+  await Promise.all(
+    (ids as number[]).map((id, index) =>
+      db.update(reservationsTable)
+        .set({ sortOrder: index })
+        .where(and(eq(reservationsTable.id, id), eq(reservationsTable.tripId, tripId)))
+    )
+  );
+  res.json({ success: true });
 });
 
 // DELETE /api/trips/:tripId/reservations/:reservationId

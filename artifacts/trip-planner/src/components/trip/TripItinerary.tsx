@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { format, parseISO, addDays } from 'date-fns';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import {
   ChevronDown, ChevronUp, Plane, Home, Compass, Car, Calendar,
   MapPin, Star, Pencil, Plus, CheckCircle2, BookMarked, Lightbulb, UtensilsCrossed,
-  ArrowRightLeft,
+  ArrowRightLeft, GripVertical,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,9 +21,25 @@ import {
   useCreateItineraryDay,
   useUpdateItineraryDay,
   getListItineraryDaysQueryKey,
+  getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
 import { fetchWikiImage } from '@/lib/wiki-image';
 import { getTransitionIndices } from '@/lib/itinerary-transitions';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,6 +78,11 @@ const TYPE_CFG: Record<EventType, { icon: React.ElementType; bg: string; label: 
   reservation:   { icon: UtensilsCrossed,   bg: 'bg-orange-500',  label: 'Reservation' },
 };
 
+// Whether this event can be manually reordered (non-timed activities/reservations)
+function isDraggable(e: TimelineEvent) {
+  return !e.time && (e.type === 'activity' || e.type === 'reservation');
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function to12h(time: string | null): string | null {
@@ -72,7 +93,13 @@ function to12h(time: string | null): string | null {
 
 // ── Event row ─────────────────────────────────────────────────────────────────
 
-function EventRow({ event, isLast }: { event: TimelineEvent; isLast: boolean }) {
+function EventRow({
+  event, isLast, dragListeners,
+}: {
+  event: TimelineEvent;
+  isLast: boolean;
+  dragListeners?: Record<string, unknown>;
+}) {
   const cfg = TYPE_CFG[event.type] ?? TYPE_CFG.activity;
   const Icon = cfg.icon;
   const [photo, setPhoto] = useState<string | null>(event.imageUrl);
@@ -89,11 +116,20 @@ function EventRow({ event, isLast }: { event: TimelineEvent; isLast: boolean }) 
 
   return (
     <div className="flex gap-3">
-      {/* Time */}
-      <div className="w-[4.5rem] shrink-0 pt-1 text-right">
-        {timeFmt && (
-          <span className="text-[11px] font-mono font-bold text-primary leading-none">{timeFmt}</span>
-        )}
+      {/* Time column — doubles as drag handle for non-timed draggable events */}
+      <div className="w-[4.5rem] shrink-0 pt-1 flex items-start justify-end">
+        {timeFmt ? (
+          <span className="text-[11px] font-mono font-bold text-primary leading-none mt-px">{timeFmt}</span>
+        ) : dragListeners ? (
+          <button
+            {...dragListeners}
+            className="cursor-grab active:cursor-grabbing text-muted-foreground/30 hover:text-muted-foreground/70 transition-colors touch-none"
+            aria-label="Drag to reorder"
+            tabIndex={-1}
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+        ) : null}
       </div>
 
       {/* Spine + dot */}
@@ -149,15 +185,30 @@ function EventRow({ event, isLast }: { event: TimelineEvent; isLast: boolean }) 
   );
 }
 
+// ── Sortable event row (wraps EventRow with dnd-kit) ─────────────────────────
+
+function SortableEventRow({ event, isLast }: { event: TimelineEvent; isLast: boolean }) {
+  const {
+    attributes, listeners, setNodeRef, transform, transition, isDragging,
+  } = useSortable({ id: `${event.type}-${event.id}` });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
+      {...attributes}
+    >
+      <EventRow event={event} isLast={isLast} dragListeners={listeners as Record<string, unknown>} />
+    </div>
+  );
+}
+
 // ── Transition divider ────────────────────────────────────────────────────────
 
 function TransitionDivider() {
   return (
     <div className="flex gap-3 my-1">
-      {/* Align with time column */}
       <div className="w-[4.5rem] shrink-0" />
-
-      {/* Spine + icon */}
       <div className="flex flex-col items-center shrink-0">
         <div className="w-px flex-none h-3 bg-border" />
         <div className="h-6 w-6 rounded-full bg-muted border border-border flex items-center justify-center z-10 shrink-0">
@@ -165,8 +216,6 @@ function TransitionDivider() {
         </div>
         <div className="w-px flex-none h-3 bg-border" />
       </div>
-
-      {/* Label */}
       <div className="flex items-center">
         <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
           Transition Day
@@ -186,7 +235,6 @@ function RightPanel({ events, note }: { events: TimelineEvent[]; note: any }) {
 
   return (
     <div className="space-y-3">
-      {/* Today's highlights */}
       {highlights.length > 0 && (
         <div className="rounded-xl overflow-hidden" style={{ background: '#1a2744' }}>
           <div className="px-4 py-2.5 border-b border-white/10 flex items-center gap-2">
@@ -204,7 +252,6 @@ function RightPanel({ events, note }: { events: TimelineEvent[]; note: any }) {
         </div>
       )}
 
-      {/* Reservations */}
       {bookings.length > 0 && (
         <div className="rounded-xl overflow-hidden" style={{ background: '#243060' }}>
           <div className="px-4 py-2.5 border-b border-white/10 flex items-center gap-2">
@@ -223,7 +270,6 @@ function RightPanel({ events, note }: { events: TimelineEvent[]; note: any }) {
         </div>
       )}
 
-      {/* Tips */}
       {note?.notes && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
           <div className="px-4 py-2.5 border-b border-amber-200 flex items-center gap-2">
@@ -240,7 +286,7 @@ function RightPanel({ events, note }: { events: TimelineEvent[]; note: any }) {
 // ── Day card ──────────────────────────────────────────────────────────────────
 
 function DayCard({
-  tripId, date, dayNumber, events, note,
+  tripId, date, dayNumber, events: propEvents, note,
   isOpen, onToggle, editMode, destination,
 }: {
   tripId: number;
@@ -255,6 +301,13 @@ function DayCard({
 }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [headerImg, setHeaderImg] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  // Local events state for optimistic DnD updates
+  const [localEvents, setLocalEvents] = useState<TimelineEvent[]>(propEvents);
+  useEffect(() => setLocalEvents(propEvents), [propEvents]);
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   useEffect(() => {
     if (!destination) return;
@@ -267,16 +320,72 @@ function DayCard({
   const weekday = format(parsed, 'EEEE').toUpperCase();
   const dateStr = format(parsed, 'MMMM d, yyyy').toUpperCase();
 
-  const visibleEvents = events.filter(e => e.type !== 'itinerary');
-  const title    = note?.title
-    ?? (visibleEvents[0]?.location?.split(',')[0].trim() ?? null);
+  const visibleEvents = localEvents.filter(e => e.type !== 'itinerary');
+  const title    = note?.title ?? (visibleEvents[0]?.location?.split(',')[0].trim() ?? null);
   const subtitle = note?.description ?? null;
+
+  // All draggable event IDs (activities then reservations)
+  const draggableIds = visibleEvents
+    .filter(isDraggable)
+    .map(e => `${e.type}-${e.id}`);
+
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const activeStr = String(active.id);
+    const overStr   = String(over.id);
+
+    // Determine the event type being dragged
+    const activeType = activeStr.startsWith('activity-') ? 'activity' : 'reservation';
+    const overType   = overStr.startsWith('activity-')   ? 'activity' : 'reservation';
+
+    // Prevent cross-type drops
+    if (activeType !== overType) return;
+
+    const type = activeType as 'activity' | 'reservation';
+    const typeItems = visibleEvents.filter(e => isDraggable(e) && e.type === type);
+    const oldIdx = typeItems.findIndex(e => `${e.type}-${e.id}` === activeStr);
+    const newIdx = typeItems.findIndex(e => `${e.type}-${e.id}` === overStr);
+    if (oldIdx < 0 || newIdx < 0) return;
+
+    const reordered = arrayMove(typeItems, oldIdx, newIdx);
+
+    // Optimistically update: rebuild full event list with reordered type group
+    let typeCounter = 0;
+    const updated = localEvents.map(e =>
+      isDraggable(e) && e.type === type ? reordered[typeCounter++] : e
+    );
+    setLocalEvents(updated);
+
+    // Persist to API
+    const url = type === 'activity'
+      ? `/api/trips/${tripId}/activities/reorder`
+      : `/api/trips/${tripId}/reservations/reorder`;
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ids: reordered.map(e => e.id) }),
+      });
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
+      } else {
+        setLocalEvents(propEvents);
+        toast.error('Could not save order');
+      }
+    } catch {
+      setLocalEvents(propEvents);
+      toast.error('Could not save order');
+    }
+  }, [localEvents, visibleEvents, propEvents, tripId, queryClient]);
 
   return (
     <div className="rounded-2xl overflow-hidden border shadow-sm">
       {/* ── Header (always visible) ── */}
       <button onClick={onToggle} className="w-full text-left focus:outline-none group/hdr">
-        {/* Background */}
         <div className="relative overflow-hidden">
           {headerImg && (
             <img src={headerImg} alt="" className="absolute inset-0 h-full w-full object-cover" />
@@ -287,13 +396,11 @@ function DayCard({
           }`} />
 
           <div className="relative px-5 py-4 flex items-center gap-5">
-            {/* Day badge */}
             <div className="shrink-0 w-14 text-center">
               <div className="text-[10px] font-black uppercase tracking-widest text-primary">Day</div>
               <div className="text-3xl font-serif font-bold text-white leading-none">{dayNumber}</div>
             </div>
 
-            {/* Text */}
             <div className="flex-1 min-w-0">
               <div className="text-[10px] font-bold tracking-widest text-white/50 uppercase">
                 {weekday} · {dateStr}
@@ -310,7 +417,6 @@ function DayCard({
               )}
             </div>
 
-            {/* Count + chevron */}
             <div className="shrink-0 flex items-center gap-2 text-white/60">
               {visibleEvents.length > 0 && (
                 <span className="hidden sm:inline-flex items-center text-[11px] bg-white/10 group-hover/hdr:bg-white/15 transition-colors px-2 py-1 rounded-full">
@@ -333,69 +439,68 @@ function DayCard({
               {/* Left: timeline */}
               <div className="flex-1 min-w-0">
                 {visibleEvents.length > 0 ? (
-                  <div>
-                    {(() => {
-                      // Detect same-day hotel transitions: every consecutive
-                      // "Check-out:" → "Check-in:" accommodation pair receives
-                      // its own TransitionDivider.  Using a Set means three or
-                      // more accommodations on the same day (e.g. a very short
-                      // mid-day stop) each get a divider rather than only the
-                      // first pair being marked.  See
-                      // src/lib/itinerary-transitions.ts for the pure logic and
-                      // itinerary-transitions.test.ts for the boundary tests.
-                      const transitionAfterIndices = getTransitionIndices(visibleEvents);
-
-                      return visibleEvents.map((event, i) => (
-                        <div key={`row-wrapper-${event.type}-${event.id}-${i}`}>
-                          <EventRow
-                            event={event}
-                            isLast={i === visibleEvents.length - 1}
-                          />
-                          {transitionAfterIndices.has(i) && (
-                            <TransitionDivider />
-                          )}
-                        </div>
-                      ));
-                    })()}
-                  </div>
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleDragEnd}
+                  >
+                    <SortableContext items={draggableIds} strategy={verticalListSortingStrategy}>
+                      {(() => {
+                        const transitionAfterIndices = getTransitionIndices(visibleEvents);
+                        return visibleEvents.map((event, i) => (
+                          <div key={`row-wrapper-${event.type}-${event.id}-${i}`}>
+                            {isDraggable(event)
+                              ? (
+                                <SortableEventRow
+                                  event={event}
+                                  isLast={i === visibleEvents.length - 1}
+                                />
+                              ) : (
+                                <EventRow
+                                  event={event}
+                                  isLast={i === visibleEvents.length - 1}
+                                />
+                              )}
+                            {transitionAfterIndices.has(i) && <TransitionDivider />}
+                          </div>
+                        ));
+                      })()}
+                    </SortableContext>
+                  </DndContext>
                 ) : (
                   <div className="py-10 text-center text-muted-foreground text-sm border border-dashed rounded-xl">
                     No events scheduled for this day
-                    {(
-                      <p className="mt-1 text-xs">Add flights, stays, activities or car rentals from their respective tabs.</p>
-                    )}
+                    <p className="mt-1 text-xs">Add flights, stays, activities or car rentals from their respective tabs.</p>
                   </div>
                 )}
               </div>
 
               {/* Right: highlights + admin panel */}
               <div className="lg:w-64 xl:w-72 shrink-0 space-y-3">
-                <RightPanel events={events} note={note} />
+                <RightPanel events={localEvents} note={note} />
 
-                {(
-                  <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" size="sm" className="w-full text-xs">
-                        {note
-                          ? <><Pencil className="h-3 w-3 mr-1.5" />Edit Day Notes</>
-                          : <><Plus className="h-3 w-3 mr-1.5" />Add Day Notes</>}
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>
-                          {note ? 'Edit' : 'Add'} Notes — Day {dayNumber} ({format(parsed, 'EEE, MMM d')})
-                        </DialogTitle>
-                      </DialogHeader>
-                      <DayNoteForm
-                        tripId={tripId}
-                        date={date}
-                        note={note}
-                        onSuccess={() => setNoteOpen(false)}
-                      />
-                    </DialogContent>
-                  </Dialog>
-                )}
+                <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm" className="w-full text-xs">
+                      {note
+                        ? <><Pencil className="h-3 w-3 mr-1.5" />Edit Day Notes</>
+                        : <><Plus className="h-3 w-3 mr-1.5" />Add Day Notes</>}
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>
+                        {note ? 'Edit' : 'Add'} Notes — Day {dayNumber} ({format(parsed, 'EEE, MMM d')})
+                      </DialogTitle>
+                    </DialogHeader>
+                    <DayNoteForm
+                      tripId={tripId}
+                      date={date}
+                      note={note}
+                      onSuccess={() => setNoteOpen(false)}
+                    />
+                  </DialogContent>
+                </Dialog>
               </div>
             </div>
           </div>
@@ -500,7 +605,6 @@ export function TripItinerary({ tripId, editMode, tripStartDate, tripEndDate, tr
   const { data: timeline, isLoading: tlLoading } = useGetTripTimeline(tripId, { query: { enabled: !!tripId } });
   const { data: itineraryDays, isLoading: dayLoading } = useListItineraryDays(tripId, { query: { enabled: !!tripId } });
 
-  // Generate one entry per day in the trip date range
   const days = useMemo(() => {
     if (!tripStartDate || !tripEndDate) return [];
     const result: { date: string; dayNumber: number }[] = [];
@@ -515,7 +619,6 @@ export function TripItinerary({ tripId, editMode, tripStartDate, tripEndDate, tr
     return result;
   }, [tripStartDate, tripEndDate]);
 
-  // Group timeline events by date
   const eventsByDate = useMemo(() => {
     const map: Record<string, TimelineEvent[]> = {};
     ((timeline as TimelineEvent[]) ?? []).forEach(e => {
@@ -525,14 +628,12 @@ export function TripItinerary({ tripId, editMode, tripStartDate, tripEndDate, tr
     return map;
   }, [timeline]);
 
-  // Map itinerary day notes by date
   const notesByDate = useMemo(() => {
     const map: Record<string, any> = {};
     (itineraryDays ?? []).forEach((d: any) => { map[d.date] = d; });
     return map;
   }, [itineraryDays]);
 
-  // Day open state — first day open by default
   const [openDates, setOpenDates] = useState<Set<string>>(
     () => new Set(tripStartDate ? [tripStartDate] : [])
   );

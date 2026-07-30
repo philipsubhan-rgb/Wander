@@ -19,6 +19,7 @@ export const activitiesTable = pgTable("activities", {
   locationUrl: text("location_url"),
   type: activityTypeEnum("type").notNull().default("other"),
   notes: text("notes"),
+  sortOrder: integer("sort_order"),
 });
 
 export const insertActivitySchema = createInsertSchema(activitiesTable).omit({ id: true });

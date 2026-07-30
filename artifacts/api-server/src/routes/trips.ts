@@ -370,6 +370,7 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
       imageUrl: a.imageUrl ?? null,
       carrierCode: null as string | null,
       confirmationCode: null as string | null,
+      _sortOrder: a.sortOrder ?? null,
     })),
     ...carRentals.map(r => ({
       id: r.id,
@@ -406,6 +407,7 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
       imageUrl: r.imageUrl ?? null,
       carrierCode: null as string | null,
       confirmationCode: r.confirmationCode ?? null,
+      _sortOrder: r.sortOrder ?? null,
     })),
   ];
 
@@ -472,12 +474,21 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
       if (aa._stayEnd   !== bb._stayEnd)   return aa._stayEnd.localeCompare(bb._stayEnd);
       return aa._isCheckout - bb._isCheckout;
     }
-    return eventPriority(a) - eventPriority(b);
+    const priorityDiff = eventPriority(a) - eventPriority(b);
+    if (priorityDiff !== 0) return priorityDiff;
+    // Final tiebreaker: explicit sort_order for activities and reservations
+    // Null sort_order sorts after explicit values, then fall back to id.
+    const aOrd: number | null = (a as any)._sortOrder ?? null;
+    const bOrd: number | null = (b as any)._sortOrder ?? null;
+    if (aOrd !== null && bOrd !== null && aOrd !== bOrd) return aOrd - bOrd;
+    if (aOrd !== null && bOrd === null) return -1;
+    if (aOrd === null && bOrd !== null) return 1;
+    return String(a.id).localeCompare(String(b.id));
   });
 
   // Strip the internal sorting helpers before sending the response.
   const response = events.map(e => {
-    const { _stayStart, _stayEnd, _isCheckout, ...rest } = e as AccomEvent;
+    const { _stayStart, _stayEnd, _isCheckout, _sortOrder, ...rest } = e as AccomEvent & { _sortOrder?: number | null };
     return rest;
   });
 

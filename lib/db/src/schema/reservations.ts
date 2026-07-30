@@ -23,6 +23,7 @@ export const reservationsTable = pgTable("reservations", {
   imageUrl:         text("image_url"),
   lat:              doublePrecision("lat"),
   lon:              doublePrecision("lon"),
+  sortOrder:        integer("sort_order"),
 });
 
 export type Reservation = typeof reservationsTable.$inferSelect;
