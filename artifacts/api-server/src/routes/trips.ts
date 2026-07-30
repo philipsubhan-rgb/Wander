@@ -328,7 +328,7 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
     ...accommodations.map(a => ({
       id: a.id,
       type: "accommodation" as const,
-      date: a.checkIn,
+      date: a.checkIn.substring(0, 10),
       title: `Check-in: ${a.name}`,
       description: a.notes ?? null,
       location: a.address,
