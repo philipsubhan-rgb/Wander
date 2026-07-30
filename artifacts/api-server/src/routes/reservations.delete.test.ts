@@ -158,6 +158,18 @@ async function deleteReservation(tripId: number, reservationId: number) {
   return { status: res.status, body: await res.json() as any };
 }
 
+async function reorderReservations(tripId: number, ids: number[]) {
+  const res = await fetch(
+    `${base}/trips/${tripId}/reservations/reorder`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    },
+  );
+  return { status: res.status, body: await res.json() as any };
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -437,5 +449,203 @@ describe("DELETE /trips/:tripId/reservations/:reservationId — cross-trip isola
 
     // No updates at all — trip-B reservations (ids 40, 41) are untouched
     expect(mockDb.update).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Delete → Reorder chain: confirms that after a deletion re-indexes survivors,
+ * a subsequent reorder request assigns fresh 0-based sort_orders without any
+ * stale values from before the delete interfering.
+ *
+ * The reorder endpoint (POST /trips/:tripId/reservations/reorder):
+ *   - Receives an ordered array of ids from the client.
+ *   - Writes sortOrder = array-index for each id via db.update().
+ *
+ * The DELETE handler already re-indexes survivors to 0-based contiguous values.
+ * After that re-index the client fetches the updated list and sends a reorder
+ * request.  The reorder endpoint must assign positions based solely on the
+ * supplied ids array — stale sort_order values that existed before the delete
+ * must never leak through.
+ *
+ * Reorder endpoint WHERE clause shape (from mock):
+ *   db.update().set({ sortOrder: index })
+ *     .where(and(eq(reservationsTable.id, id), eq(reservationsTable.tripId, tripId)))
+ *   → whereArgs = [["id", id_value], ["tripId", tripId_value]]
+ *
+ * Helper: extract { reservationId, sortOrder } from a captured update call
+ * that originated from the reorder endpoint.
+ */
+function extractReorderUpdate(call: { setArgs: unknown; whereArgs: unknown }) {
+  const whereArr      = call.whereArgs as [string, number][];
+  const reservationId = whereArr[0][1]; // eq(reservationsTable.id, id) → ["id", id]
+  const sortOrder     = (call.setArgs as { sortOrder: number }).sortOrder;
+  return { reservationId, sortOrder };
+}
+
+describe("DELETE then reorder — combined chain", () => {
+  it("reorder after deleting the middle reservation maps each id to its correct position", async () => {
+    // Three reservations: ids 1, 2, 3 with sort_orders 0, 1, 2.
+    // Step 1 — delete id=2 (middle).  DELETE re-indexes survivors: ids 1,3 → 0,1.
+    // Step 2 — user drags id=3 to front; client sends reorder [3, 1].
+    //           Reorder endpoint must assign: id=3 → sortOrder=0, id=1 → sortOrder=1.
+    const TRIP_ID = 10;
+
+    // ── Step 1: DELETE id=2 ───────────────────────────────────────────────────
+    enqueue(
+      [{ id: 2, tripId: TRIP_ID, date: "2025-08-10", sortOrder: 1 }], // deleted row
+      [{ id: 1 }, { id: 3 }],                                          // survivors returned by re-index SELECT
+    );
+
+    const deleteResult = await deleteReservation(TRIP_ID, 2);
+    expect(deleteResult.status).toBe(200);
+
+    // Record how many update calls came from the DELETE re-index phase
+    const reindexCallCount = updateCalls.length;
+    expect(reindexCallCount).toBe(2); // one update per survivor
+
+    // ── Step 2: POST reorder [3, 1] ───────────────────────────────────────────
+    const reorderResult = await reorderReservations(TRIP_ID, [3, 1]);
+    expect(reorderResult.status).toBe(200);
+    expect(reorderResult.body).toEqual({ success: true });
+
+    // Two more db.update() calls from the reorder endpoint
+    const reorderCalls = updateCalls.slice(reindexCallCount);
+    expect(reorderCalls).toHaveLength(2);
+
+    // Verify each id is bound to its positional index in the supplied array
+    const mapped = reorderCalls.map(extractReorderUpdate);
+    expect(mapped[0]).toEqual({ reservationId: 3, sortOrder: 0 }); // first in [3,1] → pos 0
+    expect(mapped[1]).toEqual({ reservationId: 1, sortOrder: 1 }); // second in [3,1] → pos 1
+  });
+
+  it("reorder after deleting the first reservation assigns correct id↔position mapping", async () => {
+    // Three reservations: ids 1, 2, 3 with sort_orders 0, 1, 2.
+    // Step 1 — delete id=1 (first, sortOrder=0).
+    //           DELETE re-indexes survivors: ids 2,3 → 0,1 (gap at 0 is closed).
+    // Step 2 — user keeps the existing order; client sends reorder [2, 3].
+    //           Reorder endpoint must assign: id=2 → sortOrder=0, id=3 → sortOrder=1.
+    //           The stale sort_order=1 that id=2 held before the delete must not interfere.
+    const TRIP_ID = 11;
+
+    enqueue(
+      [{ id: 1, tripId: TRIP_ID, date: "2025-09-05", sortOrder: 0 }], // deleted row
+      [{ id: 2 }, { id: 3 }],                                          // survivors
+    );
+
+    await deleteReservation(TRIP_ID, 1);
+
+    const reindexCallCount = updateCalls.length;
+
+    await reorderReservations(TRIP_ID, [2, 3]);
+
+    const reorderCalls = updateCalls.slice(reindexCallCount);
+    expect(reorderCalls).toHaveLength(2);
+
+    const mapped = reorderCalls.map(extractReorderUpdate);
+    expect(mapped[0]).toEqual({ reservationId: 2, sortOrder: 0 }); // first in [2,3]
+    expect(mapped[1]).toEqual({ reservationId: 3, sortOrder: 1 }); // second in [2,3]
+  });
+
+  it("reorder after deleting the last reservation maps swapped ids to their new positions", async () => {
+    // Three reservations: ids 1, 2, 3 with sort_orders 0, 1, 2.
+    // Step 1 — delete id=3 (last, sortOrder=2).  Survivors: ids 1,2 → 0,1.
+    // Step 2 — user swaps order; client sends reorder [2, 1].
+    //           Reorder endpoint must assign: id=2 → sortOrder=0, id=1 → sortOrder=1.
+    const TRIP_ID = 12;
+
+    enqueue(
+      [{ id: 3, tripId: TRIP_ID, date: "2025-10-20", sortOrder: 2 }], // deleted row
+      [{ id: 1 }, { id: 2 }],                                          // survivors
+    );
+
+    await deleteReservation(TRIP_ID, 3);
+
+    const reindexCallCount = updateCalls.length;
+
+    await reorderReservations(TRIP_ID, [2, 1]);
+
+    const reorderCalls = updateCalls.slice(reindexCallCount);
+    expect(reorderCalls).toHaveLength(2);
+
+    const mapped = reorderCalls.map(extractReorderUpdate);
+    expect(mapped[0]).toEqual({ reservationId: 2, sortOrder: 0 }); // first in [2,1]
+    expect(mapped[1]).toEqual({ reservationId: 1, sortOrder: 1 }); // second in [2,1]
+  });
+
+  it("reorder of a single survivor after two deletions assigns id=3 to sort_order 0", async () => {
+    // Three reservations: ids 1, 2, 3.
+    // Delete id=1, then delete id=2 → only id=3 survives with sort_order 0.
+    // Client sends reorder [3]; endpoint must assign id=3 → sortOrder=0.
+    const TRIP_ID = 13;
+
+    // ── First delete: remove id=1 ─────────────────────────────────────────────
+    enqueue(
+      [{ id: 1, tripId: TRIP_ID, date: "2025-07-15", sortOrder: 0 }],
+      [{ id: 2 }, { id: 3 }],
+    );
+    await deleteReservation(TRIP_ID, 1);
+
+    const afterFirstDelete = updateCalls.length; // 2 re-index updates
+
+    // ── Second delete: remove id=2 ────────────────────────────────────────────
+    enqueue(
+      [{ id: 2, tripId: TRIP_ID, date: "2025-07-15", sortOrder: 0 }],
+      [{ id: 3 }],
+    );
+    await deleteReservation(TRIP_ID, 2);
+
+    const afterSecondDelete = updateCalls.length; // 1 more re-index update for id=3
+
+    // After both deletes only id=3 remains; re-index set it to sortOrder=0
+    const secondReindex = updateCalls.slice(afterFirstDelete, afterSecondDelete);
+    expect(secondReindex).toHaveLength(1);
+    expect((secondReindex[0].setArgs as any).sortOrder).toBe(0);
+
+    // ── Reorder: client sends [3] ─────────────────────────────────────────────
+    await reorderReservations(TRIP_ID, [3]);
+
+    const reorderCalls = updateCalls.slice(afterSecondDelete);
+    expect(reorderCalls).toHaveLength(1);
+
+    const mapped = reorderCalls.map(extractReorderUpdate);
+    expect(mapped[0]).toEqual({ reservationId: 3, sortOrder: 0 });
+  });
+
+  it("reorder after deletion assigns positions solely from the supplied ids array, ignoring pre-delete sort_orders", async () => {
+    // Explicitly verifies that stale sort_order values do not bleed into the
+    // reorder endpoint.  The reorder endpoint must use array-index position only.
+    //
+    // Setup: ids 10, 20, 30 had sort_orders 0, 5, 10 (non-contiguous due to
+    // prior edits).  Delete id=20 (sortOrder=5); re-index assigns 10→0, 30→1.
+    // Client drags 30 to front → sends reorder [30, 10].
+    // Expected: id=30 → sortOrder=0, id=10 → sortOrder=1.
+    // Must NOT assign any value derived from stale sort_orders (5 or 10).
+    const TRIP_ID = 14;
+
+    enqueue(
+      [{ id: 20, tripId: TRIP_ID, date: "2025-11-01", sortOrder: 5 }], // deleted row — stale non-contiguous sortOrder
+      [{ id: 10 }, { id: 30 }],                                         // survivors
+    );
+
+    await deleteReservation(TRIP_ID, 20);
+
+    const reindexCallCount = updateCalls.length;
+
+    await reorderReservations(TRIP_ID, [30, 10]);
+
+    const reorderCalls = updateCalls.slice(reindexCallCount);
+    expect(reorderCalls).toHaveLength(2);
+
+    const mapped = reorderCalls.map(extractReorderUpdate);
+
+    // id=30 is first in the supplied array → must receive sortOrder=0
+    expect(mapped[0]).toEqual({ reservationId: 30, sortOrder: 0 });
+    // id=10 is second in the supplied array → must receive sortOrder=1
+    expect(mapped[1]).toEqual({ reservationId: 10, sortOrder: 1 });
+
+    // Neither stale pre-delete value may appear as a sort_order
+    const assignedOrders = mapped.map(m => m.sortOrder);
+    expect(assignedOrders).not.toContain(5);  // stale sortOrder of deleted id=20
+    expect(assignedOrders).not.toContain(10); // stale sortOrder of survivor id=30
   });
 });
