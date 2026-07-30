@@ -145,7 +145,7 @@ function TripCard({ trip }: { trip: any }) {
       <div className="h-48 w-full relative overflow-hidden bg-muted">
         {trip.coverImage ? (
           <img 
-            src={trip.coverImage} 
+            src={trip.coverImage.startsWith('/objects/') ? `/api/trips/${trip.id}/cover` : trip.coverImage} 
             alt={trip.title} 
             className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
           />
