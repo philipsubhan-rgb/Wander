@@ -26,6 +26,7 @@ vi.mock("drizzle-orm", () => ({
   eq:  (...args: unknown[]) => args,
   and: (...args: unknown[]) => args,
   sql: (...args: unknown[]) => args,
+  asc: (...args: unknown[]) => args,
 }));
 
 // ── Chainable DB mock ─────────────────────────────────────────────────────────
@@ -479,7 +480,140 @@ describe("POST /trips/:tripId/activities/reorder — cross-trip isolation", () =
   });
 });
 
-// ── 4. Timeline sort — reservations also respect sort_order ──────────────────
+// ── 4. DELETE gap-closing re-index ───────────────────────────────────────────
+
+/**
+ * The DELETE handler:
+ *   1. Deletes the activity (db.delete → dequeues first result)
+ *   2. Fetches remaining activities on the same (trip, date) ordered by
+ *      sortOrder ASC, id ASC (db.select → dequeues second result)
+ *   3. Writes contiguous 0-based sort_order back to each remaining row
+ *      (one db.update per row → captured in updateCalls)
+ */
+
+describe("DELETE /trips/:tripId/activities/:activityId — gap-closing re-index", () => {
+  async function deleteActivity(tripId: number, activityId: number) {
+    const res = await fetch(
+      `${activitiesBase}/trips/${tripId}/activities/${activityId}`,
+      { method: "DELETE" },
+    );
+    return { status: res.status, body: await res.json() as any };
+  }
+
+  it("returns 200 { success: true } when the activity exists", async () => {
+    enqueue(
+      [{ id: 5, tripId: 1, date: "2025-08-10", sortOrder: 1 }], // deleted row
+      [],                                                          // no remaining
+    );
+    const { status, body } = await deleteActivity(1, 5);
+    expect(status).toBe(200);
+    expect(body).toEqual({ success: true });
+  });
+
+  it("returns 404 when the activity does not belong to the trip", async () => {
+    enqueue([]); // db.delete returns no rows → not found
+    const { status } = await deleteActivity(1, 9999);
+    expect(status).toBe(404);
+  });
+
+  it("re-indexes three remaining activities to 0, 1, 2 after a middle activity is deleted", async () => {
+    // Original order: ids 1,2,3,4 with sort_orders 0,1,2,3.
+    // Deleting id=2 (sortOrder=1) leaves a gap: sort_orders 0,2,3.
+    // After re-index the remaining ids 1,3,4 must receive sort_orders 0,1,2.
+    enqueue(
+      [{ id: 2, tripId: 1, date: "2025-08-10", sortOrder: 1 }], // deleted row
+      [{ id: 1 }, { id: 3 }, { id: 4 }],                        // remaining (DB returns in sortOrder asc)
+    );
+
+    await deleteActivity(1, 2);
+
+    // One db.update() per remaining activity
+    expect(mockDb.update).toHaveBeenCalledTimes(3);
+
+    // sort_orders must be contiguous 0-based with no gaps
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0, 1, 2]);
+  });
+
+  it("closes gaps even when multiple gaps pre-existed before the delete", async () => {
+    // sort_orders were already non-contiguous: 0, 2, 5, 9
+    // Delete the first (sortOrder=0); remaining: 2, 5, 9 — two-gap sequence
+    // After re-index: 0, 1, 2
+    enqueue(
+      [{ id: 10, tripId: 1, date: "2025-09-01", sortOrder: 0 }],
+      [{ id: 11 }, { id: 12 }, { id: 13 }],
+    );
+
+    await deleteActivity(1, 10);
+
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0, 1, 2]);
+  });
+
+  it("assigns sort_order 0 to the single remaining activity", async () => {
+    // Two activities; after deleting one only the other remains.
+    enqueue(
+      [{ id: 20, tripId: 1, date: "2025-10-05", sortOrder: 0 }],
+      [{ id: 21 }],
+    );
+
+    await deleteActivity(1, 20);
+
+    expect(mockDb.update).toHaveBeenCalledTimes(1);
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0]);
+  });
+
+  it("does not call db.update when the deleted activity was the only one on that date", async () => {
+    enqueue(
+      [{ id: 99, tripId: 1, date: "2025-12-31", sortOrder: 0 }],
+      [], // no remaining activities on this date
+    );
+
+    await deleteActivity(1, 99);
+
+    expect(mockDb.update).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Insert-after-delete ordering: a new activity added after a delete must
+   * receive a sort_order that places it after the existing activities.
+   *
+   * This test simulates the combined effect on the timeline:
+   *   - Three activities remain with re-indexed sort_orders 0, 1, 2.
+   *   - A fourth activity is added with sort_order null.
+   *   - The timeline must place the null-order activity last (after 0, 1, 2),
+   *     relying on the id fallback rather than firing unexpectedly before any
+   *     activity with an explicit sort_order.
+   */
+  it("new null-sort-order activity sorts after re-indexed activities on the timeline", async () => {
+    enqueueTimeline({
+      activities: [
+        // Three re-indexed activities (contiguous after a delete)
+        { id: 1, tripId: 1, title: "First",  date: "2025-07-01", time: null, sortOrder: 0, description: null, location: null, imageUrl: null },
+        { id: 2, tripId: 1, title: "Second", date: "2025-07-01", time: null, sortOrder: 1, description: null, location: null, imageUrl: null },
+        { id: 3, tripId: 1, title: "Third",  date: "2025-07-01", time: null, sortOrder: 2, description: null, location: null, imageUrl: null },
+        // Newly inserted activity with no sort_order assigned yet
+        { id: 4, tripId: 1, title: "New",    date: "2025-07-01", time: null, sortOrder: null, description: null, location: null, imageUrl: null },
+      ],
+    });
+
+    const { status, body } = await getTimeline();
+
+    expect(status).toBe(200);
+    const jul1 = body.filter((e: any) => e.date === "2025-07-01" && e.type === "activity");
+    expect(jul1).toHaveLength(4);
+
+    // Explicitly-ordered activities come first in sort_order sequence
+    expect(jul1[0].title).toBe("First");   // sortOrder 0
+    expect(jul1[1].title).toBe("Second");  // sortOrder 1
+    expect(jul1[2].title).toBe("Third");   // sortOrder 2
+    // null-sort-order activity is placed last, not injected between the ordered ones
+    expect(jul1[3].title).toBe("New");
+  });
+});
+
+// ── 5. Timeline sort — reservations also respect sort_order ──────────────────
 
 describe("GET /trips/:tripId/timeline — sort_order tiebreaker for reservations", () => {
   /**
