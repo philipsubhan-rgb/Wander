@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import {
   ChevronDown, ChevronUp, Plane, Home, Compass, Car, Calendar,
   MapPin, Star, Pencil, Plus, CheckCircle2, BookMarked, Lightbulb, UtensilsCrossed,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -142,6 +143,33 @@ function EventRow({ event, isLast }: { event: TimelineEvent; isLast: boolean }) 
             </div>
           ) : null}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Transition divider ────────────────────────────────────────────────────────
+
+function TransitionDivider() {
+  return (
+    <div className="flex gap-3 my-1">
+      {/* Align with time column */}
+      <div className="w-[4.5rem] shrink-0" />
+
+      {/* Spine + icon */}
+      <div className="flex flex-col items-center shrink-0">
+        <div className="w-px flex-none h-3 bg-border" />
+        <div className="h-6 w-6 rounded-full bg-muted border border-border flex items-center justify-center z-10 shrink-0">
+          <ArrowRightLeft className="h-3 w-3 text-muted-foreground" />
+        </div>
+        <div className="w-px flex-none h-3 bg-border" />
+      </div>
+
+      {/* Label */}
+      <div className="flex items-center">
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+          Transition Day
+        </span>
       </div>
     </div>
   );
@@ -305,13 +333,38 @@ function DayCard({
               <div className="flex-1 min-w-0">
                 {visibleEvents.length > 0 ? (
                   <div>
-                    {visibleEvents.map((event, i) => (
-                      <EventRow
-                        key={`${event.type}-${event.id}-${i}`}
-                        event={event}
-                        isLast={i === visibleEvents.length - 1}
-                      />
-                    ))}
+                    {(() => {
+                      // Detect a same-day hotel transition: a "Check-out:" accommodation
+                      // immediately preceding a "Check-in:" accommodation. Insert the
+                      // divider only between that exact pair.
+                      const transitionAfterIdx = (() => {
+                        for (let i = 0; i < visibleEvents.length - 1; i++) {
+                          const curr = visibleEvents[i];
+                          const next = visibleEvents[i + 1];
+                          if (
+                            curr.type === 'accommodation' &&
+                            next.type === 'accommodation' &&
+                            curr.title.startsWith('Check-out:') &&
+                            next.title.startsWith('Check-in:')
+                          ) {
+                            return i;
+                          }
+                        }
+                        return -1;
+                      })();
+
+                      return visibleEvents.map((event, i) => (
+                        <div key={`row-wrapper-${event.type}-${event.id}-${i}`}>
+                          <EventRow
+                            event={event}
+                            isLast={i === visibleEvents.length - 1}
+                          />
+                          {transitionAfterIdx === i && (
+                            <TransitionDivider />
+                          )}
+                        </div>
+                      ));
+                    })()}
                   </div>
                 ) : (
                   <div className="py-10 text-center text-muted-foreground text-sm border border-dashed rounded-xl">
