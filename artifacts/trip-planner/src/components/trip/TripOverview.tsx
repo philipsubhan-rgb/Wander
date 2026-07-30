@@ -1,6 +1,6 @@
 import { useGetTripSummary, useGetTripTimeline } from '@workspace/api-client-react';
 import { useState, useEffect } from 'react';
-import { Calendar, Plane, Home, Compass, Users, CheckSquare, Car } from 'lucide-react';
+import { Calendar, Plane, Home, Compass, Users, CheckSquare, Car, UtensilsCrossed } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { fetchWikiImage } from '@/lib/wiki-image';
 
@@ -27,11 +27,12 @@ export function TripOverview({ tripId, onNavigate }: { tripId: number; onNavigat
               <div key={`${event.type}-${event.id}-${i}`} className="relative flex items-start gap-6">
                 {/* Timeline dot */}
                 <div className="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-card border shadow-sm mt-1">
-                  {event.type === 'flight' && <Plane className="h-5 w-5 text-primary" />}
-                  {event.type === 'accommodation' && <Home className="h-5 w-5 text-primary" />}
-                  {event.type === 'activity' && <Compass className="h-5 w-5 text-primary" />}
-                  {event.type === 'itinerary' && <Calendar className="h-5 w-5 text-primary" />}
-                  {event.type === 'car_rental' && <Car className="h-5 w-5 text-primary" />}
+                  {event.type === 'flight'        && <Plane            className="h-5 w-5 text-primary" />}
+                  {event.type === 'accommodation' && <Home             className="h-5 w-5 text-primary" />}
+                  {event.type === 'activity'      && <Compass          className="h-5 w-5 text-primary" />}
+                  {event.type === 'itinerary'     && <Calendar         className="h-5 w-5 text-primary" />}
+                  {event.type === 'car_rental'    && <Car              className="h-5 w-5 text-primary" />}
+                  {event.type === 'reservation'   && <UtensilsCrossed  className="h-5 w-5 text-primary" />}
                 </div>
 
                 {/* Event card */}
@@ -80,8 +81,8 @@ function EventThumbnail({ event }: { event: any }) {
   const [logoError, setLogoError] = useState(false);
 
   useEffect(() => {
-    // Only auto-fetch wiki image for activity/accommodation events without one
-    if (event.type !== 'activity' && event.type !== 'accommodation') return;
+    const fetchable = event.type === 'activity' || event.type === 'accommodation' || event.type === 'reservation';
+    if (!fetchable) return;
     if (event.imageUrl) return;
     const query = event.location || event.title.replace(/^Check-in: /, '');
     fetchWikiImage(query).then(url => { if (url) setWikiImage(url); });
@@ -110,8 +111,8 @@ function EventThumbnail({ event }: { event: any }) {
     );
   }
 
-  // Activities / accommodations: photo
-  if (event.type === 'activity' || event.type === 'accommodation') {
+  // Activities / accommodations / reservations: photo
+  if (event.type === 'activity' || event.type === 'accommodation' || event.type === 'reservation') {
     if (displayImage) {
       return (
         <div className="w-24 shrink-0 overflow-hidden">
@@ -121,8 +122,12 @@ function EventThumbnail({ event }: { event: any }) {
     }
     const icon = event.type === 'accommodation'
       ? <Home className="h-7 w-7 text-white/60" />
-      : <Compass className="h-7 w-7 text-white/60" />;
-    const bg = event.type === 'accommodation' ? '#f59e0b' : '#60a5fa';
+      : event.type === 'reservation'
+        ? <UtensilsCrossed className="h-7 w-7 text-white/60" />
+        : <Compass className="h-7 w-7 text-white/60" />;
+    const bg = event.type === 'accommodation' ? '#f59e0b'
+      : event.type === 'reservation' ? '#f97316'
+      : '#60a5fa';
     return (
       <div className="w-24 shrink-0 flex items-center justify-center" style={{ background: bg }}>
         {icon}
