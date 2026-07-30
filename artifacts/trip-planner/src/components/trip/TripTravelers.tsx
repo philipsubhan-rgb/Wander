@@ -302,7 +302,7 @@ function EditTravelerDialog({
       if (!res.ok) { toast.error(data?.error || 'Failed to set password'); return; }
       setNewPassword('');
       setConfirmPassword('');
-      toast.success('Password updated');
+      toast.success(`Password set. Have ${traveler.name} log in with: ${traveler.email ?? traveler.name}`);
     } catch {
       toast.error('Failed to set password');
     } finally {
@@ -376,6 +376,7 @@ function EditTravelerDialog({
                   placeholder="At least 6 characters"
                   disabled={isSuperAdmin}
                   className="pr-10"
+                  autoComplete="new-password"
                 />
                 <button
                   type="button"
@@ -396,6 +397,7 @@ function EditTravelerDialog({
                 onChange={e => setConfirmPassword(e.target.value)}
                 placeholder="Repeat password"
                 disabled={isSuperAdmin}
+                autoComplete="new-password"
               />
             </div>
             {!isSuperAdmin && (
