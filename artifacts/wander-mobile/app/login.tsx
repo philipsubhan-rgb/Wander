@@ -81,17 +81,19 @@ export default function LoginScreen() {
             ) : null}
 
             <View style={styles.field}>
-              <Text style={styles.label}>Username</Text>
+              <Text style={styles.label}>Email</Text>
               <View style={styles.inputWrap}>
-                <Feather name="user" size={16} color={colors.mutedForeground} style={styles.inputIcon} />
+                <Feather name="mail" size={16} color={colors.mutedForeground} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Enter username"
+                  placeholder="Enter your email address"
                   placeholderTextColor={colors.mutedForeground}
                   value={username}
                   onChangeText={setUsername}
                   autoCapitalize="none"
                   autoCorrect={false}
+                  keyboardType="email-address"
+                  textContentType="emailAddress"
                   returnKeyType="next"
                   testID="username-input"
                 />
