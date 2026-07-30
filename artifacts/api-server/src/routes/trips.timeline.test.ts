@@ -883,6 +883,64 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
     expect(sep10[1].time).toBe("00:00");
   });
 
+  /**
+   * Midnight pickup time edge case:
+   *
+   * A car rental with pickupDatetime "2025-10-05T00:00" sits alongside an
+   * activity that also starts at "00:00" on the same date.  The time
+   * extraction must treat T00:00 as the literal time "00:00" (not as
+   * "no time given" / null).  Because car_rental (priority 1) ranks above
+   * activity (priority 3), the car rental must sort first even though both
+   * events carry the same "00:00" time string.
+   */
+  it("assigns time 00:00 (not null) to a midnight car rental and sorts it before a same-time activity", async () => {
+    enqueueTimeline({
+      carRentals: [
+        {
+          id: 70,
+          tripId: 1,
+          company: "Midnight Rentals",
+          pickupLocation: "CDG Airport",
+          dropoffLocation: "Paris Centre",
+          pickupDatetime: "2025-10-05T00:00",
+          dropoffDatetime: "2025-10-08T10:00",
+          notes: null,
+          confirmationCode: "MR-MIDNIGHT",
+        },
+      ],
+      activities: [
+        {
+          id: 71,
+          tripId: 1,
+          title: "Midnight walking tour",
+          date: "2025-10-05",
+          time: "00:00",
+          description: null,
+          location: "Paris",
+          imageUrl: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const oct5 = body.filter((e: any) => e.date === "2025-10-05");
+    expect(oct5).toHaveLength(2);
+
+    // The car rental must carry the explicit time "00:00", not null.
+    const carRental = oct5.find((e: any) => e.type === "car_rental");
+    expect(carRental).toBeDefined();
+    expect(carRental.time).toBe("00:00");
+
+    // Cross-type priority: car_rental (1) < activity (3) — car rental must sort first.
+    expect(oct5[0].type).toBe("car_rental");
+    expect(oct5[0].time).toBe("00:00");
+    expect(oct5[1].type).toBe("activity");
+    expect(oct5[1].time).toBe("00:00");
+  });
+
   it("includes events on other dates alongside the shared-date events", async () => {
     enqueueTimeline({
       accommodations: [
