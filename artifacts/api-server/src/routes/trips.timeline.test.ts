@@ -951,6 +951,64 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
   });
 
   /**
+   * Date-only flight edge case:
+   *
+   * A flight stored with departureDatetime="2025-09-10" (no time component,
+   * length == 10) sits alongside a timed activity on the same date. The time
+   * extraction (length > 10 check) must produce time=null for the flight.
+   * Despite having no time, the flight (type priority 0) must still sort
+   * before the activity (type priority 3).
+   */
+  it("sorts a date-only flight (time=null) before a timed activity on the same date", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 70,
+          tripId: 1,
+          airline: "Date Air",
+          flightNumber: "DA100",
+          departureAirport: "JFK",
+          arrivalAirport: "LAX",
+          departureDatetime: "2025-09-10",
+          arrivalDatetime:   null,
+          notes: null,
+          confirmationCode: null,
+        },
+      ],
+      activities: [
+        {
+          id: 71,
+          tripId: 1,
+          title: "City tour",
+          date: "2025-09-10",
+          time: "09:00",
+          description: null,
+          location: "Los Angeles",
+          imageUrl: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const sep10 = body.filter((e: any) => e.date === "2025-09-10");
+    expect(sep10).toHaveLength(2);
+
+    // The flight must carry null time (no time component in departureDatetime).
+    const flight = sep10.find((e: any) => e.type === "flight");
+    expect(flight).toBeDefined();
+    expect(flight.time).toBeNull();
+
+    // Cross-type priority: flight (0) < activity (3) — flight must sort first.
+    expect(sep10[0].type).toBe("flight");
+    expect(sep10[0].time).toBeNull();
+    expect(sep10[1].type).toBe("activity");
+    expect(sep10[1].time).toBe("09:00");
+  });
+
+  /**
    * Midnight pickup time edge case:
    *
    * A car rental with pickupDatetime "2025-10-05T00:00" sits alongside an
