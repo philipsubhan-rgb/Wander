@@ -6,6 +6,35 @@ import type { AuthUser, LoginResponse } from '@workspace/api-client-react';
 
 const AUTH_TOKEN_KEY = 'wander_auth_token';
 
+// ── Token storage helpers ─────────────────────────────────────────────────────
+// SecureStore works only in native builds. On web (mobile browsers, Expo web
+// preview) it throws, so we fall back to localStorage which persists across
+// page refreshes and works in every browser.
+
+async function storeToken(token: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+  } catch {
+    try { localStorage.setItem(AUTH_TOKEN_KEY, token); } catch { /* ignore */ }
+  }
+}
+
+async function retrieveToken(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+  } catch {
+    try { return localStorage.getItem(AUTH_TOKEN_KEY); } catch { return null; }
+  }
+}
+
+async function removeToken(): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+  } catch {
+    try { localStorage.removeItem(AUTH_TOKEN_KEY); } catch { /* ignore */ }
+  }
+}
+
 interface AuthContextType {
   user: AuthUser | null;
   isLoading: boolean;
@@ -24,13 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Register the token getter so every API call attaches the bearer token
     // when available. This is a no-op in browsers where the token getter
     // returns null (session cookies handle auth there instead).
-    setAuthTokenGetter(async () => {
-      try {
-        return await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
-      } catch {
-        return null;
-      }
-    });
+    setAuthTokenGetter(retrieveToken);
 
     // Restore the session from the stored token (native) or cookie (web)
     getMe()
@@ -48,12 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const response: LoginResponse = await loginApi({ username, password });
 
     if (response.token) {
-      try {
-        await SecureStore.setItemAsync(AUTH_TOKEN_KEY, response.token);
-      } catch {
-        // SecureStore unavailable (e.g. web) — bearer auth won't persist,
-        // but session cookies will still work.
-      }
+      await storeToken(response.token);
     }
 
     setUser(response);
@@ -61,11 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     await logoutApi();
-    try {
-      await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
-    } catch {
-      // Ignore if SecureStore is unavailable
-    }
+    await removeToken();
     setUser(null);
     queryClient.clear();
   }, [queryClient]);
