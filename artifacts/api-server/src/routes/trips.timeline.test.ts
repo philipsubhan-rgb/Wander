@@ -773,6 +773,65 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
     expect(aug15[2].time).toBe("09:00");
   });
 
+  /**
+   * Midnight departure time edge case:
+   *
+   * A flight with departureDatetime "2025-09-10T00:00" sits alongside an
+   * activity that also starts at "00:00" on the same date.  The time
+   * extraction must treat T00:00 as the literal time "00:00" (not as
+   * "no time given" / null).  Because flight (priority 0) ranks above
+   * activity (priority 3), the flight must sort first even though both
+   * events carry the same "00:00" time string.
+   */
+  it("assigns time 00:00 (not null) to a midnight flight and sorts it before a same-time activity", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 60,
+          tripId: 1,
+          airline: "Night Air",
+          flightNumber: "NA001",
+          departureAirport: "LHR",
+          arrivalAirport: "JFK",
+          departureDatetime: "2025-09-10T00:00",
+          arrivalDatetime:   "2025-09-10T08:00",
+          notes: null,
+          confirmationCode: null,
+        },
+      ],
+      activities: [
+        {
+          id: 61,
+          tripId: 1,
+          title: "Midnight city tour",
+          date: "2025-09-10",
+          time: "00:00",
+          description: null,
+          location: "London",
+          imageUrl: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const sep10 = body.filter((e: any) => e.date === "2025-09-10");
+    expect(sep10).toHaveLength(2);
+
+    // The flight must carry the explicit time "00:00", not null.
+    const flight = sep10.find((e: any) => e.type === "flight");
+    expect(flight).toBeDefined();
+    expect(flight.time).toBe("00:00");
+
+    // Cross-type priority: flight (0) < activity (3) — flight must sort first.
+    expect(sep10[0].type).toBe("flight");
+    expect(sep10[0].time).toBe("00:00");
+    expect(sep10[1].type).toBe("activity");
+    expect(sep10[1].time).toBe("00:00");
+  });
+
   it("includes events on other dates alongside the shared-date events", async () => {
     enqueueTimeline({
       accommodations: [
