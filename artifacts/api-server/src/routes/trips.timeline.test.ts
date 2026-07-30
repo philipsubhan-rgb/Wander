@@ -706,6 +706,57 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
   });
 
   /**
+   * Car-rental vs reservation tiebreak:
+   *
+   * A car rental pickup and a reservation both carry the same explicit time
+   * (14:00) on the same date (2025-09-05). The cross-type priority places
+   * car_rental (1) before reservation (4), so the car rental must sort first.
+   */
+  it("places a car rental before a reservation when both share the same explicit date and time", async () => {
+    enqueueTimeline({
+      carRentals: [
+        {
+          id: 60,
+          tripId: 1,
+          company: "Avis",
+          pickupLocation: "Rome Airport",
+          dropoffLocation: "Rome Center",
+          pickupDatetime: "2025-09-05T14:00",
+          dropoffDatetime: "2025-09-12T14:00",
+          notes: null,
+          confirmationCode: null,
+        },
+      ],
+      reservations: [
+        {
+          id: 61,
+          tripId: 1,
+          type: "restaurant",
+          name: "Trattoria Roma",
+          date: "2025-09-05",
+          time: "14:00",
+          confirmationCode: null,
+          notes: null,
+          address: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const sep5 = body.filter((e: any) => e.date === "2025-09-05");
+    expect(sep5).toHaveLength(2);
+
+    // Both events share time "14:00" — cross-type priority must break the tie.
+    expect(sep5[0].type).toBe("car_rental");
+    expect(sep5[0].time).toBe("14:00");
+    expect(sep5[1].type).toBe("reservation");
+    expect(sep5[1].time).toBe("14:00");
+  });
+
+  /**
    * Three-way tie: flight + car_rental + activity all at 09:00 on 2025-08-15.
    *
    * Cross-type priorities: flight (0) → car_rental (1) → activity (3).
