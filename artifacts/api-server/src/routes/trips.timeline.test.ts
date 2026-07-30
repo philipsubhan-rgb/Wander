@@ -549,6 +549,58 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
     expect(july15[3].title).toBe("Check-in: Hotel Gamma");
   });
 
+  /**
+   * Timed-event cross-type ordering: a flight departure and a dinner reservation
+   * both carry the same explicit time (18:00) on the same date. The flight must
+   * sort before the reservation because its cross-type priority (0) is lower
+   * than the reservation's priority (4).
+   */
+  it("places a flight before a same-time reservation when both share an explicit time", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 10,
+          tripId: 1,
+          airline: "Sky Air",
+          flightNumber: "SK200",
+          departureAirport: "JFK",
+          arrivalAirport: "CDG",
+          departureDatetime: "2025-09-10T18:00",
+          arrivalDatetime:   "2025-09-11T06:00",
+          notes: null,
+          confirmationCode: null,
+        },
+      ],
+      reservations: [
+        {
+          id: 30,
+          tripId: 1,
+          title: "Dinner at Chez Paul",
+          date: "2025-09-10",
+          time: "18:00",
+          notes: null,
+          address: null,
+          venue: "Chez Paul",
+          imageUrl: null,
+          confirmationCode: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const sep10 = body.filter((e: any) => e.date === "2025-09-10");
+    expect(sep10).toHaveLength(2);
+
+    // Both events share time "18:00" — cross-type priority must break the tie.
+    expect(sep10[0].type).toBe("flight");
+    expect(sep10[0].time).toBe("18:00");
+    expect(sep10[1].type).toBe("reservation");
+    expect(sep10[1].time).toBe("18:00");
+  });
+
   it("includes events on other dates alongside the shared-date events", async () => {
     enqueueTimeline({
       accommodations: [
