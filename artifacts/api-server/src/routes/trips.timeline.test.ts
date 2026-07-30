@@ -1115,3 +1115,143 @@ describe("PATCH reservation date → GET timeline — sort preserved after write
     expect(aug1[1].title).toBe("Dinner at Maison");
   });
 });
+
+// ── Day-boundary flight tests ─────────────────────────────────────────────────
+
+describe("GET /trips/:tripId/timeline — day-boundary flights (23:59 vs 00:00 next day)", () => {
+  /**
+   * A connecting itinerary where the first flight departs at 23:59 on day D
+   * and the second departs at 00:00 on day D+1. The two departures must land
+   * on different calendar dates and appear in the correct chronological order.
+   */
+  it("places a 23:59 departure on its own date, separate from the 00:00 departure on the next day", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 1, tripId: 1,
+          airline: "Night Air", flightNumber: "NA001",
+          departureAirport: "LHR", arrivalAirport: "DXB",
+          departureDatetime: "2025-09-10T23:59:00",
+          arrivalDatetime:   "2025-09-11T05:30:00",
+          notes: null, confirmationCode: null,
+        },
+        {
+          id: 2, tripId: 1,
+          airline: "Dawn Air", flightNumber: "DA002",
+          departureAirport: "DXB", arrivalAirport: "SYD",
+          departureDatetime: "2025-09-11T00:00:00",
+          arrivalDatetime:   "2025-09-11T22:00:00",
+          notes: null, confirmationCode: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+    expect(status).toBe(200);
+
+    const sep10 = body.filter((e: any) => e.date === "2025-09-10");
+    const sep11 = body.filter((e: any) => e.date === "2025-09-11");
+
+    // Each flight lands on its own calendar date — they must not collapse.
+    expect(sep10).toHaveLength(1);
+    expect(sep11).toHaveLength(1);
+  });
+
+  it("assigns the 23:59 flight to date D and the 00:00 flight to date D+1", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 1, tripId: 1,
+          airline: "Night Air", flightNumber: "NA001",
+          departureAirport: "LHR", arrivalAirport: "DXB",
+          departureDatetime: "2025-09-10T23:59:00",
+          arrivalDatetime:   "2025-09-11T05:30:00",
+          notes: null, confirmationCode: null,
+        },
+        {
+          id: 2, tripId: 1,
+          airline: "Dawn Air", flightNumber: "DA002",
+          departureAirport: "DXB", arrivalAirport: "SYD",
+          departureDatetime: "2025-09-11T00:00:00",
+          arrivalDatetime:   "2025-09-11T22:00:00",
+          notes: null, confirmationCode: null,
+        },
+      ],
+    });
+
+    const { body } = await get("/trips/1/timeline");
+
+    const sep10 = body.filter((e: any) => e.date === "2025-09-10");
+    const sep11 = body.filter((e: any) => e.date === "2025-09-11");
+
+    expect(sep10[0].type).toBe("flight");
+    expect(sep10[0].title).toBe("Night Air NA001: LHR → DXB");
+
+    expect(sep11[0].type).toBe("flight");
+    expect(sep11[0].title).toBe("Dawn Air DA002: DXB → SYD");
+  });
+
+  it("preserves the time value for both boundary flights", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 1, tripId: 1,
+          airline: "Night Air", flightNumber: "NA001",
+          departureAirport: "LHR", arrivalAirport: "DXB",
+          departureDatetime: "2025-09-10T23:59:00",
+          arrivalDatetime:   "2025-09-11T05:30:00",
+          notes: null, confirmationCode: null,
+        },
+        {
+          id: 2, tripId: 1,
+          airline: "Dawn Air", flightNumber: "DA002",
+          departureAirport: "DXB", arrivalAirport: "SYD",
+          departureDatetime: "2025-09-11T00:00:00",
+          arrivalDatetime:   "2025-09-11T22:00:00",
+          notes: null, confirmationCode: null,
+        },
+      ],
+    });
+
+    const { body } = await get("/trips/1/timeline");
+
+    const lhr = body.find((e: any) => e.title === "Night Air NA001: LHR → DXB");
+    const dxb = body.find((e: any) => e.title === "Dawn Air DA002: DXB → SYD");
+
+    expect(lhr.time).toBe("23:59");
+    expect(dxb.time).toBe("00:00");
+  });
+
+  it("returns events in chronological date order (D before D+1)", async () => {
+    // Enqueue with the later flight listed first in the DB result to confirm
+    // the route does not rely on DB insertion order for date sorting.
+    enqueueTimeline({
+      flights: [
+        {
+          id: 2, tripId: 1,
+          airline: "Dawn Air", flightNumber: "DA002",
+          departureAirport: "DXB", arrivalAirport: "SYD",
+          departureDatetime: "2025-09-11T00:00:00",
+          arrivalDatetime:   "2025-09-11T22:00:00",
+          notes: null, confirmationCode: null,
+        },
+        {
+          id: 1, tripId: 1,
+          airline: "Night Air", flightNumber: "NA001",
+          departureAirport: "LHR", arrivalAirport: "DXB",
+          departureDatetime: "2025-09-10T23:59:00",
+          arrivalDatetime:   "2025-09-11T05:30:00",
+          notes: null, confirmationCode: null,
+        },
+      ],
+    });
+
+    const { body } = await get("/trips/1/timeline");
+
+    const flights = body.filter((e: any) => e.type === "flight");
+    expect(flights).toHaveLength(2);
+    // The 23:59 departure on Sep 10 must precede the 00:00 departure on Sep 11.
+    expect(flights[0].date).toBe("2025-09-10");
+    expect(flights[1].date).toBe("2025-09-11");
+  });
+});
