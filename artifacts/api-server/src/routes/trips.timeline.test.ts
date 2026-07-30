@@ -1008,6 +1008,64 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
     expect(oct5[1].time).toBe("00:00");
   });
 
+  /**
+   * Date-only pickup edge case:
+   *
+   * A car rental whose pickupDatetime is a plain date string ("2025-08-01",
+   * length === 10) must produce time === null via the `length > 10` guard.
+   * The timeline entry must land on the correct date and, when sharing that
+   * date with an activity that also has no time, sort before the activity
+   * because cross-type priority places car_rental (1) before activity (3).
+   */
+  it("assigns time null to a date-only car rental and sorts it before a same-day null-time activity", async () => {
+    enqueueTimeline({
+      carRentals: [
+        {
+          id: 80,
+          tripId: 1,
+          company: "Budget Wheels",
+          pickupLocation: "Rome Fiumicino",
+          dropoffLocation: "Rome Centro",
+          pickupDatetime: "2025-08-01",          // no time component — length === 10
+          dropoffDatetime: "2025-08-05T09:00",
+          notes: null,
+          confirmationCode: "BW-NOTIME",
+        },
+      ],
+      activities: [
+        {
+          id: 81,
+          tripId: 1,
+          title: "Colosseum tour",
+          date: "2025-08-01",
+          time: null,                             // also no time — same sort bucket
+          description: null,
+          location: "Rome",
+          imageUrl: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const aug1 = body.filter((e: any) => e.date === "2025-08-01");
+    expect(aug1).toHaveLength(2);
+
+    // The `length > 10` guard must produce null, not an empty string or "00:00".
+    const carRental = aug1.find((e: any) => e.type === "car_rental");
+    expect(carRental).toBeDefined();
+    expect(carRental.date).toBe("2025-08-01");
+    expect(carRental.time).toBeNull();
+
+    // Cross-type priority: car_rental (1) < activity (3) — car rental must sort first.
+    expect(aug1[0].type).toBe("car_rental");
+    expect(aug1[0].time).toBeNull();
+    expect(aug1[1].type).toBe("activity");
+    expect(aug1[1].time).toBeNull();
+  });
+
   it("includes events on other dates alongside the shared-date events", async () => {
     enqueueTimeline({
       accommodations: [
