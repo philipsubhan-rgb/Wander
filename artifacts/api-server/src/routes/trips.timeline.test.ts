@@ -500,6 +500,7 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
   });
 
   it("interleaves correctly when hotels are added in reverse DB row order (non-chronological DB rows)", async () => {
+
     // Same three stays as above but delivered in reverse row order from the DB.
     enqueueTimeline({
       accommodations: [
@@ -645,5 +646,133 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
     expect(accomEvents[2].title).toBe("Check-in: Hotel Beta");
     expect(accomEvents[3].date).toBe("2025-07-20");
     expect(accomEvents[3].title).toBe("Check-out: Hotel Beta");
+  });
+});
+
+// ── Write-then-read round-trip ────────────────────────────────────────────────
+//
+// Verify that the timeline sort is correct after a PATCH changes an event's
+// date so it now shares a date with another event type.  The sort runs in
+// memory on every GET, so it must produce the right cross-type order
+// regardless of when the underlying row was written.
+//
+// This describe block mounts BOTH the trips router (for GET …/timeline) and
+// the reservations router (for PATCH …/reservations/:reservationId) on a
+// dedicated server so the full round-trip can be exercised end-to-end.
+//
+// The session role is set to "super_admin" so the requireTripParticipant
+// middleware in the reservations router short-circuits and does NOT enqueue
+// an extra DB call — keeping the mock-queue accounting simple.
+
+describe("PATCH reservation date → GET timeline — sort preserved after write-then-read", () => {
+  let server2: http.Server;
+  let base2: string;
+
+  beforeAll(async () => {
+    const { default: tripsRouter }        = await import("./trips.js");
+    const { default: reservationsRouter } = await import("./reservations.js");
+
+    const app2 = express();
+    app2.use(express.json());
+
+    // super_admin bypasses the participant-check DB query inside requireTripParticipant.
+    app2.use((req: any, _res, next) => {
+      req.session = { userId: 1, role: "super_admin" };
+      next();
+    });
+
+    app2.use("/api", tripsRouter);
+    app2.use("/api", reservationsRouter);
+
+    await new Promise<void>(resolve => {
+      server2 = http.createServer(app2).listen(0, resolve);
+    });
+    const addr = server2.address() as { port: number };
+    base2 = `http://localhost:${addr.port}/api`;
+  });
+
+  afterAll(() => server2.close());
+
+  async function patch2(path: string, body: Record<string, unknown>) {
+    const res = await fetch(`${base2}${path}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: await res.json() };
+  }
+
+  async function get2(path: string) {
+    const res = await fetch(`${base2}${path}`);
+    return { status: res.status, body: await res.json() as any[] };
+  }
+
+  /**
+   * Round-trip scenario:
+   *
+   * 1. A flight exists on 2025-08-01.
+   * 2. A reservation originally lives on 2025-09-01 (different date).
+   * 3. PATCH moves the reservation's date to 2025-08-01.
+   * 4. GET /timeline now sees both on the same date — flight must sort first
+   *    because its cross-type priority (0) is lower than reservation's (4).
+   */
+  it("flight precedes reservation after the reservation's date is patched to match the flight's date", async () => {
+    // ── Step 1: PATCH the reservation's date ──────────────────────────────
+    //
+    // With super_admin role, requireTripParticipant makes NO db.select() call.
+    // The only DB call is db.update(reservationsTable).set(...).where(...).returning().
+    // Enqueue the single array that the route's .returning() will dequeue.
+    const updatedReservationRow = {
+      id: 30, tripId: 1, type: "restaurant",
+      title: "Dinner at Maison", venue: "Maison", address: null,
+      date: "2025-08-01", time: null, endTime: null,
+      confirmationCode: null, numberOfPeople: null, phone: null,
+      notes: null, url: null, imageUrl: null, lat: null, lon: null,
+    };
+    enqueue([updatedReservationRow]);  // consumed by db.update().returning()
+
+    const patchRes = await patch2("/trips/1/reservations/30", {
+      title: "Dinner at Maison",
+      date:  "2025-08-01",
+    });
+    expect(patchRes.status).toBe(200);
+
+    // ── Step 2: GET the timeline ──────────────────────────────────────────
+    //
+    // Enqueue the six arrays consumed by the Promise.all in the timeline handler
+    // (flights, accommodations, activities, itinerary, carRentals, reservations).
+    // The reservation now appears with the updated date 2025-08-01.
+    enqueueTimeline({
+      flights: [
+        {
+          id: 10, tripId: 1,
+          airline: "Sky Air", flightNumber: "SK100",
+          departureAirport: "JFK", arrivalAirport: "CDG",
+          departureDatetime: "2025-08-01",
+          arrivalDatetime:   "2025-08-02",
+          notes: null, confirmationCode: null,
+        },
+      ],
+      reservations: [
+        {
+          id: 30, tripId: 1,
+          title: "Dinner at Maison",
+          date:  "2025-08-01",   // ← updated date (was 2025-09-01 before the PATCH)
+          time: null, notes: null, address: null, venue: "Maison",
+          imageUrl: null, confirmationCode: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get2("/trips/1/timeline");
+    expect(status).toBe(200);
+
+    const aug1 = body.filter((e: any) => e.date === "2025-08-01");
+    expect(aug1).toHaveLength(2);
+
+    // Cross-type priority: flight (0) < reservation (4) — flight must be first.
+    expect(aug1[0].type).toBe("flight");
+    expect(aug1[1].type).toBe("reservation");
+    expect(aug1[1].title).toBe("Dinner at Maison");
   });
 });
