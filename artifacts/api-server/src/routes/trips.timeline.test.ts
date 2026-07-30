@@ -256,6 +256,169 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
     expect(july15[1].title).toBe("Check-in: Hotel Beta");
   });
 
+  /**
+   * Type-ordering scenario: flight, activity, and reservation all land on the
+   * same date with no explicit time (all default to "00:00"). The sort must
+   * produce the cross-type priority order:
+   *   flight → activity → reservation
+   */
+  it("orders flight before activity before reservation when all share a date and time", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 10,
+          tripId: 1,
+          airline: "Sky Air",
+          flightNumber: "SK100",
+          departureAirport: "JFK",
+          arrivalAirport: "CDG",
+          departureDatetime: "2025-07-15",
+          arrivalDatetime:   "2025-07-16",
+          notes: null,
+          confirmationCode: null,
+        },
+      ],
+      activities: [
+        {
+          id: 20,
+          tripId: 1,
+          title: "Eiffel Tower visit",
+          date: "2025-07-15",
+          time: null,
+          description: null,
+          location: "Paris",
+          imageUrl: null,
+        },
+      ],
+      reservations: [
+        {
+          id: 30,
+          tripId: 1,
+          title: "Dinner at Le Jules Verne",
+          date: "2025-07-15",
+          time: null,
+          notes: null,
+          address: null,
+          venue: "Le Jules Verne",
+          imageUrl: null,
+          confirmationCode: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const july15 = body.filter((e: any) => e.date === "2025-07-15");
+    expect(july15).toHaveLength(3);
+    expect(july15[0].type).toBe("flight");
+    expect(july15[1].type).toBe("activity");
+    expect(july15[2].type).toBe("reservation");
+  });
+
+  /**
+   * Full cross-type ordering: flight, car_rental, accommodation (check-out
+   * then check-in), activity, reservation — all on the same date, no time.
+   */
+  it("applies the full cross-type priority order on a single day with no times", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 10,
+          tripId: 1,
+          airline: "Sky Air",
+          flightNumber: "SK100",
+          departureAirport: "JFK",
+          arrivalAirport: "CDG",
+          departureDatetime: "2025-08-01",
+          arrivalDatetime:   "2025-08-02",
+          notes: null,
+          confirmationCode: null,
+        },
+      ],
+      accommodations: [
+        {
+          id: 1,
+          tripId: 1,
+          name: "Old Hotel",
+          checkIn: "2025-07-28",
+          checkOut: "2025-08-01",
+          address: "1 Old St",
+          notes: null,
+          imageUrl: null,
+          confirmationCode: null,
+        },
+        {
+          id: 2,
+          tripId: 1,
+          name: "New Hotel",
+          checkIn: "2025-08-01",
+          checkOut: "2025-08-05",
+          address: "2 New Ave",
+          notes: null,
+          imageUrl: null,
+          confirmationCode: null,
+        },
+      ],
+      activities: [
+        {
+          id: 20,
+          tripId: 1,
+          title: "City tour",
+          date: "2025-08-01",
+          time: null,
+          description: null,
+          location: "Paris",
+          imageUrl: null,
+        },
+      ],
+      reservations: [
+        {
+          id: 30,
+          tripId: 1,
+          title: "Dinner reservation",
+          date: "2025-08-01",
+          time: null,
+          notes: null,
+          address: null,
+          venue: "Restaurant X",
+          imageUrl: null,
+          confirmationCode: null,
+        },
+      ],
+      carRentals: [
+        {
+          id: 40,
+          tripId: 1,
+          company: "FastCar",
+          pickupLocation: "CDG Airport",
+          dropoffLocation: "Paris Center",
+          pickupDatetime: "2025-08-01",
+          dropoffDatetime: "2025-08-05",
+          notes: null,
+          confirmationCode: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const aug1 = body.filter((e: any) => e.date === "2025-08-01");
+    // flight, car_rental, check-out: Old Hotel, check-in: New Hotel, activity, reservation
+    expect(aug1).toHaveLength(6);
+    expect(aug1[0].type).toBe("flight");
+    expect(aug1[1].type).toBe("car_rental");
+    expect(aug1[2].type).toBe("accommodation");
+    expect(aug1[2].title).toBe("Check-out: Old Hotel");
+    expect(aug1[3].type).toBe("accommodation");
+    expect(aug1[3].title).toBe("Check-in: New Hotel");
+    expect(aug1[4].type).toBe("activity");
+    expect(aug1[5].type).toBe("reservation");
+  });
+
   it("includes events on other dates alongside the shared-date events", async () => {
     enqueueTimeline({
       accommodations: [

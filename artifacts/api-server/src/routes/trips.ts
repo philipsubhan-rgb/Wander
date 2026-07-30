@@ -401,12 +401,23 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
     })),
   ];
 
-  // Assign a sub-type priority so same-date/time events appear in a logical
-  // order: check-out first (traveler leaves), then check-in (traveler arrives).
-  const accomPriority = (title: string) => {
-    if (title.startsWith("Check-out:")) return 0;
-    if (title.startsWith("Check-in:"))  return 1;
-    return 2;
+  // Assign a priority so same-date/time events of any type appear in a
+  // deterministic, logical order that mirrors the traveler's day:
+  //   flight → car_rental → accommodation (check-out before check-in)
+  //   → activity → reservation → itinerary → everything else
+  const eventPriority = (e: { type: string; title: string }) => {
+    switch (e.type) {
+      case "flight":        return 0;
+      case "car_rental":    return 1;
+      case "accommodation":
+        if (e.title.startsWith("Check-out:")) return 2;
+        if (e.title.startsWith("Check-in:"))  return 3;
+        return 4;
+      case "activity":      return 5;
+      case "reservation":   return 6;
+      case "itinerary":     return 7;
+      default:              return 8;
+    }
   };
 
   events.sort((a, b) => {
@@ -414,7 +425,7 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
     const at = a.time ?? "00:00";
     const bt = b.time ?? "00:00";
     if (at !== bt) return at.localeCompare(bt);
-    return accomPriority(a.title) - accomPriority(b.title);
+    return eventPriority(a) - eventPriority(b);
   });
 
   res.json(events);
