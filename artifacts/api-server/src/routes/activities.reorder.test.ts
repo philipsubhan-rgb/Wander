@@ -401,7 +401,85 @@ describe("GET /trips/:tripId/timeline — sort_order tiebreaker for activities",
   });
 });
 
-// ── 3. Timeline sort — reservations also respect sort_order ──────────────────
+// ── 3. Cross-trip isolation — reorder cannot corrupt another trip ─────────────
+
+describe("POST /trips/:tripId/activities/reorder — cross-trip isolation", () => {
+  /**
+   * Every db.update() WHERE clause must include both:
+   *   eq(activitiesTable.id,     <activity id>)
+   *   eq(activitiesTable.tripId, <tripId from the URL>)
+   *
+   * With the mock, eq(table.col, val) => [col, val] and
+   * and(a, b) => [a, b], so whereArgs for tripId=1, activityId=7 becomes:
+   *   [["id", 7], ["tripId", 1]]
+   *
+   * This test confirms that when a caller sends activity IDs that belong to
+   * trip B (tripId=2) inside a request for trip A (tripId=1), every WHERE
+   * clause binds to tripId=1 — ensuring the DB would match zero rows in
+   * trip B.
+   */
+  it("binds every UPDATE WHERE clause to the tripId from the URL, not the activity's owning trip", async () => {
+    // Activity IDs 100 and 200 conceptually belong to trip B (tripId=2),
+    // but the request is for trip A (tripId=1).
+    await postReorder(1, [100, 200]);
+
+    expect(mockDb.update).toHaveBeenCalledTimes(2);
+
+    for (const call of updateCalls) {
+      // whereArgs = [["id", <activityId>], ["tripId", <urlTripId>]]
+      const whereArr = call.whereArgs as [unknown, unknown][];
+      const tripIdClause = whereArr[1] as [string, number];
+
+      expect(tripIdClause[0]).toBe("tripId");
+      expect(tripIdClause[1]).toBe(1); // URL tripId, NOT 2
+    }
+  });
+
+  it("includes the activity's own id alongside the tripId in each WHERE clause", async () => {
+    await postReorder(5, [10, 20, 30]);
+
+    expect(updateCalls).toHaveLength(3);
+
+    const activityIds = updateCalls.map(c => {
+      const whereArr = c.whereArgs as [unknown, unknown][];
+      const idClause = whereArr[0] as [string, number];
+      return idClause[1];
+    });
+
+    expect(activityIds).toEqual([10, 20, 30]);
+  });
+
+  it("does not touch any activity when the supplied IDs are from a different trip", async () => {
+    // Trip B has activities 50, 60, 70; request goes to trip A (tripId=1).
+    // Because each WHERE includes tripId=1, the real DB would match nothing
+    // in trip B. Confirm the WHERE clauses all reference tripId=1.
+    await postReorder(1, [50, 60, 70]);
+
+    expect(mockDb.update).toHaveBeenCalledTimes(3);
+
+    for (const call of updateCalls) {
+      const whereArr  = call.whereArgs as [unknown, unknown][];
+      const tripIdClause = whereArr[1] as [string, number];
+
+      expect(tripIdClause[0]).toBe("tripId");
+      expect(tripIdClause[1]).toBe(1);
+
+      // Confirm the set payload only carries sortOrder (no tripId override)
+      expect(Object.keys(call.setArgs as object)).toEqual(["sortOrder"]);
+    }
+  });
+
+  it("still returns 200 and does not leak trip B data when IDs don't belong to the request's trip", async () => {
+    // DB returns empty arrays (default) → no rows updated for foreign IDs.
+    // The endpoint must still respond cleanly.
+    const { status, body } = await postReorder(1, [500, 600]);
+
+    expect(status).toBe(200);
+    expect(body).toEqual({ success: true });
+  });
+});
+
+// ── 4. Timeline sort — reservations also respect sort_order ──────────────────
 
 describe("GET /trips/:tripId/timeline — sort_order tiebreaker for reservations", () => {
   /**
