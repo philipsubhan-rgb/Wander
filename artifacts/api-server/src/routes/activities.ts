@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { db, activitiesTable } from "@workspace/db";
 import {
   ListActivitiesParams,
@@ -62,6 +62,14 @@ router.delete("/trips/:tripId/activities/:activityId", requireTripParticipant(),
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
   const [item] = await db.delete(activitiesTable).where(and(eq(activitiesTable.id, params.data.activityId), eq(activitiesTable.tripId, params.data.tripId))).returning();
   if (!item) { res.status(404).json({ error: "Activity not found" }); return; }
+  // Re-index remaining activities on the same date to close any gaps
+  const remaining = await db.select({ id: activitiesTable.id })
+    .from(activitiesTable)
+    .where(and(eq(activitiesTable.tripId, params.data.tripId), eq(activitiesTable.date, item.date)))
+    .orderBy(asc(activitiesTable.sortOrder), asc(activitiesTable.id));
+  await Promise.all(remaining.map((r, index) =>
+    db.update(activitiesTable).set({ sortOrder: index }).where(eq(activitiesTable.id, r.id))
+  ));
   res.json({ success: true });
 });
 

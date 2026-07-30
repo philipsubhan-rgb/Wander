@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { db, reservationsTable } from "@workspace/db";
 import { requireAuth, requireTripParticipant } from "../middlewares/auth";
 
@@ -89,9 +89,19 @@ router.post("/trips/:tripId/reservations/reorder", requireTripParticipant(), asy
 
 // DELETE /api/trips/:tripId/reservations/:reservationId
 router.delete("/trips/:tripId/reservations/:reservationId", requireTripParticipant(), async (req, res): Promise<void> => {
+  const tripId        = Number(req.params.tripId);
   const reservationId = Number(req.params.reservationId);
-  if (isNaN(reservationId)) { res.status(400).json({ error: "Invalid id" }); return; }
-  await db.delete(reservationsTable).where(eq(reservationsTable.id, reservationId));
+  if (isNaN(tripId) || isNaN(reservationId)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const [item] = await db.delete(reservationsTable).where(and(eq(reservationsTable.id, reservationId), eq(reservationsTable.tripId, tripId))).returning();
+  if (!item) { res.status(404).json({ error: "Not found" }); return; }
+  // Re-index remaining reservations on the same date to close any gaps
+  const remaining = await db.select({ id: reservationsTable.id })
+    .from(reservationsTable)
+    .where(and(eq(reservationsTable.tripId, tripId), eq(reservationsTable.date, item.date)))
+    .orderBy(asc(reservationsTable.sortOrder), asc(reservationsTable.id));
+  await Promise.all(remaining.map((r, index) =>
+    db.update(reservationsTable).set({ sortOrder: index }).where(eq(reservationsTable.id, r.id))
+  ));
   res.json({ success: true });
 });
 
