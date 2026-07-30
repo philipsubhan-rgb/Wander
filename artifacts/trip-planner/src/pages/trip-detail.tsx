@@ -203,7 +203,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
               {canAdmin && (
                 <TabsTrigger value="travelers" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Travelers</TabsTrigger>
               )}
-              {editMode && canAdmin && (
+              {canAdmin && (
                 <TabsTrigger value="settings" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none px-2 py-4 text-base">Settings</TabsTrigger>
               )}
             </TabsList>
@@ -224,7 +224,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
             {canAdmin && (
               <TabsContent value="travelers" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripTravelers tripId={tripId} /></TabsContent>
             )}
-            {editMode && canAdmin && (
+            {canAdmin && (
               <TabsContent value="settings" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripSettings trip={trip} /></TabsContent>
             )}
           </div>
