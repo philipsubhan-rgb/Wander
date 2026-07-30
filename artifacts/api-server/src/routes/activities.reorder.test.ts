@@ -45,7 +45,11 @@ function enqueue(...items: unknown[]) {
 // Track every db.update() call so the reorder tests can inspect arguments.
 const updateCalls: { setArgs: unknown; whereArgs: unknown }[] = [];
 
-function makeChain(captureSet = false): any {
+// Track WHERE args passed to db.select() so isolation tests can assert the
+// date filter is present and scoped to the correct date.
+const selectWhereCalls: unknown[] = [];
+
+function makeChain(captureSet = false, captureWhere = false): any {
   let p: Promise<unknown> | null = null;
   let capturedSet: unknown;
   let capturedWhere: unknown;
@@ -74,6 +78,9 @@ function makeChain(captureSet = false): any {
     if (captureSet) {
       updateCalls.push({ setArgs: capturedSet, whereArgs: capturedWhere });
     }
+    if (captureWhere) {
+      selectWhereCalls.push(args);
+    }
     return chain;
   };
 
@@ -83,7 +90,7 @@ function makeChain(captureSet = false): any {
 const fakeTable = new Proxy({}, { get: (_t, p) => p });
 
 const mockDb = {
-  select: vi.fn(() => makeChain()),
+  select: vi.fn(() => makeChain(/* captureSet = */ false, /* captureWhere = */ true)),
   insert: vi.fn(() => makeChain()),
   update: vi.fn(() => makeChain(/* captureSet = */ true)),
   delete: vi.fn(() => makeChain()),
@@ -167,7 +174,9 @@ afterAll(() => {
 beforeEach(() => {
   resultQueue.length = 0;
   updateCalls.length = 0;
+  selectWhereCalls.length = 0;
   mockDb.update.mockClear();
+  mockDb.select.mockClear();
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -573,6 +582,74 @@ describe("DELETE /trips/:tripId/activities/:activityId — gap-closing re-index"
     await deleteActivity(1, 99);
 
     expect(mockDb.update).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Cross-date isolation: deleting an activity from date A must not touch
+   * activities on date B within the same trip.
+   *
+   * The re-index SELECT filters by both tripId AND date, so the DB only
+   * returns date-A rows.  This test confirms:
+   *   1. The WHERE clause passed to db.select contains the deleted activity's
+   *      date (date A), not date B.
+   *   2. db.update is called only for the activities that the select returned
+   *      (date A survivors), never for date B.
+   *   3. The sort_orders written match only the date-A survivors in sequence.
+   *
+   * With the drizzle-orm mock:
+   *   eq(col, val)   → [col, val]
+   *   and(a, b, ...) → [a, b, ...]
+   *
+   * So the WHERE arg for tripId=1, date="2025-08-10" becomes:
+   *   [["tripId", 1], ["date", "2025-08-10"]]
+   */
+  it("re-index SELECT is scoped to the deleted activity's date, leaving date-B activities untouched", async () => {
+    const DATE_A = "2025-08-10";
+    const DATE_B = "2025-08-11";
+
+    // db.delete returns the activity being deleted (on date A)
+    // db.select returns only the two survivors on date A (the route filters by date)
+    // date-B activities (ids 4, 5) are never returned by the select because the
+    // real DB WHERE clause includes eq(activitiesTable.date, item.date)
+    enqueue(
+      [{ id: 2, tripId: 1, date: DATE_A, sortOrder: 1 }], // deleted row
+      [{ id: 1 }, { id: 3 }],                              // remaining on date A only
+    );
+
+    await deleteActivity(1, 2);
+
+    // ── Assert 1: the SELECT WHERE clause names date A, not date B ────────────
+    // The route issues exactly one db.select for the re-index query.
+    // selectWhereCalls[0] = and(eq(tripId,1), eq(date, DATE_A))
+    //                     = [["tripId", 1], ["date", DATE_A]]
+    expect(selectWhereCalls).toHaveLength(1);
+    const whereArr = selectWhereCalls[0] as [unknown, unknown][];
+    const tripIdClause = whereArr[0] as [string, number];
+    const dateClause   = whereArr[1] as [string, string];
+
+    expect(tripIdClause[0]).toBe("tripId");
+    expect(tripIdClause[1]).toBe(1);
+
+    expect(dateClause[0]).toBe("date");
+    expect(dateClause[1]).toBe(DATE_A);   // must be date A
+    expect(dateClause[1]).not.toBe(DATE_B); // must NOT be date B
+
+    // ── Assert 2: db.update called only for the two date-A survivors ──────────
+    // The re-index UPDATE uses eq(activitiesTable.id, r.id) without and(),
+    // so whereArgs is ["id", <value>] directly (not a nested array).
+    // date-B activities (ids 4, 5) are never in the update list.
+    expect(mockDb.update).toHaveBeenCalledTimes(2);
+    const updatedIds = updateCalls.map(c => {
+      const w = c.whereArgs as [string, number];
+      return w[1]; // second element is the activity id value
+    });
+    expect(updatedIds).toEqual([1, 3]);    // only date-A survivors
+    expect(updatedIds).not.toContain(4);   // date-B activity never touched
+    expect(updatedIds).not.toContain(5);   // date-B activity never touched
+
+    // ── Assert 3: sort_orders are compacted for date A only ───────────────────
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0, 1]);
   });
 
   /**
