@@ -345,3 +345,97 @@ describe("DELETE /trips/:tripId/reservations/:reservationId — gap-closing re-i
     expect(sortOrders).toEqual([0, 1]);
   });
 });
+
+/**
+ * Cross-trip isolation: deleting a reservation from trip A must never touch
+ * reservations belonging to trip B, even when both trips share the same
+ * calendar date.
+ *
+ * The re-index SELECT filters by the URL's tripId, so the real DB will only
+ * return trip-A rows.  These tests confirm:
+ *   1. The WHERE clause passed to db.select binds to the URL's tripId (trip A),
+ *      not to any foreign tripId (trip B).
+ *   2. db.update is called only for reservation IDs that the select returned
+ *      (trip A survivors); trip B reservation IDs are never updated.
+ *
+ * With the drizzle-orm mock:
+ *   eq(col, val)   → [col, val]
+ *   and(a, b, ...) → [a, b, ...]
+ *
+ * So the WHERE arg for tripId=1, date="2025-08-10" becomes:
+ *   [["tripId", 1], ["date", "2025-08-10"]]
+ */
+describe("DELETE /trips/:tripId/reservations/:reservationId — cross-trip isolation", () => {
+  it("re-index SELECT WHERE clause binds to the URL tripId, not a foreign tripId", async () => {
+    const SHARED_DATE = "2025-08-10";
+    const TRIP_A_ID   = 1;
+    const TRIP_B_ID   = 2;
+
+    // Trip A has reservations 10, 11, 12 on SHARED_DATE (sort_orders 0,1,2).
+    // Trip B has reservations 20, 21    on SHARED_DATE — different trip.
+    // We delete reservation 11 from trip A (sort_order 1).
+    // The re-index SELECT must be scoped to tripId=TRIP_A_ID; the mock returns
+    // only trip-A survivors [10, 12] because the real DB would never return
+    // trip-B rows when tripId is bound in the WHERE clause.
+    enqueue(
+      [{ id: 11, tripId: TRIP_A_ID, date: SHARED_DATE, sortOrder: 1 }], // deleted row
+      [{ id: 10 }, { id: 12 }],                                          // trip-A survivors
+    );
+
+    await deleteReservation(TRIP_A_ID, 11);
+
+    // ── Assert 1: SELECT WHERE names TRIP_A_ID, not TRIP_B_ID ────────────────
+    expect(selectWhereCalls).toHaveLength(1);
+    const whereArr     = selectWhereCalls[0] as [unknown, unknown][];
+    const tripIdClause = whereArr[0] as [string, number];
+    const dateClause   = whereArr[1] as [string, string];
+
+    expect(tripIdClause[0]).toBe("tripId");
+    expect(tripIdClause[1]).toBe(TRIP_A_ID);    // bound to trip A's id
+    expect(tripIdClause[1]).not.toBe(TRIP_B_ID); // never trip B's id
+
+    expect(dateClause[0]).toBe("date");
+    expect(dateClause[1]).toBe(SHARED_DATE);
+
+    // ── Assert 2: db.update called only for trip-A reservation IDs ───────────
+    // The re-index UPDATE uses eq(reservationsTable.id, r.id) so whereArgs is
+    // ["id", <value>] directly (not a nested array).
+    expect(mockDb.update).toHaveBeenCalledTimes(2);
+    const updatedIds = updateCalls.map(c => {
+      const w = c.whereArgs as [string, number];
+      return w[1];
+    });
+
+    expect(updatedIds).toEqual([10, 12]);         // only trip-A survivors
+    expect(updatedIds).not.toContain(20);          // trip-B reservation never touched
+    expect(updatedIds).not.toContain(21);          // trip-B reservation never touched
+
+    // ── Assert 3: sort_orders are compacted for trip-A survivors only ─────────
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0, 1]);
+  });
+
+  it("does not call db.update at all when the deleted reservation was the sole trip-A entry on the shared date", async () => {
+    // Trip A has exactly one reservation on SHARED_DATE; trip B has two on the
+    // same date.  After deleting trip A's reservation, no survivors exist for
+    // trip A → db.update must not fire (trip B is never involved).
+    const SHARED_DATE = "2025-09-15";
+    const TRIP_A_ID   = 3;
+
+    enqueue(
+      [{ id: 30, tripId: TRIP_A_ID, date: SHARED_DATE, sortOrder: 0 }], // deleted row
+      [],  // no remaining reservations for trip A on SHARED_DATE
+    );
+
+    await deleteReservation(TRIP_A_ID, 30);
+
+    // SELECT was issued with the correct tripId
+    expect(selectWhereCalls).toHaveLength(1);
+    const tripIdClause = (selectWhereCalls[0] as [unknown, unknown][])[0] as [string, number];
+    expect(tripIdClause[0]).toBe("tripId");
+    expect(tripIdClause[1]).toBe(TRIP_A_ID);
+
+    // No updates at all — trip-B reservations (ids 40, 41) are untouched
+    expect(mockDb.update).not.toHaveBeenCalled();
+  });
+});
