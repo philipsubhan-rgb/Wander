@@ -1009,6 +1009,58 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
   });
 
   /**
+   * Same-type null-time vs timed activity:
+   *
+   * Two activities share the same date (2025-11-01). One has time=null; the
+   * other has time="09:00".  Because both have the SAME type (priority 3), the
+   * mixed-null branch (which defers to cross-type priority) does NOT fire.
+   * Instead the comparator normalises null → "00:00" and compares time strings:
+   * "00:00" < "09:00" so the null-time activity must sort first.
+   */
+  it("sorts a null-time activity before a timed activity on the same date (same type, time decides)", async () => {
+    enqueueTimeline({
+      activities: [
+        {
+          id: 80,
+          tripId: 1,
+          title: "Morning run",
+          date: "2025-11-01",
+          time: "09:00",
+          description: null,
+          location: "Central Park",
+          imageUrl: null,
+        },
+        {
+          id: 81,
+          tripId: 1,
+          title: "All-day museum visit",
+          date: "2025-11-01",
+          time: null,
+          description: null,
+          location: "MoMA",
+          imageUrl: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const nov1 = body.filter((e: any) => e.date === "2025-11-01");
+    expect(nov1).toHaveLength(2);
+
+    // Both are activities — cross-type priority cannot decide. Time must:
+    // null ("00:00") < "09:00" → null-time activity sorts first.
+    expect(nov1[0].type).toBe("activity");
+    expect(nov1[0].title).toBe("All-day museum visit");
+    expect(nov1[0].time).toBeNull();
+    expect(nov1[1].type).toBe("activity");
+    expect(nov1[1].title).toBe("Morning run");
+    expect(nov1[1].time).toBe("09:00");
+  });
+
+  /**
    * Midnight pickup time edge case:
    *
    * A car rental with pickupDatetime "2025-10-05T00:00" sits alongside an

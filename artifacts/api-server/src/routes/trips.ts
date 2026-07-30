@@ -453,9 +453,13 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
     // When exactly one event lacks a time, type priority decides the order
     // rather than treating null as "00:00".  This prevents a null-time
     // activity from accidentally appearing before a timed flight simply
-    // because "00:00" < "14:30".
+    // because "00:00" < "14:30".  When both events share the same type
+    // priority (e.g. two activities), the priority delta is zero and we
+    // fall through to the normalised time comparison so "00:00" < "09:00"
+    // still puts the null-time event first.
     if ((a.time === null) !== (b.time === null)) {
-      return eventPriority(a) - eventPriority(b);
+      const priorityDiff = eventPriority(a) - eventPriority(b);
+      if (priorityDiff !== 0) return priorityDiff;
     }
     const at = a.time ?? "00:00";
     const bt = b.time ?? "00:00";
