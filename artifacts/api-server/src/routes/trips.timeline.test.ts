@@ -652,6 +652,74 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
     expect(june20[1].time).toBe("10:00");
   });
 
+  /**
+   * Three-way tie: flight + car_rental + activity all at 09:00 on 2025-08-15.
+   *
+   * Cross-type priorities: flight (0) → car_rental (1) → activity (3).
+   * The comparator is applied pairwise by Array.prototype.sort, so a three-way
+   * tie exercises transitivity — a bug in the comparator that passes pair-wise
+   * checks can still break under three or more participants.
+   */
+  it("places flight before car_rental before activity when all three share the same explicit date and time", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 11,
+          tripId: 1,
+          airline: "Arc Air",
+          flightNumber: "AR900",
+          departureAirport: "LHR",
+          arrivalAirport: "JFK",
+          departureDatetime: "2025-08-15T09:00",
+          arrivalDatetime:   "2025-08-15T14:00",
+          notes: null,
+          confirmationCode: null,
+        },
+      ],
+      carRentals: [
+        {
+          id: 41,
+          tripId: 1,
+          company: "QuickCar",
+          pickupLocation: "JFK Airport",
+          dropoffLocation: "Manhattan",
+          pickupDatetime: "2025-08-15T09:00",
+          dropoffDatetime: "2025-08-20T09:00",
+          notes: null,
+          confirmationCode: null,
+        },
+      ],
+      activities: [
+        {
+          id: 21,
+          tripId: 1,
+          title: "Sunrise hike",
+          date: "2025-08-15",
+          time: "09:00",
+          description: null,
+          location: "Upstate NY",
+          imageUrl: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const aug15 = body.filter((e: any) => e.date === "2025-08-15");
+    // flight departure + car_rental pickup + activity — all three at 09:00
+    expect(aug15).toHaveLength(3);
+
+    // Cross-type priority must produce: flight (0) → car_rental (1) → activity (3)
+    expect(aug15[0].type).toBe("flight");
+    expect(aug15[0].time).toBe("09:00");
+    expect(aug15[1].type).toBe("car_rental");
+    expect(aug15[1].time).toBe("09:00");
+    expect(aug15[2].type).toBe("activity");
+    expect(aug15[2].time).toBe("09:00");
+  });
+
   it("includes events on other dates alongside the shared-date events", async () => {
     enqueueTimeline({
       accommodations: [
