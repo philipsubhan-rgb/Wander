@@ -602,6 +602,56 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
     expect(sep10[1].time).toBe("18:00");
   });
 
+  /**
+   * Car-rental vs activity tiebreak:
+   *
+   * A car rental pickup and an activity both carry the same explicit time
+   * (10:00) on the same date (2025-06-20). The cross-type priority places
+   * car_rental (1) before activity (3), so the car rental must sort first.
+   */
+  it("places a car rental before an activity when both share the same explicit date and time", async () => {
+    enqueueTimeline({
+      activities: [
+        {
+          id: 20,
+          tripId: 1,
+          title: "Morning city walk",
+          date: "2025-06-20",
+          time: "10:00",
+          description: null,
+          location: "Paris",
+          imageUrl: null,
+        },
+      ],
+      carRentals: [
+        {
+          id: 40,
+          tripId: 1,
+          company: "SpeedRent",
+          pickupLocation: "CDG Airport",
+          dropoffLocation: "Paris Center",
+          pickupDatetime: "2025-06-20T10:00",
+          dropoffDatetime: "2025-06-25T10:00",
+          notes: null,
+          confirmationCode: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const june20 = body.filter((e: any) => e.date === "2025-06-20");
+    expect(june20).toHaveLength(2);
+
+    // Both events share time "10:00" — cross-type priority must break the tie.
+    expect(june20[0].type).toBe("car_rental");
+    expect(june20[0].time).toBe("10:00");
+    expect(june20[1].type).toBe("activity");
+    expect(june20[1].time).toBe("10:00");
+  });
+
   it("includes events on other dates alongside the shared-date events", async () => {
     enqueueTimeline({
       accommodations: [
