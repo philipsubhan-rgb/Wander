@@ -23,8 +23,8 @@ function StayCard({ tripId, stay, colors, onDelete }: {
   tripId: number; stay: any; colors: ReturnType<typeof useColors>; onDelete: (id: number) => void;
 }) {
   const accent = STAY_COLORS[(stay.type as StayType) ?? 'other'] ?? '#94A3B8';
-  const checkIn = stay.checkIn ? new Date(stay.checkIn).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '–';
-  const checkOut = stay.checkOut ? new Date(stay.checkOut).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '–';
+  const checkIn = stay.checkIn ? new Date(stay.checkIn.substring(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '–';
+  const checkOut = stay.checkOut ? new Date(stay.checkOut.substring(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '–';
 
   function confirmDelete() {
     Alert.alert('Delete Stay', `Remove "${stay.name}"?`, [
@@ -140,8 +140,8 @@ function AddStayModal({ tripId, visible, onClose, colors }: {
         address: address.trim(),
         phone: phone.trim() || undefined,
         type,
-        checkIn: new Date(`${checkInDate}T${checkInTime}`).toISOString(),
-        checkOut: new Date(`${checkOutDate}T${checkOutTime}`).toISOString(),
+        checkIn: `${checkInDate}T${checkInTime}:00.000Z`,
+        checkOut: `${checkOutDate}T${checkOutTime}:00.000Z`,
         confirmationCode: confirmationCode.trim() || undefined,
       },
     });

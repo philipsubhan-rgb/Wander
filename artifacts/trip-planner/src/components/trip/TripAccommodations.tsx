@@ -347,8 +347,8 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
       lat: values.lat,
       lon: values.lon,
       imageUrl: values.imageUrl || undefined,
-      checkIn:  new Date(`${values.checkInDate}T${values.checkInTime}`).toISOString(),
-      checkOut: new Date(`${values.checkOutDate}T${values.checkOutTime}`).toISOString(),
+      checkIn:  `${values.checkInDate}T${values.checkInTime}:00.000Z`,
+      checkOut: `${values.checkOutDate}T${values.checkOutTime}:00.000Z`,
     };
 
     if (stay) {
