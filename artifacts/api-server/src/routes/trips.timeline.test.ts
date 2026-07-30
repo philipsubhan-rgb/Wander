@@ -757,6 +757,73 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
   });
 
   /**
+   * Three-way tie: car_rental + activity + reservation all at 11:00 on 2025-10-20.
+   *
+   * Cross-type priorities: car_rental (1) → activity (3) → reservation (4).
+   * The comparator is applied pairwise by Array.prototype.sort, so a three-way
+   * tie exercises transitivity — a bug in the comparator that passes pair-wise
+   * checks can still break under three or more participants.
+   */
+  it("places car_rental before activity before reservation when all three share the same explicit date and time", async () => {
+    enqueueTimeline({
+      carRentals: [
+        {
+          id: 70,
+          tripId: 1,
+          company: "Hertz",
+          pickupLocation: "Barcelona Airport",
+          dropoffLocation: "Barcelona Center",
+          pickupDatetime: "2025-10-20T11:00",
+          dropoffDatetime: "2025-10-25T11:00",
+          notes: null,
+          confirmationCode: null,
+        },
+      ],
+      activities: [
+        {
+          id: 71,
+          tripId: 1,
+          title: "City walking tour",
+          date: "2025-10-20",
+          time: "11:00",
+          description: null,
+          location: "Barcelona Old Town",
+          imageUrl: null,
+        },
+      ],
+      reservations: [
+        {
+          id: 72,
+          tripId: 1,
+          type: "restaurant",
+          name: "El Xampanyet",
+          date: "2025-10-20",
+          time: "11:00",
+          confirmationCode: null,
+          notes: null,
+          address: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const oct20 = body.filter((e: any) => e.date === "2025-10-20");
+    // car_rental pickup + activity + reservation — all three at 11:00
+    expect(oct20).toHaveLength(3);
+
+    // Cross-type priority must produce: car_rental (1) → activity (3) → reservation (4)
+    expect(oct20[0].type).toBe("car_rental");
+    expect(oct20[0].time).toBe("11:00");
+    expect(oct20[1].type).toBe("activity");
+    expect(oct20[1].time).toBe("11:00");
+    expect(oct20[2].type).toBe("reservation");
+    expect(oct20[2].time).toBe("11:00");
+  });
+
+  /**
    * Three-way tie: flight + car_rental + activity all at 09:00 on 2025-08-15.
    *
    * Cross-type priorities: flight (0) → car_rental (1) → activity (3).
