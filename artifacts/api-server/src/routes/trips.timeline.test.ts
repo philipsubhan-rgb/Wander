@@ -1664,3 +1664,99 @@ describe("GET /trips/:tripId/timeline — day-boundary flights (23:59 vs 00:00 n
     }
   });
 });
+
+// ── Five-way same-datetime tie-break ──────────────────────────────────────────
+
+describe("GET /trips/:tripId/timeline — five-way same-datetime priority order", () => {
+  /**
+   * All five user-facing event types (flight, car_rental, accommodation,
+   * activity, reservation) land on the same calendar date.  Accommodation
+   * events always carry time: null which the comparator treats as "00:00",
+   * so placing the remaining four event types at 00:00 creates a true
+   * five-way collision.
+   *
+   * Expected order (by eventPriority): flight(0) → car_rental(1) →
+   *   accommodation(2) → activity(3) → reservation(4).
+   */
+  it("orders all five event types correctly when they share the same date and time", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 10, tripId: 1,
+          airline: "Atlas Air", flightNumber: "AT100",
+          departureAirport: "JFK", arrivalAirport: "CDG",
+          departureDatetime: "2025-12-01T00:00:00",
+          arrivalDatetime:   "2025-12-01T12:00:00",
+          notes: null, confirmationCode: null,
+        },
+      ],
+      accommodations: [
+        {
+          id: 20, tripId: 1,
+          name: "Grand Hotel",
+          checkIn:  "2025-12-01",
+          checkOut: "2025-12-05",
+          address: "1 Rue de Rivoli", notes: null,
+          imageUrl: null, confirmationCode: null,
+        },
+      ],
+      activities: [
+        {
+          id: 30, tripId: 1,
+          title: "Museum Tour",
+          date: "2025-12-01", time: "00:00",
+          description: null, location: "Louvre", imageUrl: null,
+        },
+      ],
+      carRentals: [
+        {
+          id: 40, tripId: 1,
+          company: "SpeedCar", pickupLocation: "CDG Terminal 2",
+          pickupDatetime:  "2025-12-01T00:00:00",
+          dropoffDatetime: "2025-12-05T00:00:00",
+          confirmationCode: null,
+        },
+      ],
+      reservations: [
+        {
+          id: 50, tripId: 1,
+          title: "Welcome Dinner",
+          date: "2025-12-01", time: "00:00",
+          notes: null, address: null, venue: "Café de Flore",
+          imageUrl: null, confirmationCode: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+    expect(status).toBe(200);
+
+    // Collect all events on 2025-12-01 at time 00:00 (accommodations carry
+    // time: null which the comparator normalises to "00:00").
+    const dec01 = body.filter(
+      (e: any) =>
+        e.date === "2025-12-01" &&
+        (e.time === "00:00" || e.time === null),
+    );
+
+    // Exactly five events must be present (the check-out for Grand Hotel falls
+    // on 2025-12-05, so only the check-in lands on 2025-12-01).
+    expect(dec01).toHaveLength(5);
+
+    // Priority order: flight(0) → car_rental(1) → accommodation(2) → activity(3) → reservation(4).
+    expect(dec01[0].type).toBe("flight");
+    expect(dec01[0].title).toBe("Atlas Air AT100: JFK → CDG");
+
+    expect(dec01[1].type).toBe("car_rental");
+    expect(dec01[1].title).toBe("SpeedCar pick-up");
+
+    expect(dec01[2].type).toBe("accommodation");
+    expect(dec01[2].title).toBe("Check-in: Grand Hotel");
+
+    expect(dec01[3].type).toBe("activity");
+    expect(dec01[3].title).toBe("Museum Tour");
+
+    expect(dec01[4].type).toBe("reservation");
+    expect(dec01[4].title).toBe("Welcome Dinner");
+  });
+});
