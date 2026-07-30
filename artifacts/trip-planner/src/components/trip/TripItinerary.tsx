@@ -7,7 +7,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   ChevronDown, ChevronUp, Plane, Home, Compass, Car, Calendar,
-  MapPin, Star, Pencil, Plus, CheckCircle2, BookMarked, Lightbulb,
+  MapPin, Star, Pencil, Plus, CheckCircle2, BookMarked, Lightbulb, UtensilsCrossed,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,7 +34,7 @@ interface Props {
   tripCoverImage?: string | null;
 }
 
-type EventType = 'flight' | 'accommodation' | 'activity' | 'car_rental' | 'itinerary';
+type EventType = 'flight' | 'accommodation' | 'activity' | 'car_rental' | 'itinerary' | 'reservation';
 
 interface TimelineEvent {
   id: number;
@@ -52,11 +52,12 @@ interface TimelineEvent {
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const TYPE_CFG: Record<EventType, { icon: React.ElementType; bg: string; label: string }> = {
-  flight:        { icon: Plane,    bg: 'bg-blue-500',    label: 'Flight'     },
-  accommodation: { icon: Home,     bg: 'bg-amber-500',   label: 'Stay'       },
-  activity:      { icon: Compass,  bg: 'bg-emerald-500', label: 'Activity'   },
-  car_rental:    { icon: Car,      bg: 'bg-violet-500',  label: 'Car Rental' },
-  itinerary:     { icon: Calendar, bg: 'bg-rose-400',    label: 'Plan'       },
+  flight:        { icon: Plane,             bg: 'bg-blue-500',    label: 'Flight'      },
+  accommodation: { icon: Home,              bg: 'bg-amber-500',   label: 'Stay'        },
+  activity:      { icon: Compass,           bg: 'bg-emerald-500', label: 'Activity'    },
+  car_rental:    { icon: Car,               bg: 'bg-violet-500',  label: 'Car Rental'  },
+  itinerary:     { icon: Calendar,          bg: 'bg-rose-400',    label: 'Plan'        },
+  reservation:   { icon: UtensilsCrossed,   bg: 'bg-orange-500',  label: 'Reservation' },
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

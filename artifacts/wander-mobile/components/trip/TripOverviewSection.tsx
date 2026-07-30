@@ -49,6 +49,7 @@ const TYPE_ICON: Record<string, keyof typeof Feather.glyphMap> = {
   activity: 'compass',
   itinerary: 'calendar',
   car_rental: 'truck',
+  reservation: 'bookmark',
 };
 
 const TYPE_COLOR: Record<string, string> = {
@@ -57,6 +58,7 @@ const TYPE_COLOR: Record<string, string> = {
   activity: '#10B981',
   itinerary: '#8B5CF6',
   car_rental: '#F59E0B',
+  reservation: '#F97316',
 };
 
 function TimelineEvent({ event, colors }: { event: any; colors: ReturnType<typeof useColors> }) {

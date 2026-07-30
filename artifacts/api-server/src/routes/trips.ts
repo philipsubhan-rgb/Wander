@@ -3,7 +3,7 @@ import { Readable } from "stream";
 import { eq, and, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { db, tripsTable, tripParticipantsTable, usersTable, flightsTable, accommodationsTable, activitiesTable, itineraryDaysTable, packingItemsTable, carRentalsTable, tripExpensesTable } from "@workspace/db";
+import { db, tripsTable, tripParticipantsTable, usersTable, flightsTable, accommodationsTable, activitiesTable, itineraryDaysTable, packingItemsTable, carRentalsTable, tripExpensesTable, reservationsTable } from "@workspace/db";
 import {
   CreateTripBody,
   UpdateTripBody,
@@ -303,12 +303,13 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
   }
   const { tripId } = params.data;
 
-  const [flights, accommodations, activities, itinerary, carRentals] = await Promise.all([
+  const [flights, accommodations, activities, itinerary, carRentals, reservations] = await Promise.all([
     db.select().from(flightsTable).where(eq(flightsTable.tripId, tripId)),
     db.select().from(accommodationsTable).where(eq(accommodationsTable.tripId, tripId)),
     db.select().from(activitiesTable).where(eq(activitiesTable.tripId, tripId)),
     db.select().from(itineraryDaysTable).where(eq(itineraryDaysTable.tripId, tripId)),
     db.select().from(carRentalsTable).where(eq(carRentalsTable.tripId, tripId)),
+    db.select().from(reservationsTable).where(eq(reservationsTable.tripId, tripId)),
   ]);
 
   const events = [
@@ -371,6 +372,18 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
       imageUrl: null as string | null,
       carrierCode: null as string | null,
       confirmationCode: null as string | null,
+    })),
+    ...reservations.map(r => ({
+      id: r.id,
+      type: "reservation" as const,
+      date: r.date,
+      title: r.title,
+      description: r.notes ?? null,
+      location: r.address ?? r.venue ?? null,
+      time: r.time ?? null,
+      imageUrl: r.imageUrl ?? null,
+      carrierCode: null as string | null,
+      confirmationCode: r.confirmationCode ?? null,
     })),
   ];
 
