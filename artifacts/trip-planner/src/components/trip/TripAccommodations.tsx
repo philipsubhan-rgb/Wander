@@ -319,10 +319,11 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
       const co = splitDateTime(stay.checkOut, DEFAULT_CHECKOUT_TIME);
       return {
         ...stay,
-        phone: stay.phone ?? '',
-        lat: stay.lat ?? undefined,
-        lon: stay.lon ?? undefined,
-        imageUrl: stay.imageUrl ?? undefined,
+        phone:            stay.phone            ?? '',
+        lat:              stay.lat              ?? undefined,
+        lon:              stay.lon              ?? undefined,
+        imageUrl:         stay.imageUrl         ?? undefined,
+        confirmationCode: stay.confirmationCode ?? '',
         checkInDate:  ci.date,
         checkInTime:  ci.time,
         checkOutDate: co.date,

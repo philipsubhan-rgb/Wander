@@ -90,7 +90,7 @@ export function MiniMap({ lat, lon, label }: MiniMapProps) {
 
   return (
     <>
-      <div className="relative">
+      <div className="relative isolate">
         <LeafletMap
           lat={lat}
           lon={lon}
