@@ -23,6 +23,7 @@ import {
   getListItineraryDaysQueryKey,
 } from '@workspace/api-client-react';
 import { fetchWikiImage } from '@/lib/wiki-image';
+import { getTransitionIndices } from '@/lib/itinerary-transitions';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -334,24 +335,15 @@ function DayCard({
                 {visibleEvents.length > 0 ? (
                   <div>
                     {(() => {
-                      // Detect a same-day hotel transition: a "Check-out:" accommodation
-                      // immediately preceding a "Check-in:" accommodation. Insert the
-                      // divider only between that exact pair.
-                      const transitionAfterIdx = (() => {
-                        for (let i = 0; i < visibleEvents.length - 1; i++) {
-                          const curr = visibleEvents[i];
-                          const next = visibleEvents[i + 1];
-                          if (
-                            curr.type === 'accommodation' &&
-                            next.type === 'accommodation' &&
-                            curr.title.startsWith('Check-out:') &&
-                            next.title.startsWith('Check-in:')
-                          ) {
-                            return i;
-                          }
-                        }
-                        return -1;
-                      })();
+                      // Detect same-day hotel transitions: every consecutive
+                      // "Check-out:" → "Check-in:" accommodation pair receives
+                      // its own TransitionDivider.  Using a Set means three or
+                      // more accommodations on the same day (e.g. a very short
+                      // mid-day stop) each get a divider rather than only the
+                      // first pair being marked.  See
+                      // src/lib/itinerary-transitions.ts for the pure logic and
+                      // itinerary-transitions.test.ts for the boundary tests.
+                      const transitionAfterIndices = getTransitionIndices(visibleEvents);
 
                       return visibleEvents.map((event, i) => (
                         <div key={`row-wrapper-${event.type}-${event.id}-${i}`}>
@@ -359,7 +351,7 @@ function DayCard({
                             event={event}
                             isLast={i === visibleEvents.length - 1}
                           />
-                          {transitionAfterIdx === i && (
+                          {transitionAfterIndices.has(i) && (
                             <TransitionDivider />
                           )}
                         </div>

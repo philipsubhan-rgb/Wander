@@ -419,6 +419,136 @@ describe("GET /trips/:tripId/timeline — same-day check-out / check-in", () => 
     expect(aug1[5].type).toBe("reservation");
   });
 
+  /**
+   * Three-accommodation boundary condition:
+   *
+   * Traveler checks OUT of Hotel A, checks IN to Hotel B for a short stay,
+   * checks OUT of Hotel B, then checks IN to Hotel C — all on 2025-07-15.
+   *
+   * The sort must produce the correct interleaved order so each check-out is
+   * immediately followed by the matching check-in, enabling the TripItinerary
+   * component to insert a TransitionDivider between every consecutive pair:
+   *
+   *   Check-out: Hotel Alpha   ← divider ↓
+   *   Check-in:  Hotel Beta
+   *   Check-out: Hotel Beta    ← divider ↓
+   *   Check-in:  Hotel Gamma
+   */
+  /**
+   * Uses deliberately non-chronological IDs (Alpha=5, Beta=2, Gamma=8) to
+   * confirm the sort is driven by stay dates, not database insert order or
+   * primary-key values.
+   */
+  it("correctly interleaves three same-day accommodation handoffs regardless of ID order (check-out A → check-in B → check-out B → check-in C)", async () => {
+    enqueueTimeline({
+      accommodations: [
+        // IDs intentionally non-chronological to prove date-based sort
+        {
+          id: 5,
+          tripId: 1,
+          name: "Hotel Alpha",
+          checkIn: "2025-07-10",
+          checkOut: "2025-07-15",
+          address: "1 Alpha St",
+          notes: null,
+          imageUrl: null,
+          confirmationCode: null,
+        },
+        {
+          id: 2,
+          tripId: 1,
+          name: "Hotel Beta",
+          checkIn: "2025-07-15",
+          checkOut: "2025-07-15",
+          address: "2 Beta Ave",
+          notes: null,
+          imageUrl: null,
+          confirmationCode: null,
+        },
+        {
+          id: 8,
+          tripId: 1,
+          name: "Hotel Gamma",
+          checkIn: "2025-07-15",
+          checkOut: "2025-07-20",
+          address: "3 Gamma Rd",
+          notes: null,
+          imageUrl: null,
+          confirmationCode: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const july15 = body.filter((e: any) => e.date === "2025-07-15");
+    expect(july15).toHaveLength(4);
+
+    // Must be interleaved so each check-out is immediately followed by the
+    // next check-in, giving the UI consecutive pairs it can mark as transitions.
+    expect(july15[0].title).toBe("Check-out: Hotel Alpha");
+    expect(july15[1].title).toBe("Check-in: Hotel Beta");
+    expect(july15[2].title).toBe("Check-out: Hotel Beta");
+    expect(july15[3].title).toBe("Check-in: Hotel Gamma");
+
+    // Internal sort helpers must not leak into the API response.
+    expect(july15[0]).not.toHaveProperty("_stayStart");
+    expect(july15[0]).not.toHaveProperty("_stayEnd");
+    expect(july15[0]).not.toHaveProperty("_isCheckout");
+  });
+
+  it("interleaves correctly when hotels are added in reverse DB row order (non-chronological DB rows)", async () => {
+    // Same three stays as above but delivered in reverse row order from the DB.
+    enqueueTimeline({
+      accommodations: [
+        {
+          id: 8,
+          tripId: 1,
+          name: "Hotel Gamma",
+          checkIn: "2025-07-15",
+          checkOut: "2025-07-20",
+          address: "3 Gamma Rd",
+          notes: null,
+          imageUrl: null,
+          confirmationCode: null,
+        },
+        {
+          id: 2,
+          tripId: 1,
+          name: "Hotel Beta",
+          checkIn: "2025-07-15",
+          checkOut: "2025-07-15",
+          address: "2 Beta Ave",
+          notes: null,
+          imageUrl: null,
+          confirmationCode: null,
+        },
+        {
+          id: 5,
+          tripId: 1,
+          name: "Hotel Alpha",
+          checkIn: "2025-07-10",
+          checkOut: "2025-07-15",
+          address: "1 Alpha St",
+          notes: null,
+          imageUrl: null,
+          confirmationCode: null,
+        },
+      ],
+    });
+
+    const { body } = await get("/trips/1/timeline");
+
+    const july15 = body.filter((e: any) => e.date === "2025-07-15");
+    expect(july15).toHaveLength(4);
+    expect(july15[0].title).toBe("Check-out: Hotel Alpha");
+    expect(july15[1].title).toBe("Check-in: Hotel Beta");
+    expect(july15[2].title).toBe("Check-out: Hotel Beta");
+    expect(july15[3].title).toBe("Check-in: Hotel Gamma");
+  });
+
   it("includes events on other dates alongside the shared-date events", async () => {
     enqueueTimeline({
       accommodations: [

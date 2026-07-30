@@ -337,6 +337,10 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
         imageUrl: a.imageUrl ?? null,
         carrierCode: null as string | null,
         confirmationCode: a.confirmationCode ?? null,
+        // Sorting helpers — stripped before the response is sent (see below).
+        _stayStart: a.checkIn.substring(0, 10),
+        _stayEnd:   a.checkOut.substring(0, 10),
+        _isCheckout: 0 as 0 | 1,
       },
       {
         id: `${a.id}-checkout`,
@@ -349,6 +353,10 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
         imageUrl: a.imageUrl ?? null,
         carrierCode: null as string | null,
         confirmationCode: a.confirmationCode ?? null,
+        // Sorting helpers — stripped before the response is sent (see below).
+        _stayStart: a.checkIn.substring(0, 10),
+        _stayEnd:   a.checkOut.substring(0, 10),
+        _isCheckout: 1 as 0 | 1,
       },
     ])),
     ...activities.map(a => ({
@@ -401,23 +409,43 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
     })),
   ];
 
-  // Assign a priority so same-date/time events of any type appear in a
+  // Assign a cross-type priority so same-date/time events appear in a
   // deterministic, logical order that mirrors the traveler's day:
-  //   flight → car_rental → accommodation (check-out before check-in)
-  //   → activity → reservation → itinerary → everything else
-  const eventPriority = (e: { type: string; title: string }) => {
+  //   flight → car_rental → accommodation → activity → reservation → itinerary
+  // Accommodation events use a separate per-stay sort (see below).
+  const eventPriority = (e: { type: string }) => {
     switch (e.type) {
       case "flight":        return 0;
       case "car_rental":    return 1;
-      case "accommodation":
-        if (e.title.startsWith("Check-out:")) return 2;
-        if (e.title.startsWith("Check-in:"))  return 3;
-        return 4;
-      case "activity":      return 5;
-      case "reservation":   return 6;
-      case "itinerary":     return 7;
-      default:              return 8;
+      case "accommodation": return 2;
+      case "activity":      return 3;
+      case "reservation":   return 4;
+      case "itinerary":     return 5;
+      default:              return 6;
     }
+  };
+
+  // For two accommodation events sharing the same date and time, sort by
+  // actual stay chronology so each stay's check-out is immediately followed
+  // by the next stay's check-in.  Sort keys (embedded above as _stayStart,
+  // _stayEnd, _isCheckout):
+  //
+  //   primary   → _stayStart (checkIn date of the stay)
+  //   secondary → _stayEnd   (checkOut date of the stay)
+  //   tertiary  → _isCheckout: 0 = check-in, 1 = check-out
+  //
+  // Example — three same-day stays A(Jul10→Jul15), B(Jul15↔Jul15), C(Jul15→Jul20):
+  //   check-out A  →  (Jul10, Jul15, 1) — earliest stayStart
+  //   check-in  B  →  (Jul15, Jul15, 0) — same stayStart, earlier stayEnd, is check-in
+  //   check-out B  →  (Jul15, Jul15, 1) — same stayStart, earlier stayEnd, is check-out
+  //   check-in  C  →  (Jul15, Jul20, 0) — same stayStart, later stayEnd
+  //
+  // This is ID-independent: inserting stays out of DB-creation order or with
+  // non-chronological IDs produces the same result.
+  type AccomEvent = (typeof events)[number] & {
+    _stayStart:  string;
+    _stayEnd:    string;
+    _isCheckout: 0 | 1;
   };
 
   events.sort((a, b) => {
@@ -425,10 +453,24 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
     const at = a.time ?? "00:00";
     const bt = b.time ?? "00:00";
     if (at !== bt) return at.localeCompare(bt);
+    // Within accommodations, use stay-date keys to preserve handoff order.
+    if (a.type === "accommodation" && b.type === "accommodation") {
+      const aa = a as AccomEvent;
+      const bb = b as AccomEvent;
+      if (aa._stayStart !== bb._stayStart) return aa._stayStart.localeCompare(bb._stayStart);
+      if (aa._stayEnd   !== bb._stayEnd)   return aa._stayEnd.localeCompare(bb._stayEnd);
+      return aa._isCheckout - bb._isCheckout;
+    }
     return eventPriority(a) - eventPriority(b);
   });
 
-  res.json(events);
+  // Strip the internal sorting helpers before sending the response.
+  const response = events.map(e => {
+    const { _stayStart, _stayEnd, _isCheckout, ...rest } = e as AccomEvent;
+    return rest;
+  });
+
+  res.json(response);
 });
 
 // ──────────────────────────────────────────────────────────────────
