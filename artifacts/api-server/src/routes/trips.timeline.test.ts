@@ -1299,6 +1299,161 @@ describe("PATCH reservation date → GET timeline — sort preserved after write
   });
 });
 
+// ── PATCH car rental pickupDatetime → three-way tie ──────────────────────────
+//
+// Verify that editing a car rental's pickupDatetime so it collides with an
+// existing activity and reservation produces the correct cross-type priority
+// order: car_rental (1) → activity (3) → reservation (4).
+//
+// A dedicated server (server3) mounts both the trips router (GET …/timeline)
+// and the carRentals router (PATCH …/car-rentals/:carRentalId).  The session
+// role is "super_admin" so requireTripParticipant short-circuits without
+// making an extra DB select call.
+
+describe("PATCH car rental pickupDatetime → GET timeline — priority order preserved after three-way tie", () => {
+  let server3: http.Server;
+  let base3: string;
+
+  beforeAll(async () => {
+    const { default: tripsRouter }      = await import("./trips.js");
+    const { default: carRentalsRouter } = await import("./carRentals.js");
+
+    const app3 = express();
+    app3.use(express.json());
+
+    // super_admin bypasses the participant-check DB query inside requireTripParticipant.
+    app3.use((req: any, _res, next) => {
+      req.session = { userId: 1, role: "super_admin" };
+      next();
+    });
+
+    app3.use("/api", tripsRouter);
+    app3.use("/api", carRentalsRouter);
+
+    await new Promise<void>(resolve => {
+      server3 = http.createServer(app3).listen(0, resolve);
+    });
+    const addr = server3.address() as { port: number };
+    base3 = `http://localhost:${addr.port}/api`;
+  });
+
+  afterAll(() => server3.close());
+
+  async function patch3(path: string, body: Record<string, unknown>) {
+    const res = await fetch(`${base3}${path}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return { status: res.status, body: await res.json() as any };
+  }
+
+  async function get3(path: string) {
+    const res = await fetch(`${base3}${path}`);
+    return { status: res.status, body: await res.json() as any[] };
+  }
+
+  /**
+   * Round-trip scenario:
+   *
+   * 1. An activity and a reservation already exist on 2025-10-15 at 09:00.
+   * 2. A car rental originally has pickupDatetime "2025-10-20T09:00:00"
+   *    (a different date — no collision yet).
+   * 3. PATCH changes the car rental's pickupDatetime to "2025-10-15T09:00:00".
+   * 4. GET /timeline now sees all three events on 2025-10-15 at 09:00.
+   *    Cross-type priority must produce: car_rental (1) → activity (3) → reservation (4).
+   */
+  it("car_rental precedes activity and reservation after pickupDatetime is patched to match their date and time", async () => {
+    // ── Step 1: PATCH the car rental's pickupDatetime ─────────────────────
+    //
+    // With super_admin role, requireTripParticipant makes NO db.select() call.
+    // The only DB call is db.update(carRentalsTable).set(...).where(...).returning().
+    // Enqueue the single array that the route's .returning() will dequeue.
+    const updatedCarRentalRow = {
+      id: 40, tripId: 1,
+      company: "FastWheels", pickupLocation: "Airport Terminal 1",
+      dropoffLocation: null,
+      pickupDatetime:  "2025-10-15T09:00:00",   // ← updated (was 2025-10-20T09:00:00)
+      dropoffDatetime: "2025-10-18T09:00:00",
+      carType: "economy",
+      confirmationCode: null, driverName: null, phone: null,
+      lat: null, lon: null, imageUrl: null, notes: null,
+    };
+    enqueue([updatedCarRentalRow]); // consumed by db.update().returning()
+
+    const patchRes = await patch3("/trips/1/car-rentals/40", {
+      pickupDatetime: "2025-10-15T09:00:00",
+    });
+    expect(patchRes.status).toBe(200);
+
+    // The PATCH response must carry the edited pickupDatetime so callers can
+    // observe the mutation.  Assert it before proceeding so a regression where
+    // the update silently ignores the new datetime fails here, not in the
+    // ordering assertions below.
+    expect(patchRes.body.pickupDatetime).toBe("2025-10-15T09:00:00");
+
+    // ── Step 2: GET the timeline ──────────────────────────────────────────
+    //
+    // Derive the car rental's pickupDatetime from the PATCH response rather
+    // than re-hardcoding "2025-10-15T09:00:00".  This makes the GET seed
+    // stateful with respect to what the PATCH actually returned, so a bug
+    // that returns the wrong datetime would also break the ordering assertions
+    // (the extracted date/time would no longer match the activity/reservation).
+    //
+    // Enqueue the six arrays consumed by the Promise.all in the timeline handler
+    // (flights, accommodations, activities, itinerary, carRentals, reservations).
+    const updatedPickupDatetime: string = patchRes.body.pickupDatetime;
+
+    enqueueTimeline({
+      activities: [
+        {
+          id: 20, tripId: 1,
+          title: "City Walking Tour",
+          date: "2025-10-15", time: "09:00",
+          description: null, location: "Old Town", imageUrl: null,
+        },
+      ],
+      carRentals: [
+        {
+          id: 40, tripId: 1,
+          company: "FastWheels", pickupLocation: "Airport Terminal 1",
+          pickupDatetime:  updatedPickupDatetime,   // ← derived from PATCH response
+          dropoffDatetime: "2025-10-18T09:00:00",
+          confirmationCode: null,
+        },
+      ],
+      reservations: [
+        {
+          id: 50, tripId: 1,
+          title: "Rooftop Brunch",
+          date: "2025-10-15", time: "09:00",
+          notes: null, address: null, venue: "Sky Lounge",
+          imageUrl: null, confirmationCode: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get3("/trips/1/timeline");
+    expect(status).toBe(200);
+
+    const oct15at09 = body.filter(
+      (e: any) => e.date === "2025-10-15" && e.time === "09:00",
+    );
+    expect(oct15at09).toHaveLength(3);
+
+    // Cross-type priority: car_rental (1) < activity (3) < reservation (4).
+    expect(oct15at09[0].type).toBe("car_rental");
+    expect(oct15at09[0].title).toBe("FastWheels pick-up");
+
+    expect(oct15at09[1].type).toBe("activity");
+    expect(oct15at09[1].title).toBe("City Walking Tour");
+
+    expect(oct15at09[2].type).toBe("reservation");
+    expect(oct15at09[2].title).toBe("Rooftop Brunch");
+  });
+});
+
 // ── Day-boundary flight tests ─────────────────────────────────────────────────
 
 describe("GET /trips/:tripId/timeline — day-boundary flights (23:59 vs 00:00 next day)", () => {
