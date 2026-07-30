@@ -4,6 +4,7 @@ import pinoHttp from "pino-http";
 import session from "express-session";
 import ConnectPgSimple from "connect-pg-simple";
 import router from "./routes";
+import { mcpRouter } from "./mcp";
 import { logger } from "./lib/logger";
 import { pool } from "@workspace/db";
 
@@ -77,5 +78,9 @@ app.use(
 );
 
 app.use("/api", router);
+
+// MCP read-only server — mounted outside /api so MCP clients can reach it
+// at a stable path without the REST API prefix.
+app.use(mcpRouter);
 
 export default app;
