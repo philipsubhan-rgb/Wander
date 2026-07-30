@@ -401,11 +401,20 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
     })),
   ];
 
+  // Assign a sub-type priority so same-date/time events appear in a logical
+  // order: check-out first (traveler leaves), then check-in (traveler arrives).
+  const accomPriority = (title: string) => {
+    if (title.startsWith("Check-out:")) return 0;
+    if (title.startsWith("Check-in:"))  return 1;
+    return 2;
+  };
+
   events.sort((a, b) => {
     if (a.date !== b.date) return a.date.localeCompare(b.date);
     const at = a.time ?? "00:00";
     const bt = b.time ?? "00:00";
-    return at.localeCompare(bt);
+    if (at !== bt) return at.localeCompare(bt);
+    return accomPriority(a.title) - accomPriority(b.title);
   });
 
   res.json(events);
