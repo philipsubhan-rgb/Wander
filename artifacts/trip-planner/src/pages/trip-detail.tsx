@@ -125,7 +125,11 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
     <div className="min-h-screen pb-20 bg-background">
       <div className="relative h-[40vh] min-h-[300px] w-full bg-muted">
         {trip.coverImage ? (
-          <img src={trip.coverImage} alt={trip.title} className="w-full h-full object-cover" />
+          <img
+            src={trip.coverImage.startsWith('/objects/') ? `/api/trips/${tripId}/cover` : trip.coverImage}
+            alt={trip.title}
+            className="w-full h-full object-cover"
+          />
         ) : (
           <div className="w-full h-full" style={{ background: getGradientForDestination(trip.destination) }} />
         )}

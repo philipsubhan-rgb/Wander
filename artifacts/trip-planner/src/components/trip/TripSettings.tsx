@@ -1,6 +1,6 @@
 import { 
   useUpdateTrip, useDeleteTrip, useListTripParticipants, useAddTripParticipant, useRemoveTripParticipant,
-  useLookupUserByEmail,
+  useLookupUserByEmail, requestUploadUrl,
   getGetTripQueryKey, getListTripParticipantsQueryKey, getListExpensesQueryKey, getGetExpenseBalanceQueryKey,
 } from '@workspace/api-client-react';
 import { useState, useEffect, useRef } from 'react';
@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { toast } from 'sonner';
-import { Users, Trash2, Shield, TriangleAlert, Search, UserCheck, AlertCircle, Crown, Copy, Check, KeyRound } from 'lucide-react';
+import { Users, Trash2, Shield, TriangleAlert, Search, UserCheck, AlertCircle, Crown, Copy, Check, KeyRound, Camera, RefreshCw, ImageOff } from 'lucide-react';
 
 const tripSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -23,7 +23,6 @@ const tripSchema = z.object({
   startDate: z.string().min(1, 'Start date is required'),
   endDate: z.string().min(1, 'End date is required'),
   status: z.enum(['planning', 'confirmed', 'active', 'completed']),
-  coverImage: z.string().optional(),
 });
 
 // ── Email-based participant lookup ────────────────────────────────────────────
@@ -350,7 +349,6 @@ export function TripSettings({ trip }: { trip: any }) {
     startDate: (t.startDate ?? '').slice(0, 10),
     endDate: (t.endDate ?? '').slice(0, 10),
     status: t.status as z.infer<typeof tripSchema>['status'],
-    coverImage: t.coverImage ?? '',
   });
 
   const form = useForm<z.infer<typeof tripSchema>>({
@@ -360,11 +358,10 @@ export function TripSettings({ trip }: { trip: any }) {
 
   useEffect(() => {
     form.reset(tripToFormValues(trip));
-  }, [trip.id, trip.startDate, trip.endDate, trip.title, trip.destination, trip.status, trip.coverImage]);
+  }, [trip.id, trip.startDate, trip.endDate, trip.title, trip.destination, trip.status]);
 
   const onSubmit = (values: z.infer<typeof tripSchema>) => {
-    const payload = { ...values, coverImage: values.coverImage || undefined };
-    updateTrip.mutate({ tripId: trip.id, data: payload }, {
+    updateTrip.mutate({ tripId: trip.id, data: values }, {
       onSuccess: (updated) => {
         toast.success('Trip settings saved');
         queryClient.invalidateQueries({ queryKey: getGetTripQueryKey(trip.id) });
@@ -374,13 +371,70 @@ export function TripSettings({ trip }: { trip: any }) {
           startDate: (updated.startDate ?? '').slice(0, 10),
           endDate: (updated.endDate ?? '').slice(0, 10),
           status: updated.status as z.infer<typeof tripSchema>['status'],
-          coverImage: updated.coverImage ?? '',
         });
       },
       onError: (err: any) => {
         toast.error(err?.data?.error ?? err?.message ?? 'Failed to save trip settings');
       },
     });
+  };
+
+  // ── Cover image management ─────────────────────────────────────────────────
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const [refreshingCover, setRefreshingCover] = useState(false);
+
+  const coverSrc = trip.coverImage
+    ? (trip.coverImage.startsWith('/objects/')
+        ? `/api/trips/${trip.id}/cover`
+        : trip.coverImage)
+    : null;
+
+  const handleCoverFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!fileInputRef.current) return;
+    fileInputRef.current.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { toast.error('Please select an image file'); return; }
+    if (file.size > 10 * 1024 * 1024) { toast.error('Image must be under 10 MB'); return; }
+
+    setUploadingCover(true);
+    try {
+      const { uploadURL, objectPath } = await requestUploadUrl({ name: file.name, size: file.size, contentType: file.type });
+      await fetch(uploadURL, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+      await updateTrip.mutateAsync({ tripId: trip.id, data: { coverImage: objectPath } });
+      queryClient.invalidateQueries({ queryKey: getGetTripQueryKey(trip.id) });
+      toast.success('Cover photo updated');
+    } catch {
+      toast.error('Failed to upload cover photo');
+    } finally {
+      setUploadingCover(false);
+    }
+  };
+
+  const handleRefreshCover = async () => {
+    setRefreshingCover(true);
+    try {
+      const res = await fetch(`/api/trips/${trip.id}/refresh-cover`, { method: 'POST', credentials: 'include' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(data?.error || 'Could not find an image for this destination'); return; }
+      queryClient.invalidateQueries({ queryKey: getGetTripQueryKey(trip.id) });
+      toast.success('Cover photo refreshed from destination');
+    } catch {
+      toast.error('Failed to refresh cover photo');
+    } finally {
+      setRefreshingCover(false);
+    }
+  };
+
+  const handleRemoveCover = async () => {
+    try {
+      await updateTrip.mutateAsync({ tripId: trip.id, data: { coverImage: '' } });
+      queryClient.invalidateQueries({ queryKey: getGetTripQueryKey(trip.id) });
+      toast.success('Cover photo removed');
+    } catch {
+      toast.error('Failed to remove cover photo');
+    }
   };
 
   const [removePayerWarning, setRemovePayerWarning] = useState<{ userId: number; name: string; expensesAsPayer: number } | null>(null);
@@ -496,9 +550,6 @@ export function TripSettings({ trip }: { trip: any }) {
                   </Select>
                 <FormMessage /></FormItem>
               )} />
-              <FormField control={form.control} name="coverImage" render={({ field }) => (
-                <FormItem><FormLabel>Cover Image URL</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
               <div className="pt-4">
                 <Button type="submit" disabled={updateTrip.isPending} className="w-full">
                   {updateTrip.isPending ? 'Saving...' : 'Save Settings'}
@@ -506,6 +557,71 @@ export function TripSettings({ trip }: { trip: any }) {
               </div>
             </form>
           </Form>
+        </div>
+
+        {/* Cover image editor */}
+        <div className="space-y-3">
+          <h3 className="font-semibold text-base">Cover Photo</h3>
+          <div className="bg-card border rounded-xl overflow-hidden shadow-sm">
+            {/* Preview */}
+            <div className="relative h-36 bg-muted">
+              {coverSrc ? (
+                <img src={coverSrc} alt="Trip cover" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <ImageOff className="h-8 w-8 text-muted-foreground/40" />
+                </div>
+              )}
+            </div>
+            {/* Actions */}
+            <div className="p-3 flex flex-wrap gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleCoverFile}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingCover}
+                className="flex-1"
+              >
+                {uploadingCover
+                  ? <span className="h-3.5 w-3.5 animate-spin inline-block border-2 border-current border-t-transparent rounded-full mr-1.5" />
+                  : <Camera className="h-3.5 w-3.5 mr-1.5" />}
+                Upload Photo
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleRefreshCover}
+                disabled={refreshingCover}
+                className="flex-1"
+                title="Auto-fetch a photo for this destination"
+              >
+                {refreshingCover
+                  ? <span className="h-3.5 w-3.5 animate-spin inline-block border-2 border-current border-t-transparent rounded-full mr-1.5" />
+                  : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+                Auto-generate
+              </Button>
+              {coverSrc && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleRemoveCover}
+                  className="text-destructive/70 hover:text-destructive w-full"
+                >
+                  Remove cover photo
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 

@@ -1,6 +1,8 @@
 import { Router, type IRouter } from "express";
+import { Readable } from "stream";
 import { eq, and, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { db, tripsTable, tripParticipantsTable, usersTable, flightsTable, accommodationsTable, activitiesTable, itineraryDaysTable, packingItemsTable, carRentalsTable, tripExpensesTable } from "@workspace/db";
 import {
   CreateTripBody,
@@ -164,6 +166,49 @@ router.patch("/trips/:tripId", requireTripAdmin(), async (req, res): Promise<voi
   }
 
   res.json(serializeTrip(trip));
+});
+
+// Public — no auth — serves trip cover image (proxy for uploaded /objects/ paths, redirect for external URLs)
+router.get("/trips/:tripId/cover", async (req, res): Promise<void> => {
+  const tripId = parseInt(req.params.tripId);
+  if (isNaN(tripId)) { res.status(400).end(); return; }
+
+  const [row] = await db.select({ coverImage: tripsTable.coverImage }).from(tripsTable).where(eq(tripsTable.id, tripId));
+  if (!row?.coverImage) { res.status(404).end(); return; }
+
+  const { coverImage } = row;
+
+  // External URL — redirect
+  if (coverImage.startsWith("http://") || coverImage.startsWith("https://")) {
+    res.redirect(302, coverImage);
+    return;
+  }
+
+  // Uploaded object — stream without auth since cover photos are not sensitive
+  if (coverImage.startsWith("/objects/")) {
+    try {
+      const service = new ObjectStorageService();
+      const file = await service.getObjectEntityFile(coverImage);
+      const response = await service.downloadObject(file);
+      res.status(response.status);
+      response.headers.forEach((value, key) => res.setHeader(key, value));
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      if (response.body) {
+        Readable.fromWeb(response.body as ReadableStream<Uint8Array>).pipe(res);
+      } else {
+        res.end();
+      }
+    } catch (err) {
+      if (err instanceof ObjectNotFoundError) {
+        res.status(404).end();
+      } else {
+        res.status(500).end();
+      }
+    }
+    return;
+  }
+
+  res.status(404).end();
 });
 
 // Manually refresh the cover image for a trip
