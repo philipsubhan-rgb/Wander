@@ -1,0 +1,233 @@
+Implement a minimal, read-only Model Context Protocol server inside the existing Wander monorepo.
+
+PROJECT CONTEXT
+
+The project is a pnpm TypeScript monorepo.
+
+The existing API application is located at:
+
+artifacts/api-server
+
+It uses:
+
+TypeScript
+Express 5
+PostgreSQL
+Drizzle ORM
+Existing Wander authentication and authorization
+Workspace packages including @workspace/db and @workspace/api-zod
+
+OBJECTIVE
+
+Add a remote MCP endpoint at:
+
+POST /mcp
+GET /mcp
+DELETE /mcp if required by the selected Streamable HTTP transport
+
+Use the official TypeScript MCP SDK:
+
+@modelcontextprotocol/sdk
+
+Use Streamable HTTP, not the deprecated legacy SSE transport.
+
+Do not create an MCP user interface at this stage.
+
+Do not change existing Wander web or mobile behavior.
+
+SECURITY REQUIREMENTS
+
+This first implementation must be read-only.
+Do not expose database credentials, password hashes, session secrets, JWT secrets, access tokens, refresh tokens, or raw authentication data.
+Do not provide direct unrestricted database access.
+Reuse the application's existing service and authorization logic where practical.
+Every trip-specific tool must verify that the authenticated user is an active participant in the requested trip or has the appropriate existing administrator permission.
+Never trust a user ID supplied in a tool argument.
+Derive the authenticated user from the verified request authentication context.
+Add audit logging for MCP tool calls without recording secrets or sensitive tokens.
+Mark all tools with accurate MCP annotations:
+readOnlyHint: true
+destructiveHint: false
+openWorldHint: false
+Return sanitized structured data only.
+
+INITIAL MCP TOOLS
+
+Implement these tools:
+
+list_my_trips
+
+Purpose:
+Return trips the authenticated user is authorized to view.
+
+Optional inputs:
+
+status
+includePast
+
+Return:
+
+tripId
+trip name
+destination
+start date
+end date
+trip status
+participant count
+whether the current user is a trip administrator
+get_trip_overview
+
+Input:
+
+tripId
+
+Return:
+
+basic trip information
+destination
+dates
+description
+participant summary
+counts of itinerary items, reservations, expenses, notes, and packing items
+get_trip_itinerary
+
+Input:
+
+tripId
+optional date
+
+Return:
+
+itinerary days
+activities
+start and end times
+locations
+reservation status
+notes needed to understand the schedule
+
+Do not return private credentials or unnecessary participant personal information.
+
+get_trip_participants
+
+Input:
+
+tripId
+
+Return only information appropriate for other members of the trip to see:
+
+participant ID
+display name
+trip role
+participation status
+
+Do not return password information, authentication records, private tokens, or unrelated profile data.
+
+get_trip_expense_summary
+
+Input:
+
+tripId
+
+Return:
+
+trip expense total
+currency information
+totals paid by participant
+totals owed by participant
+current net balances
+simplified settlement recommendations if the existing application already calculates them
+
+Do not create, modify, reimburse, or delete expenses.
+
+IMPLEMENTATION REQUIREMENTS
+
+Inspect the existing routes, database schema, services, authentication middleware, trip authorization logic, expense calculations, and tests before implementing anything.
+Reuse existing business logic rather than duplicating calculations.
+Install dependencies using pnpm in the correct workspace.
+Use an McpServer with a stable name and version, such as:
+name: wander-group-travel
+version: 0.1.0
+Use Zod schemas for every tool input and structured output.
+Return both:
+structuredContent for machine-readable results
+concise content text summarizing the result
+Add an MCP health endpoint or an equivalent safe diagnostics endpoint that reveals no secrets.
+Keep MCP implementation files separated from existing REST routes, for example:
+artifacts/api-server/src/mcp/
+Add clear error responses for:
+unauthenticated requests
+unauthorized trip access
+unknown trip IDs
+invalid input
+server errors
+Do not use mock trip data in production handlers.
+
+AUTHENTICATION
+
+First inspect how the existing web and mobile applications authenticate.
+
+Design the MCP authentication layer to work with the existing Wander identity model.
+
+For this first development version, it is acceptable to support a development-only bearer token stored in Replit Secrets, provided:
+
+it is disabled unless an explicit development environment flag is enabled
+it maps to a valid Wander user through a server-side configuration
+it is never committed to the repository
+production use is clearly blocked
+the code is structured so OAuth or another proper delegated-user authentication method can replace it later
+
+Do not weaken existing application authentication.
+
+TESTING
+
+Add automated tests for:
+
+Unauthenticated MCP request is rejected.
+Authenticated user can list only their trips.
+User cannot access a trip they do not belong to.
+Trip administrator can access the trip.
+Itinerary output is sanitized.
+Participant output excludes confidential fields.
+Expense summary uses the existing settlement logic.
+All tools are read-only.
+Invalid trip IDs return a safe error.
+Existing API tests still pass.
+
+DOCUMENTATION
+
+Create:
+
+docs/mcp-read-only.md
+
+Document:
+
+architecture
+endpoint
+local development steps
+required Replit Secrets
+authentication limitations
+available tools
+example tool requests
+MCP Inspector testing instructions
+security constraints
+how to disable the MCP endpoint
+known future work
+
+DELIVERABLE PROCESS
+
+Before modifying code:
+
+Summarize the existing authentication, trip authorization, database, and expense architecture.
+List the files you expect to create or modify.
+Identify any uncertainty or security concern.
+Then implement the smallest working read-only version.
+
+After implementation:
+
+Run type checking.
+Run all relevant tests.
+Report every changed file.
+Explain how to start the server.
+Provide the exact public MCP endpoint format.
+Provide manual MCP Inspector test steps.
+Do not implement write tools, AI itinerary generation, external reservation booking, or payment functionality in this task.
