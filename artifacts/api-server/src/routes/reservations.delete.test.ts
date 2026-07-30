@@ -649,3 +649,129 @@ describe("DELETE then reorder — combined chain", () => {
     expect(assignedOrders).not.toContain(10); // stale sortOrder of survivor id=30
   });
 });
+
+/**
+ * Reorder with a nonexistent / already-deleted reservation ID.
+ *
+ * The POST /trips/:tripId/reservations/reorder endpoint calls db.update for
+ * every ID in the supplied array — including IDs whose rows were already
+ * deleted (e.g. removed in another browser tab).  When the WHERE clause finds
+ * no matching row the real DB simply skips the update (0 rows affected) without
+ * throwing.  There is no mechanism to detect the missing row, so the endpoint
+ * returns 200 { success: true } for the whole request.
+ *
+ * This describe block confirms:
+ *   1. The endpoint does NOT crash when one ID in the array no longer exists.
+ *   2. It returns 200 { success: true }.
+ *   3. db.update is still called for every ID in the array (the route does not
+ *      pre-filter); the mock records each call so we can assert sort_orders.
+ *   4. The valid (surviving) reservation receives the correct positional
+ *      sort_order based on its index in the supplied ids array.
+ *   5. The nonexistent ID also receives a db.update call with its positional
+ *      sort_order (the route cannot distinguish it from a valid one; the real
+ *      DB will just write 0 rows for it — this is the documented silent-skip
+ *      behavior that this test pins down).
+ *
+ * Reorder endpoint WHERE clause shape (from mock):
+ *   and(eq(reservationsTable.id, id), eq(reservationsTable.tripId, tripId))
+ *   → whereArgs = [["id", id_value], ["tripId", tripId_value]]
+ */
+describe("POST /trips/:tripId/reservations/reorder — nonexistent reservation ID", () => {
+  it("returns 200 and does not crash when one ID in the array no longer exists", async () => {
+    const TRIP_ID    = 20;
+    const VALID_ID   = 101;
+    const DELETED_ID = 999; // was deleted in another tab; no row exists for this
+
+    // The reorder endpoint does not read from the DB before writing, so no
+    // results need to be enqueued — the mock's update chain resolves to [] by
+    // default when the queue is empty, which mirrors the real DB returning
+    // 0 rows affected for the missing ID.
+    const { status, body } = await reorderReservations(TRIP_ID, [VALID_ID, DELETED_ID]);
+
+    expect(status).toBe(200);
+    expect(body).toEqual({ success: true });
+  });
+
+  it("calls db.update for every supplied ID, including the nonexistent one", async () => {
+    const TRIP_ID    = 21;
+    const VALID_ID   = 102;
+    const DELETED_ID = 998;
+
+    await reorderReservations(TRIP_ID, [VALID_ID, DELETED_ID]);
+
+    // One db.update() per ID in the array (2 total), regardless of existence
+    expect(mockDb.update).toHaveBeenCalledTimes(2);
+  });
+
+  it("assigns sortOrder=0 to the valid ID when it appears first in the array", async () => {
+    // ids = [validId, deletedId]
+    // The valid reservation is at index 0 → must receive sortOrder=0.
+    const TRIP_ID    = 22;
+    const VALID_ID   = 103;
+    const DELETED_ID = 997;
+
+    await reorderReservations(TRIP_ID, [VALID_ID, DELETED_ID]);
+
+    expect(mockDb.update).toHaveBeenCalledTimes(2);
+
+    // First update call corresponds to the first element in the array
+    const firstCall = updateCalls[0];
+    const firstUpdate = extractReorderUpdate(firstCall);
+    expect(firstUpdate.reservationId).toBe(VALID_ID);
+    expect(firstUpdate.sortOrder).toBe(0);
+  });
+
+  it("assigns sortOrder=0 to the valid ID when it appears second (deleted ID was first)", async () => {
+    // ids = [deletedId, validId]
+    // The valid reservation is at index 1 → must receive sortOrder=1.
+    // (The deleted row at index 0 → sortOrder=0 in the update, but the real
+    //  DB finds no row so 0 rows are affected — the sort_order sequence for
+    //  living reservations ends up non-contiguous, which the task description
+    //  identifies as a known limitation of this silent-skip approach.)
+    const TRIP_ID    = 23;
+    const VALID_ID   = 104;
+    const DELETED_ID = 996;
+
+    await reorderReservations(TRIP_ID, [DELETED_ID, VALID_ID]);
+
+    expect(mockDb.update).toHaveBeenCalledTimes(2);
+
+    // Second update call corresponds to the valid ID (index 1 in the array)
+    const secondCall = updateCalls[1];
+    const secondUpdate = extractReorderUpdate(secondCall);
+    expect(secondUpdate.reservationId).toBe(VALID_ID);
+    expect(secondUpdate.sortOrder).toBe(1);
+  });
+
+  it("handles a reorder list that consists entirely of nonexistent IDs without crashing", async () => {
+    // Edge case: every ID in the array was deleted.  The endpoint should still
+    // return 200 { success: true } — the real DB simply writes 0 rows.
+    const TRIP_ID = 24;
+
+    const { status, body } = await reorderReservations(TRIP_ID, [9001, 9002, 9003]);
+
+    expect(status).toBe(200);
+    expect(body).toEqual({ success: true });
+
+    // db.update is called for all three IDs despite none existing
+    expect(mockDb.update).toHaveBeenCalledTimes(3);
+  });
+
+  it("a single valid ID reorder succeeds even when accompanied by a deleted ID", async () => {
+    // Regression: ensures a one-survivor scenario does not cause an off-by-one
+    // in sortOrder when the other slot in the array is a ghost.
+    const TRIP_ID    = 25;
+    const VALID_ID   = 105;
+    const DELETED_ID = 995;
+
+    const { status, body } = await reorderReservations(TRIP_ID, [VALID_ID, DELETED_ID]);
+
+    expect(status).toBe(200);
+    expect(body).toEqual({ success: true });
+
+    // The valid ID is at index 0 → sortOrder must be 0
+    const firstUpdate = extractReorderUpdate(updateCalls[0]);
+    expect(firstUpdate.reservationId).toBe(VALID_ID);
+    expect(firstUpdate.sortOrder).toBe(0);
+  });
+});
