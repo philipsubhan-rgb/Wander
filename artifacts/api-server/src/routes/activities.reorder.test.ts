@@ -690,6 +690,185 @@ describe("DELETE /trips/:tripId/activities/:activityId — gap-closing re-index"
   });
 });
 
+// ── 6. Delete → reorder chain ─────────────────────────────────────────────────
+
+/**
+ * Simulates the full lifecycle: three activities → delete one → reorder survivors.
+ *
+ * After a deletion the DELETE handler re-indexes the remaining activities to
+ * contiguous 0-based sort_orders.  A subsequent reorder request must treat
+ * those re-indexed values as the authoritative current state and assign new
+ * positional sort_orders correctly, with no interference from the stale
+ * sort_order values that existed before the delete.
+ *
+ * Each HTTP request is independent (separate fetch calls), so the mock queue
+ * must be loaded for each operation separately.  The test clears updateCalls
+ * between operations so assertions are unambiguous.
+ */
+
+describe("delete → reorder chain — stale sort_orders do not interfere", () => {
+  async function deleteActivity(tripId: number, activityId: number) {
+    const res = await fetch(
+      `${activitiesBase}/trips/${tripId}/activities/${activityId}`,
+      { method: "DELETE" },
+    );
+    return { status: res.status, body: await res.json() as any };
+  }
+
+  /**
+   * Full chain: three activities (sort_orders 0, 1, 2) → delete the middle
+   * one (id=2) → reorder the two survivors in reversed order ([3, 1]).
+   *
+   * After the delete, the DELETE handler re-indexes the survivors to 0, 1
+   * (ids 1 and 3 in that order).  The subsequent reorder with [3, 1] must
+   * assign sort_order 0 to id=3 and sort_order 1 to id=1 — reflecting the
+   * user's new preferred order, not the stale pre-delete sort_orders.
+   */
+  it("reorder after delete assigns correct 0-based sort_orders to both survivors", async () => {
+    // ── Phase 1: DELETE id=2 (the middle activity) ───────────────────────────
+    enqueue(
+      [{ id: 2, tripId: 1, date: "2025-08-10", sortOrder: 1 }], // deleted row
+      [{ id: 1 }, { id: 3 }],                                    // remaining (re-index query)
+    );
+
+    const { status: deleteStatus, body: deleteBody } = await deleteActivity(1, 2);
+    expect(deleteStatus).toBe(200);
+    expect(deleteBody).toEqual({ success: true });
+
+    // The DELETE handler must re-index the two survivors to [0, 1]
+    expect(updateCalls.map(c => (c.setArgs as any).sortOrder)).toEqual([0, 1]);
+
+    // Clear state between phases so reorder assertions are unambiguous
+    updateCalls.length = 0;
+    mockDb.update.mockClear();
+
+    // ── Phase 2: REORDER survivors in reversed order [3, 1] ─────────────────
+    // No extra DB rows need to be enqueued; the reorder Promise.all resolves
+    // to the default [] for each update (already the queue default).
+    const { status: reorderStatus, body: reorderBody } = await postReorder(1, [3, 1]);
+    expect(reorderStatus).toBe(200);
+    expect(reorderBody).toEqual({ success: true });
+
+    // Two updates — one per surviving activity
+    expect(mockDb.update).toHaveBeenCalledTimes(2);
+
+    // sort_order must be positional (0-based) for the new order [3, 1]
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0, 1]);
+
+    // id=3 is first in the reorder list → must receive sort_order 0
+    // id=1 is second in the reorder list → must receive sort_order 1
+    const activityIds = updateCalls.map(c => {
+      const whereArr = c.whereArgs as [unknown, unknown][];
+      return (whereArr[0] as [string, number])[1];
+    });
+    expect(activityIds).toEqual([3, 1]);
+  });
+
+  /**
+   * Confirms that stale sort_order values from before the delete (which could
+   * be non-contiguous if the original set had gaps) do not contaminate the
+   * reorder assignment.
+   *
+   * Original state: ids 10, 11, 12 with sort_orders 0, 5, 9 (already gapped).
+   * Delete id=11 (sort_order 5) → re-index survivors: id=10 → 0, id=12 → 1.
+   * Reorder survivors as [12, 10] → id=12 gets sort_order 0, id=10 gets 1.
+   * The stale sort_order 9 for id=12 must play no role in this final assignment.
+   */
+  it("stale non-contiguous sort_orders from before the delete do not affect the reorder result", async () => {
+    // ── Phase 1: DELETE id=11 ────────────────────────────────────────────────
+    enqueue(
+      [{ id: 11, tripId: 1, date: "2025-09-15", sortOrder: 5 }], // deleted row
+      [{ id: 10 }, { id: 12 }],                                   // survivors returned by re-index query
+    );
+
+    const { status: ds } = await deleteActivity(1, 11);
+    expect(ds).toBe(200);
+    // Re-index gives survivors contiguous sort_orders [0, 1]
+    expect(updateCalls.map(c => (c.setArgs as any).sortOrder)).toEqual([0, 1]);
+
+    updateCalls.length = 0;
+    mockDb.update.mockClear();
+
+    // ── Phase 2: REORDER [12, 10] ────────────────────────────────────────────
+    const { status: rs } = await postReorder(1, [12, 10]);
+    expect(rs).toBe(200);
+
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0, 1]); // id=12 → 0, id=10 → 1
+
+    const activityIds = updateCalls.map(c => {
+      const whereArr = c.whereArgs as [unknown, unknown][];
+      return (whereArr[0] as [string, number])[1];
+    });
+    expect(activityIds).toEqual([12, 10]);
+  });
+
+  /**
+   * Confirms that after deleting the first activity in a sequence the
+   * reorder still produces a correct 0-based sequence for the survivors,
+   * even though the original first activity's id no longer exists.
+   */
+  it("reorder after deleting the first activity produces correct sort_orders for remaining items", async () => {
+    // Original: ids 20, 21, 22, sort_orders 0, 1, 2
+    // Delete id=20 (the first) → survivors 21, 22 re-indexed to 0, 1
+    enqueue(
+      [{ id: 20, tripId: 1, date: "2025-10-20", sortOrder: 0 }],
+      [{ id: 21 }, { id: 22 }],
+    );
+
+    const { status: ds } = await deleteActivity(1, 20);
+    expect(ds).toBe(200);
+    expect(updateCalls.map(c => (c.setArgs as any).sortOrder)).toEqual([0, 1]);
+
+    updateCalls.length = 0;
+    mockDb.update.mockClear();
+
+    // Reorder survivors; keep the same order [21, 22] — sort_orders should still be 0, 1
+    const { status: rs } = await postReorder(1, [21, 22]);
+    expect(rs).toBe(200);
+
+    const sortOrders = updateCalls.map(c => (c.setArgs as any).sortOrder);
+    expect(sortOrders).toEqual([0, 1]);
+
+    const activityIds = updateCalls.map(c => {
+      const whereArr = c.whereArgs as [unknown, unknown][];
+      return (whereArr[0] as [string, number])[1];
+    });
+    expect(activityIds).toEqual([21, 22]);
+  });
+
+  /**
+   * Timeline read after the full chain: once delete + reorder have run, the
+   * timeline must return activities in the final sort_order sequence (as it
+   * would after a page reload), with no trace of the deleted activity.
+   */
+  it("timeline reflects the final sort_order after a delete-then-reorder chain", async () => {
+    // Simulate the DB state after: delete id=2, then reorder [3, 1]
+    // id=3 now has sort_order 0, id=1 has sort_order 1, id=2 is gone.
+    enqueueTimeline({
+      activities: [
+        { id: 1, tripId: 1, title: "Alpha", date: "2025-08-10", time: null, sortOrder: 1, description: null, location: null, imageUrl: null },
+        { id: 3, tripId: 1, title: "Gamma", date: "2025-08-10", time: null, sortOrder: 0, description: null, location: null, imageUrl: null },
+        // id=2 ("Beta") is gone — must not appear
+      ],
+    });
+
+    const { status, body } = await getTimeline();
+    expect(status).toBe(200);
+
+    const aug10 = body.filter((e: any) => e.date === "2025-08-10" && e.type === "activity");
+    expect(aug10).toHaveLength(2); // only 2 survivors
+
+    // Gamma (sortOrder 0) must come before Alpha (sortOrder 1)
+    expect(aug10[0].title).toBe("Gamma");
+    expect(aug10[1].title).toBe("Alpha");
+
+    // Deleted activity must not appear anywhere
+    expect(body.some((e: any) => e.title === "Beta")).toBe(false);
+  });
+});
+
 // ── 5. Timeline sort — reservations also respect sort_order ──────────────────
 
 describe("GET /trips/:tripId/timeline — sort_order tiebreaker for reservations", () => {
