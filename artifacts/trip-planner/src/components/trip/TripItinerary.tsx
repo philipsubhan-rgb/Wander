@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { format, parseISO, addDays } from 'date-fns';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -301,7 +301,36 @@ function DayCard({
 }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [headerImg, setHeaderImg] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
+
+  const createDay = useCreateItineraryDay();
+  const updateDay = useUpdateItineraryDay();
+
+  const saveTitle = useCallback((value: string) => {
+    const trimmed = value.trim();
+    setEditingTitle(false);
+    if (trimmed === (note?.title ?? '')) return;
+    const payload = {
+      date,
+      title: trimmed,
+      description: note?.description || undefined,
+      notes: note?.notes || undefined,
+    };
+    const opts = {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListItineraryDaysQueryKey(tripId) });
+      },
+      onError: () => toast.error('Failed to save title'),
+    };
+    if (note) {
+      updateDay.mutate({ tripId, dayId: note.id, data: payload }, opts);
+    } else {
+      createDay.mutate({ tripId, data: payload }, opts);
+    }
+  }, [note, date, tripId, queryClient, createDay, updateDay]);
 
   // Local events state for optimistic DnD updates
   const [localEvents, setLocalEvents] = useState<TimelineEvent[]>(propEvents);
@@ -405,12 +434,39 @@ function DayCard({
               <div className="text-[10px] font-bold tracking-widest text-white/50 uppercase">
                 {weekday} · {dateStr}
               </div>
-              {title ? (
-                <div className="text-base md:text-lg font-serif font-bold text-white mt-0.5 leading-tight truncate">
-                  {title}
-                </div>
+              {editingTitle ? (
+                <input
+                  ref={titleInputRef}
+                  className="bg-transparent text-base md:text-lg font-serif font-bold text-white mt-0.5 leading-tight outline-none border-b border-white/40 focus:border-white/80 w-full transition-colors"
+                  value={titleDraft}
+                  onChange={e => setTitleDraft(e.target.value)}
+                  onBlur={() => saveTitle(titleDraft)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); titleInputRef.current?.blur(); }
+                    if (e.key === 'Escape') { setEditingTitle(false); }
+                  }}
+                  onClick={e => e.stopPropagation()}
+                  placeholder="Add a day title…"
+                />
               ) : (
-                <div className="text-sm text-white/40 italic mt-0.5">No events planned</div>
+                <div
+                  className="group/title flex items-center gap-1.5 cursor-text mt-0.5"
+                  onClick={e => {
+                    e.stopPropagation();
+                    setTitleDraft(note?.title ?? '');
+                    setEditingTitle(true);
+                    setTimeout(() => titleInputRef.current?.focus(), 0);
+                  }}
+                >
+                  {title ? (
+                    <span className="text-base md:text-lg font-serif font-bold text-white leading-tight truncate">
+                      {title}
+                    </span>
+                  ) : (
+                    <span className="text-sm text-white/35 italic">Add a title…</span>
+                  )}
+                  <Pencil className="h-3 w-3 text-white/40 opacity-0 group-hover/title:opacity-100 transition-opacity shrink-0" />
+                </div>
               )}
               {subtitle && (
                 <div className="text-xs italic text-white/50 mt-0.5 line-clamp-1">{subtitle}</div>
