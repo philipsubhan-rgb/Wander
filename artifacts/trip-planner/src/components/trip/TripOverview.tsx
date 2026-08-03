@@ -47,12 +47,20 @@ export function TripOverview({ tripId, onNavigate }: { tripId: number; onNavigat
   const { data: rawTimeline } = useGetTripTimeline(tripId, { query: { enabled: !!tripId } });
   const queryClient = useQueryClient();
 
-  // Group events by date (preserving API sort order within each date)
+  // Group events by date; itinerary (day-title) entries are always pinned first
   const { sortedDates, eventsByDate: initialByDate } = useMemo(() => {
     const byDate: Record<string, TimelineEvent[]> = {};
     ((rawTimeline as TimelineEvent[]) ?? []).forEach(e => {
       if (!byDate[e.date]) byDate[e.date] = [];
       byDate[e.date].push(e);
+    });
+    // Pin itinerary events to the top of each day; preserve API order for everything else
+    Object.keys(byDate).forEach(d => {
+      byDate[d].sort((a, b) => {
+        if (a.type === 'itinerary' && b.type !== 'itinerary') return -1;
+        if (b.type === 'itinerary' && a.type !== 'itinerary') return 1;
+        return 0;
+      });
     });
     return { sortedDates: Object.keys(byDate).sort(), eventsByDate: byDate };
   }, [rawTimeline]);
