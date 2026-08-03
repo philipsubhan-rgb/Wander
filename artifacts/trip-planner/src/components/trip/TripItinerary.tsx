@@ -304,6 +304,9 @@ function DayCard({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState('');
+  const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
   const queryClient = useQueryClient();
 
   const createDay = useCreateItineraryDay();
@@ -324,6 +327,31 @@ function DayCard({
         queryClient.invalidateQueries({ queryKey: getListItineraryDaysQueryKey(tripId) });
       },
       onError: () => toast.error('Failed to save title'),
+    };
+    if (note) {
+      updateDay.mutate({ tripId, dayId: note.id, data: payload }, opts);
+    } else {
+      createDay.mutate({ tripId, data: payload }, opts);
+    }
+  }, [note, date, tripId, queryClient, createDay, updateDay]);
+
+  const saveDescription = useCallback((value: string) => {
+    const trimmed = value.trim();
+    setEditingDescription(false);
+    if (trimmed === (note?.description ?? '')) return;
+    // Don't create a new day record with no title — title inline edit handles that
+    if (!note && !trimmed) return;
+    const payload = {
+      date,
+      title: note?.title || '',
+      description: trimmed || undefined,
+      notes: note?.notes || undefined,
+    };
+    const opts = {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListItineraryDaysQueryKey(tripId) });
+      },
+      onError: () => toast.error('Failed to save description'),
     };
     if (note) {
       updateDay.mutate({ tripId, dayId: note.id, data: payload }, opts);
@@ -468,8 +496,40 @@ function DayCard({
                   <Pencil className="h-3 w-3 text-white/40 opacity-0 group-hover/title:opacity-100 transition-opacity shrink-0" />
                 </div>
               )}
-              {subtitle && (
-                <div className="text-xs italic text-white/50 mt-0.5 line-clamp-1">{subtitle}</div>
+              {editingDescription ? (
+                <textarea
+                  ref={descriptionInputRef}
+                  rows={2}
+                  className="bg-transparent text-xs italic text-white/70 mt-0.5 outline-none border-b border-white/40 focus:border-white/80 w-full transition-colors resize-none leading-snug"
+                  value={descriptionDraft}
+                  onChange={e => setDescriptionDraft(e.target.value)}
+                  onBlur={() => saveDescription(descriptionDraft)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); descriptionInputRef.current?.blur(); }
+                    if (e.key === 'Escape') { setEditingDescription(false); }
+                  }}
+                  onClick={e => e.stopPropagation()}
+                  placeholder="Add a plan…"
+                />
+              ) : (
+                <div
+                  className="group/desc flex items-center gap-1 cursor-text mt-0.5"
+                  onClick={e => {
+                    e.stopPropagation();
+                    setDescriptionDraft(note?.description ?? '');
+                    setEditingDescription(true);
+                    setTimeout(() => descriptionInputRef.current?.focus(), 0);
+                  }}
+                >
+                  {subtitle ? (
+                    <span className="text-xs italic text-white/50 line-clamp-1">{subtitle}</span>
+                  ) : (
+                    <span className="text-xs italic text-white/25 opacity-0 group-hover/desc:opacity-100 transition-opacity">Add a plan…</span>
+                  )}
+                  {subtitle && (
+                    <Pencil className="h-2.5 w-2.5 text-white/30 opacity-0 group-hover/desc:opacity-100 transition-opacity shrink-0" />
+                  )}
+                </div>
               )}
             </div>
 
