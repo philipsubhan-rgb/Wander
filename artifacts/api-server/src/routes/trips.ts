@@ -413,13 +413,21 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
 
   // Assign a cross-type priority so same-date/time events appear in a
   // deterministic, logical order that mirrors the traveler's day:
-  //   flight → car_rental → accommodation → activity → reservation → itinerary
-  // Accommodation events use a separate per-stay sort (see below).
+  //   checkout → flight → car_rental → check-in → activity → reservation → itinerary
+  //
+  // Check-OUT gets priority -1 (before flights) because on a departure day the
+  // traveler leaves the hotel before boarding.  Check-IN stays at 2 (after
+  // flights/car-rentals) because on an arrival day you land/drive first, then
+  // check in.  Accommodation events use a separate per-stay sort for same-type
+  // ties (see below).
   const eventPriority = (e: { type: string }) => {
+    if (e.type === "accommodation") {
+      // _isCheckout is 1 for checkout rows, 0 for check-in rows (stripped later).
+      return (e as any)._isCheckout === 1 ? -1 : 2;
+    }
     switch (e.type) {
       case "flight":        return 0;
       case "car_rental":    return 1;
-      case "accommodation": return 2;
       case "activity":      return 3;
       case "reservation":   return 4;
       case "itinerary":     return 5;
