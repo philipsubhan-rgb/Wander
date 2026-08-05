@@ -368,8 +368,10 @@ function CarRentalForm({ tripId, rental, tripStartDate, tripEndDate, tripDestina
       company: values.company,
       pickupLocation: values.pickupLocation,
       dropoffLocation: values.dropoffLocation || undefined,
-      pickupDatetime:  `${values.pickupDate}T${values.pickupTime}`,
-      dropoffDatetime: `${values.dropoffDate}T${values.dropoffTime}`,
+      // Append :00.000Z so the string is interpreted as UTC, matching how the
+      // values were loaded (via .slice(0, 16) on the stored UTC ISO string).
+      pickupDatetime:  `${values.pickupDate}T${values.pickupTime}:00.000Z`,
+      dropoffDatetime: `${values.dropoffDate}T${values.dropoffTime}:00.000Z`,
       carType: values.carType,
       confirmationCode: values.confirmationCode || undefined,
       driverName: values.driverName || undefined,

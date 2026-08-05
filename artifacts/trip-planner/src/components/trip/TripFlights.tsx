@@ -480,8 +480,11 @@ function FlightForm({ tripId, flight, tripStartDate, onSuccess }: { tripId: numb
   const onSubmit = (values: z.infer<typeof flightSchema>) => {
     const payload = {
       ...values,
-      departureDatetime: new Date(values.departureDatetime).toISOString(),
-      arrivalDatetime: new Date(values.arrivalDatetime).toISOString(),
+      // The datetime-local inputs are loaded from and must be saved as UTC.
+      // Appending :00.000Z treats the value as UTC, avoiding the local-offset
+      // shift that new Date(...).toISOString() would introduce.
+      departureDatetime: values.departureDatetime + ':00.000Z',
+      arrivalDatetime: values.arrivalDatetime + ':00.000Z',
     };
 
     if (flight) {
