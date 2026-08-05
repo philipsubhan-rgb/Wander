@@ -347,6 +347,7 @@ function CarRentalForm({ tripId, rental, tripStartDate, tripEndDate, tripDestina
         driverName: rental.driverName ?? '',
         confirmationCode: rental.confirmationCode ?? '',
         dropoffLocation: rental.dropoffLocation ?? '',
+        notes: rental.notes ?? '',
         lat: rental.lat ?? undefined,
         lon: rental.lon ?? undefined,
         imageUrl: rental.imageUrl ?? undefined,
