@@ -1,4 +1,4 @@
-import { useListAccommodations, useCreateAccommodation, useUpdateAccommodation, useDeleteAccommodation, getListAccommodationsQueryKey } from '@workspace/api-client-react';
+import { useListAccommodations, useCreateAccommodation, useUpdateAccommodation, useDeleteAccommodation, getListAccommodationsQueryKey, getGetTripTimelineQueryKey } from '@workspace/api-client-react';
 import { ImagePickerContent } from '@/components/ImageEditor';
 import { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
@@ -186,7 +186,7 @@ function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tr
 
   const handleImageSave = (url: string | null) => {
     updateStayImg.mutate({ tripId, accommodationId: stay.id, data: { imageUrl: url ?? '' } }, {
-      onSuccess: () => { toast.success('Image updated'); queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) }); },
+      onSuccess: () => { toast.success('Image updated'); queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); },
       onError: () => toast.error('Failed to update image'),
     });
   };
@@ -197,6 +197,7 @@ function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tr
         onSuccess: () => {
           toast.success('Deleted');
           queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) });
+          queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
         }
       });
     }
@@ -353,11 +354,11 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
 
     if (stay) {
       updateStay.mutate({ tripId, accommodationId: stay.id, data: payload }, {
-        onSuccess: () => { toast.success('Updated'); queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) }); onSuccess(); }
+        onSuccess: () => { toast.success('Updated'); queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); onSuccess(); }
       });
     } else {
       createStay.mutate({ tripId, data: payload }, {
-        onSuccess: () => { toast.success('Added'); queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) }); onSuccess(); }
+        onSuccess: () => { toast.success('Added'); queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); onSuccess(); }
       });
     }
   };

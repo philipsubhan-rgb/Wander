@@ -1,5 +1,6 @@
 import {
-  useListFlights, useCreateFlight, useUpdateFlight, useDeleteFlight, getListFlightsQueryKey,
+  useListFlights, useCreateFlight, useUpdateFlight, useDeleteFlight,
+  getListFlightsQueryKey, getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
 import { useState, useRef, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
@@ -363,6 +364,7 @@ function FlightCard({ tripId, flight, editMode, tripStartDate }: { tripId: numbe
         onSuccess: () => {
           toast.success('Flight deleted');
           queryClient.invalidateQueries({ queryKey: getListFlightsQueryKey(tripId) });
+          queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
         },
         onError: () => toast.error('Failed to delete flight'),
       });
@@ -487,6 +489,7 @@ function FlightForm({ tripId, flight, tripStartDate, onSuccess }: { tripId: numb
         onSuccess: () => {
           toast.success('Flight updated');
           queryClient.invalidateQueries({ queryKey: getListFlightsQueryKey(tripId) });
+          queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
           onSuccess();
         },
         onError: () => toast.error('Failed to update flight'),
@@ -496,6 +499,7 @@ function FlightForm({ tripId, flight, tripStartDate, onSuccess }: { tripId: numb
         onSuccess: () => {
           toast.success('Flight added');
           queryClient.invalidateQueries({ queryKey: getListFlightsQueryKey(tripId) });
+          queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
           onSuccess();
         },
         onError: () => toast.error('Failed to add flight'),

@@ -23,6 +23,7 @@ import {
   useUpdateCarRental,
   useDeleteCarRental,
   getListCarRentalsQueryKey,
+  getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
 
 const API_BASE = `${import.meta.env.BASE_URL}api`;
@@ -185,7 +186,7 @@ function CarRentalCard({ tripId, rental, editMode, tripStartDate, tripEndDate, t
 
   const handleImageSave = (url: string | null) => {
     updateRentalImg.mutate({ tripId, carRentalId: rental.id, data: { imageUrl: url ?? '' } }, {
-      onSuccess: () => { toast.success('Image updated'); queryClient.invalidateQueries({ queryKey: getListCarRentalsQueryKey(tripId) }); },
+      onSuccess: () => { toast.success('Image updated'); queryClient.invalidateQueries({ queryKey: getListCarRentalsQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); },
       onError: () => toast.error('Failed to update image'),
     });
   };
@@ -193,7 +194,7 @@ function CarRentalCard({ tripId, rental, editMode, tripStartDate, tripEndDate, t
   const handleDelete = () => {
     if (confirm('Delete this car rental?')) {
       deleteRental.mutate({ tripId, carRentalId: rental.id }, {
-        onSuccess: () => { toast.success('Deleted'); queryClient.invalidateQueries({ queryKey: getListCarRentalsQueryKey(tripId) }); }
+        onSuccess: () => { toast.success('Deleted'); queryClient.invalidateQueries({ queryKey: getListCarRentalsQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); }
       });
     }
   };
@@ -381,12 +382,12 @@ function CarRentalForm({ tripId, rental, tripStartDate, tripEndDate, tripDestina
 
     if (rental) {
       updateRental.mutate({ tripId, carRentalId: rental.id, data: payload }, {
-        onSuccess: () => { toast.success('Updated'); queryClient.invalidateQueries({ queryKey: getListCarRentalsQueryKey(tripId) }); onSuccess(); },
+        onSuccess: () => { toast.success('Updated'); queryClient.invalidateQueries({ queryKey: getListCarRentalsQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); onSuccess(); },
         onError: () => toast.error('Failed to update'),
       });
     } else {
       createRental.mutate({ tripId, data: payload }, {
-        onSuccess: () => { toast.success('Added'); queryClient.invalidateQueries({ queryKey: getListCarRentalsQueryKey(tripId) }); onSuccess(); },
+        onSuccess: () => { toast.success('Added'); queryClient.invalidateQueries({ queryKey: getListCarRentalsQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); onSuccess(); },
         onError: () => toast.error('Failed to add'),
       });
     }
