@@ -1,4 +1,5 @@
-import { useListActivities, useCreateActivity, useUpdateActivity, useDeleteActivity, getListActivitiesQueryKey, getGetTripTimelineQueryKey } from '@workspace/api-client-react';
+import { useListActivities, useCreateActivity, useUpdateActivity, useDeleteActivity } from '@workspace/api-client-react';
+import { invalidateActivityQueries } from '@/lib/invalidate-trip-queries';
 import { ImagePickerContent } from '@/components/ImageEditor';
 import { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
@@ -192,7 +193,7 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
 
   const handleImageSave = (url: string | null) => {
     updateActivity.mutate({ tripId, activityId: activity.id, data: { imageUrl: url ?? '' } }, {
-      onSuccess: () => { toast.success('Image updated'); queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); },
+      onSuccess: () => { toast.success('Image updated'); invalidateActivityQueries(queryClient, tripId); },
       onError: () => toast.error('Failed to update image'),
     });
   };
@@ -202,8 +203,7 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
       deleteActivity.mutate({ tripId, activityId: activity.id }, {
         onSuccess: () => {
           toast.success('Deleted');
-          queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) });
-          queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
+          invalidateActivityQueries(queryClient, tripId);
         }
       });
     }
@@ -410,13 +410,13 @@ function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, tripDestin
     if (activity) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       updateActivity.mutate({ tripId, activityId: activity.id, data: data as any }, {
-        onSuccess: () => { toast.success('Activity updated'); queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); onSuccess(); },
+        onSuccess: () => { toast.success('Activity updated'); invalidateActivityQueries(queryClient, tripId); onSuccess(); },
         onError: (err: unknown) => { const msg = err instanceof Error ? err.message : 'Unknown error'; toast.error(`Failed to save: ${msg}`); },
       });
     } else {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       createActivity.mutate({ tripId, data: data as any }, {
-        onSuccess: () => { toast.success('Activity added'); queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); onSuccess(); },
+        onSuccess: () => { toast.success('Activity added'); invalidateActivityQueries(queryClient, tripId); onSuccess(); },
         onError: (err: unknown) => { const msg = err instanceof Error ? err.message : 'Unknown error'; toast.error(`Failed to add: ${msg}`); },
       });
     }

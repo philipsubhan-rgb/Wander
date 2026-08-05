@@ -1,7 +1,7 @@
 import {
   useListFlights, useCreateFlight, useUpdateFlight, useDeleteFlight,
-  getListFlightsQueryKey, getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
+import { invalidateFlightQueries } from '@/lib/invalidate-trip-queries';
 import { useState, useRef, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -363,8 +363,7 @@ function FlightCard({ tripId, flight, editMode, tripStartDate }: { tripId: numbe
       deleteFlight.mutate({ tripId, flightId: flight.id }, {
         onSuccess: () => {
           toast.success('Flight deleted');
-          queryClient.invalidateQueries({ queryKey: getListFlightsQueryKey(tripId) });
-          queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
+          invalidateFlightQueries(queryClient, tripId);
         },
         onError: () => toast.error('Failed to delete flight'),
       });
@@ -491,8 +490,7 @@ function FlightForm({ tripId, flight, tripStartDate, onSuccess }: { tripId: numb
       updateFlight.mutate({ tripId, flightId: flight.id, data: payload }, {
         onSuccess: () => {
           toast.success('Flight updated');
-          queryClient.invalidateQueries({ queryKey: getListFlightsQueryKey(tripId) });
-          queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
+          invalidateFlightQueries(queryClient, tripId);
           onSuccess();
         },
         onError: () => toast.error('Failed to update flight'),
@@ -501,8 +499,7 @@ function FlightForm({ tripId, flight, tripStartDate, onSuccess }: { tripId: numb
       createFlight.mutate({ tripId, data: payload }, {
         onSuccess: () => {
           toast.success('Flight added');
-          queryClient.invalidateQueries({ queryKey: getListFlightsQueryKey(tripId) });
-          queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
+          invalidateFlightQueries(queryClient, tripId);
           onSuccess();
         },
         onError: () => toast.error('Failed to add flight'),
