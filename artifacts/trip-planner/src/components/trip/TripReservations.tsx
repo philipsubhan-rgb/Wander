@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { MiniMap } from './MiniMap';
 import {
   useListReservations, useCreateReservation, useUpdateReservation, useDeleteReservation,
-  getListReservationsQueryKey,
+  getListReservationsQueryKey, getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
 import { useAuth } from '@/hooks/use-auth';
 import { fetchWikiImage } from '@/lib/wiki-image';
@@ -159,7 +159,7 @@ function ReservationCard({ tripId, res, editMode }: { tripId: number; res: any; 
 
   const handleImageSave = (url: string | null) => {
     updateResImg.mutate({ tripId, reservationId: res.id, data: { imageUrl: url ?? '' } }, {
-      onSuccess: () => { toast.success('Image updated'); queryClient.invalidateQueries({ queryKey: getListReservationsQueryKey(tripId) }); },
+      onSuccess: () => { toast.success('Image updated'); queryClient.invalidateQueries({ queryKey: getListReservationsQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); },
       onError: () => toast.error('Failed to update image'),
     });
   };
@@ -191,6 +191,7 @@ function ReservationCard({ tripId, res, editMode }: { tripId: number; res: any; 
       onSuccess: () => {
         toast.success('Deleted');
         queryClient.invalidateQueries({ queryKey: getListReservationsQueryKey(tripId) });
+        queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
       },
       onError: () => toast.error('Failed to delete'),
     });
@@ -399,6 +400,7 @@ function ReservationForm({
       onSuccess: () => {
         toast.success(reservation ? 'Updated' : 'Reservation added');
         queryClient.invalidateQueries({ queryKey: getListReservationsQueryKey(tripId) });
+        queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
         onSuccess();
       },
       onError: () => toast.error('Failed to save'),
