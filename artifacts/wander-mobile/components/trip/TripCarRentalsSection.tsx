@@ -7,7 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import {
-  useListCarRentals, useCreateCarRental, useDeleteCarRental, getListCarRentalsQueryKey,
+  useListCarRentals, useCreateCarRental, useDeleteCarRental, getListCarRentalsQueryKey, getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 import { FieldLabel, FormInput, formStyles } from './TripFlightsSection';
@@ -102,6 +102,7 @@ function AddCarRentalModal({ tripId, visible, onClose, colors }: {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListCarRentalsQueryKey(tripId) });
+        queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         onClose(); reset();
       },
@@ -214,7 +215,7 @@ export function TripCarRentalsSection({ tripId }: { tripId: number }) {
 
   const { data: rentals, isLoading, refetch, isRefetching } = useListCarRentals(tripId, { query: { enabled: !!tripId } });
   const { mutate: deleteRental } = useDeleteCarRental({
-    mutation: { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListCarRentalsQueryKey(tripId) }) },
+    mutation: { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListCarRentalsQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); } },
   });
 
   if (isLoading) return <View style={crs.center}><ActivityIndicator color={colors.primary} /></View>;

@@ -7,7 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import {
-  useListFlights, useCreateFlight, useDeleteFlight, getListFlightsQueryKey,
+  useListFlights, useCreateFlight, useDeleteFlight, getListFlightsQueryKey, getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 
@@ -131,6 +131,7 @@ function AddFlightModal({ tripId, visible, onClose, colors }: {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListFlightsQueryKey(tripId) });
+        queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         onClose();
         reset();
@@ -253,7 +254,7 @@ export function TripFlightsSection({ tripId }: { tripId: number }) {
   const { data: flights, isLoading, isError, refetch, isRefetching } = useListFlights(tripId, { query: { enabled: !!tripId } });
   const { mutate: deleteFlight } = useDeleteFlight({
     mutation: {
-      onSuccess: () => queryClient.invalidateQueries({ queryKey: getListFlightsQueryKey(tripId) }),
+      onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListFlightsQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); },
     },
   });
 

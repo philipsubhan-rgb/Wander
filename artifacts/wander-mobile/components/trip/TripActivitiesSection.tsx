@@ -7,7 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import {
-  useListActivities, useCreateActivity, useDeleteActivity, getListActivitiesQueryKey,
+  useListActivities, useCreateActivity, useDeleteActivity, getListActivitiesQueryKey, getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 import { FieldLabel, FormInput, formStyles } from './TripFlightsSection';
@@ -103,6 +103,7 @@ function AddActivityModal({ tripId, visible, onClose, colors }: {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) });
+        queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         onClose(); reset();
       },
@@ -191,7 +192,7 @@ export function TripActivitiesSection({ tripId }: { tripId: number }) {
 
   const { data: activities, isLoading, isError, refetch, isRefetching } = useListActivities(tripId, { query: { enabled: !!tripId } });
   const { mutate: deleteActivity } = useDeleteActivity({
-    mutation: { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) }) },
+    mutation: { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); } },
   });
 
   const sorted = activities ? [...activities].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()) : [];

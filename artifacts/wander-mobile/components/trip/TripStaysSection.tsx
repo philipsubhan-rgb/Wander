@@ -7,7 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import {
-  useListAccommodations, useCreateAccommodation, useDeleteAccommodation, getListAccommodationsQueryKey,
+  useListAccommodations, useCreateAccommodation, useDeleteAccommodation, getListAccommodationsQueryKey, getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 import { FieldLabel, FormInput, formStyles } from './TripFlightsSection';
@@ -105,6 +105,7 @@ function AddStayModal({ tripId, visible, onClose, colors }: {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) });
+        queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         onClose(); reset();
       },
@@ -211,7 +212,7 @@ export function TripStaysSection({ tripId }: { tripId: number }) {
 
   const { data: stays, isLoading, isError, refetch, isRefetching } = useListAccommodations(tripId, { query: { enabled: !!tripId } });
   const { mutate: deleteStay } = useDeleteAccommodation({
-    mutation: { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) }) },
+    mutation: { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListAccommodationsQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); } },
   });
 
   if (isLoading) return <View style={ss.center}><ActivityIndicator color={colors.primary} /></View>;

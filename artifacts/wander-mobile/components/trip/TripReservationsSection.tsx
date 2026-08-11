@@ -7,7 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import {
-  useListReservations, useCreateReservation, useDeleteReservation, getListReservationsQueryKey,
+  useListReservations, useCreateReservation, useDeleteReservation, getListReservationsQueryKey, getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 import { FieldLabel, FormInput, formStyles } from './TripFlightsSection';
@@ -129,6 +129,7 @@ function AddReservationModal({ tripId, visible, onClose, colors }: {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListReservationsQueryKey(tripId) });
+        queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         onClose(); reset();
       },
@@ -249,7 +250,7 @@ export function TripReservationsSection({ tripId }: { tripId: number }) {
 
   const { data: reservations, isLoading, refetch, isRefetching } = useListReservations(tripId, { query: { enabled: !!tripId } });
   const { mutate: deleteRes } = useDeleteReservation({
-    mutation: { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListReservationsQueryKey(tripId) }) },
+    mutation: { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListReservationsQueryKey(tripId) }); queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) }); } },
   });
 
   if (isLoading) return <View style={rvs.center}><ActivityIndicator color={colors.primary} /></View>;
