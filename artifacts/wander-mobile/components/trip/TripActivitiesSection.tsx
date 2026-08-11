@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, Modal, Alert, RefreshControl, KeyboardAvoidingView, Platform,
@@ -7,7 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import {
-  useListActivities, useCreateActivity, useDeleteActivity, getListActivitiesQueryKey, getGetTripTimelineQueryKey,
+  useListActivities, useCreateActivity, useDeleteActivity, useUpdateActivity, getListActivitiesQueryKey, getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 import { FieldLabel, FormInput, formStyles } from './TripFlightsSection';
@@ -25,8 +25,8 @@ const ACT_ICONS: Record<ActivityType, keyof typeof Feather.glyphMap> = {
   culture: 'book', relaxation: 'sun', transport: 'truck', other: 'compass',
 };
 
-function ActivityCard({ tripId, activity, colors, onDelete }: {
-  tripId: number; activity: any; colors: ReturnType<typeof useColors>; onDelete: (id: number) => void;
+function ActivityCard({ tripId, activity, colors, onDelete, onEdit }: {
+  tripId: number; activity: any; colors: ReturnType<typeof useColors>; onDelete: (id: number) => void; onEdit: (activity: any) => void;
 }) {
   const type = (activity.type as ActivityType) ?? 'other';
   const accent = ACT_COLORS[type];
@@ -52,6 +52,9 @@ function ActivityCard({ tripId, activity, colors, onDelete }: {
             <Text style={[ac.typeText, { color: accent }]}>{type}</Text>
           </View>
         </View>
+        <TouchableOpacity onPress={() => onEdit(activity)} hitSlop={8} style={{ marginRight: 6 }}>
+          <Feather name="edit-2" size={14} color={colors.mutedForeground} />
+        </TouchableOpacity>
         <TouchableOpacity onPress={confirmDelete} hitSlop={8}>
           <Feather name="trash-2" size={14} color={colors.mutedForeground} />
         </TouchableOpacity>
@@ -185,10 +188,113 @@ function AddActivityModal({ tripId, visible, onClose, colors }: {
   );
 }
 
+function EditActivityModal({ tripId, item, visible, onClose, colors }: {
+  tripId: number; item: any; visible: boolean; onClose: () => void; colors: ReturnType<typeof useColors>;
+}) {
+  const queryClient = useQueryClient();
+  const { mutate: updateActivity, isPending } = useUpdateActivity({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListActivitiesQueryKey(tripId) });
+        queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        onClose();
+      },
+      onError: () => Alert.alert('Error', 'Failed to update activity'),
+    },
+  });
+
+  const [title, setTitle] = useState('');
+  const [type, setType] = useState<ActivityType>('sightseeing');
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('');
+  const [location, setLocation] = useState('');
+  const [description, setDescription] = useState('');
+
+  useEffect(() => {
+    if (item) {
+      setTitle(item.title ?? '');
+      setType((item.type as ActivityType) ?? 'sightseeing');
+      setDate(item.date ?? '');
+      setTime(item.time ?? '');
+      setLocation(item.location ?? '');
+      setDescription(item.description ?? '');
+    }
+  }, [item]);
+
+  function reset() { setTitle(''); setType('sightseeing'); setDate(''); setTime(''); setLocation(''); setDescription(''); }
+
+  function handleSubmit() {
+    if (!title.trim() || !date.trim()) {
+      Alert.alert('Missing fields', 'Title and date are required.');
+      return;
+    }
+    updateActivity({
+      tripId,
+      activityId: item.id,
+      data: {
+        title: title.trim(),
+        type,
+        date: date.trim(),
+        time: time.trim() || undefined,
+        location: location.trim() || undefined,
+        description: description.trim() || undefined,
+      },
+    });
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => { onClose(); reset(); }}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <View style={[formStyles.container, { backgroundColor: colors.background }]}>
+          <View style={[formStyles.header, { borderBottomColor: colors.border }]}>
+            <Text style={[formStyles.title, { color: colors.foreground }]}>Edit Activity</Text>
+            <TouchableOpacity onPress={() => { onClose(); reset(); }} hitSlop={8}>
+              <Feather name="x" size={22} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={formStyles.body} keyboardShouldPersistTaps="handled">
+            <FieldLabel label="Title" colors={colors} />
+            <FormInput value={title} onChangeText={setTitle} placeholder="e.g. Visit Eiffel Tower" colors={colors} />
+            <FieldLabel label="Type" colors={colors} />
+            <View style={formStyles.chips}>
+              {ACTIVITY_TYPES.map((t) => (
+                <TouchableOpacity key={t} style={[formStyles.chip, { backgroundColor: type === t ? ACT_COLORS[t] : colors.card, borderColor: type === t ? ACT_COLORS[t] : colors.border }]} onPress={() => setType(t)}>
+                  <Text style={[formStyles.chipText, { color: type === t ? '#fff' : colors.foreground }]}>
+                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={formStyles.row}>
+              <View style={{ flex: 1 }}>
+                <FieldLabel label="Date (YYYY-MM-DD)" colors={colors} />
+                <FormInput value={date} onChangeText={setDate} placeholder="2025-07-15" colors={colors} autoCapitalize="none" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <FieldLabel label="Time (optional)" colors={colors} />
+                <FormInput value={time} onChangeText={setTime} placeholder="14:00" colors={colors} autoCapitalize="none" />
+              </View>
+            </View>
+            <FieldLabel label="Location (optional)" colors={colors} />
+            <FormInput value={location} onChangeText={setLocation} placeholder="e.g. Champ de Mars, Paris" colors={colors} />
+            <FieldLabel label="Description (optional)" colors={colors} />
+            <FormInput value={description} onChangeText={setDescription} placeholder="Add notes about this activity…" colors={colors} multiline />
+            <TouchableOpacity style={[formStyles.submit, { backgroundColor: isPending ? colors.muted : colors.primary }]} onPress={handleSubmit} disabled={isPending}>
+              {isPending ? <ActivityIndicator color="#fff" /> : <Text style={formStyles.submitText}>Save Changes</Text>}
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 export function TripActivitiesSection({ tripId }: { tripId: number }) {
   const colors = useColors();
   const queryClient = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
+  const [editingItem, setEditingItem] = useState<any>(null);
 
   const { data: activities, isLoading, isError, refetch, isRefetching } = useListActivities(tripId, { query: { enabled: !!tripId } });
   const { mutate: deleteActivity } = useDeleteActivity({
@@ -208,7 +314,7 @@ export function TripActivitiesSection({ tripId }: { tripId: number }) {
           <Text style={as.addBtnText}>Add Activity</Text>
         </TouchableOpacity>
         {sorted.length > 0 ? sorted.map((a) => (
-          <ActivityCard key={a.id} tripId={tripId} activity={a} colors={colors} onDelete={(id) => deleteActivity({ tripId, activityId: id })} />
+          <ActivityCard key={a.id} tripId={tripId} activity={a} colors={colors} onDelete={(id) => deleteActivity({ tripId, activityId: id })} onEdit={setEditingItem} />
         )) : (
           <View style={[as.empty, { borderColor: colors.border }]}>
             <Feather name="compass" size={32} color={colors.mutedForeground} />
@@ -218,6 +324,7 @@ export function TripActivitiesSection({ tripId }: { tripId: number }) {
         )}
       </ScrollView>
       <AddActivityModal tripId={tripId} visible={showAdd} onClose={() => setShowAdd(false)} colors={colors} />
+      <EditActivityModal tripId={tripId} item={editingItem} visible={!!editingItem} onClose={() => setEditingItem(null)} colors={colors} />
     </>
   );
 }

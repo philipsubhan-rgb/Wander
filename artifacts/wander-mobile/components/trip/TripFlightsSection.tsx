@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, Modal, TextInput, Alert, RefreshControl, KeyboardAvoidingView, Platform, Image,
@@ -7,7 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import {
-  useListFlights, useCreateFlight, useDeleteFlight, getListFlightsQueryKey, getGetTripTimelineQueryKey,
+  useListFlights, useCreateFlight, useDeleteFlight, useUpdateFlight, getListFlightsQueryKey, getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 
@@ -35,8 +35,8 @@ function AirlineLogo({ code }: { code: string }) {
   );
 }
 
-function FlightCard({ tripId, flight, colors, onDelete }: {
-  tripId: number; flight: any; colors: ReturnType<typeof useColors>; onDelete: (id: number) => void;
+function FlightCard({ tripId, flight, colors, onDelete, onEdit }: {
+  tripId: number; flight: any; colors: ReturnType<typeof useColors>; onDelete: (id: number) => void; onEdit: (flight: any) => void;
 }) {
   const dep = flight.departureDatetime ? new Date(flight.departureDatetime) : null;
   const arr = flight.arrivalDatetime ? new Date(flight.arrivalDatetime) : null;
@@ -74,6 +74,9 @@ function FlightCard({ tripId, flight, colors, onDelete }: {
         <View style={[cardStyles.dirBadge, { backgroundColor: (dirColor[dir] ?? '#6B7FA3') + '20' }]}>
           <Text style={[cardStyles.dirText, { color: dirColor[dir] ?? '#6B7FA3' }]}>{dir}</Text>
         </View>
+        <TouchableOpacity onPress={() => onEdit(flight)} hitSlop={8} style={{ marginRight: 6 }}>
+          <Feather name="edit-2" size={14} color={colors.mutedForeground} />
+        </TouchableOpacity>
         <TouchableOpacity onPress={confirmDelete} hitSlop={8}>
           <Feather name="trash-2" size={14} color={colors.mutedForeground} />
         </TouchableOpacity>
@@ -160,8 +163,8 @@ function AddFlightModal({ tripId, visible, onClose, colors }: {
       return;
     }
     // Convert local datetime strings to ISO
-    const depIso = new Date(departureDatetime).toISOString();
-    const arrIso = new Date(arrivalDatetime).toISOString();
+    const depIso = new Date(departureDatetime.replace(' ', 'T')).toISOString();
+    const arrIso = new Date(arrivalDatetime.replace(' ', 'T')).toISOString();
     createFlight({
       tripId,
       data: {
@@ -246,10 +249,146 @@ function AddFlightModal({ tripId, visible, onClose, colors }: {
   );
 }
 
+function EditFlightModal({ tripId, item, visible, onClose, colors }: {
+  tripId: number; item: any; visible: boolean; onClose: () => void; colors: ReturnType<typeof useColors>;
+}) {
+  const queryClient = useQueryClient();
+  const { mutate: updateFlight, isPending } = useUpdateFlight({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListFlightsQueryKey(tripId) });
+        queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        onClose();
+      },
+      onError: () => Alert.alert('Error', 'Failed to update flight'),
+    },
+  });
+
+  const [airline, setAirline] = useState('');
+  const [flightNumber, setFlightNumber] = useState('');
+  const [departureAirport, setDepartureAirport] = useState('');
+  const [arrivalAirport, setArrivalAirport] = useState('');
+  const [departureDatetime, setDepartureDatetime] = useState('');
+  const [arrivalDatetime, setArrivalDatetime] = useState('');
+  const [confirmationCode, setConfirmationCode] = useState('');
+  const [direction, setDirection] = useState<Direction>('outbound');
+
+  useEffect(() => {
+    if (item) {
+      setAirline(item.airline ?? '');
+      setFlightNumber(item.flightNumber ?? '');
+      setDepartureAirport(item.departureAirport ?? '');
+      setArrivalAirport(item.arrivalAirport ?? '');
+      setDepartureDatetime(item.departureDatetime ? item.departureDatetime.slice(0, 16).replace('T', ' ') : '');
+      setArrivalDatetime(item.arrivalDatetime ? item.arrivalDatetime.slice(0, 16).replace('T', ' ') : '');
+      setConfirmationCode(item.confirmationCode ?? '');
+      setDirection((item.direction as Direction) ?? 'outbound');
+    }
+  }, [item]);
+
+  function reset() {
+    setAirline(''); setFlightNumber(''); setDepartureAirport(''); setArrivalAirport('');
+    setDepartureDatetime(''); setArrivalDatetime(''); setConfirmationCode(''); setDirection('outbound');
+  }
+
+  function handleSubmit() {
+    if (!airline.trim() || !flightNumber.trim() || !departureAirport.trim() || !arrivalAirport.trim() || !departureDatetime.trim() || !arrivalDatetime.trim()) {
+      Alert.alert('Missing fields', 'Please fill in airline, flight number, airports, and times.');
+      return;
+    }
+    const depIso = new Date(departureDatetime.replace(' ', 'T')).toISOString();
+    const arrIso = new Date(arrivalDatetime.replace(' ', 'T')).toISOString();
+    updateFlight({
+      tripId,
+      flightId: item.id,
+      data: {
+        airline: airline.trim(),
+        flightNumber: flightNumber.trim(),
+        departureAirport: departureAirport.trim().toUpperCase(),
+        arrivalAirport: arrivalAirport.trim().toUpperCase(),
+        departureDatetime: depIso,
+        arrivalDatetime: arrIso,
+        confirmationCode: confirmationCode.trim() || undefined,
+        direction,
+      },
+    });
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => { onClose(); reset(); }}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <View style={[formStyles.container, { backgroundColor: colors.background }]}>
+          <View style={[formStyles.header, { borderBottomColor: colors.border }]}>
+            <Text style={[formStyles.title, { color: colors.foreground }]}>Edit Flight</Text>
+            <TouchableOpacity onPress={() => { onClose(); reset(); }} hitSlop={8}>
+              <Feather name="x" size={22} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={formStyles.body} keyboardShouldPersistTaps="handled">
+            <FieldLabel label="Airline" colors={colors} />
+            <FormInput value={airline} onChangeText={setAirline} placeholder="e.g. Lufthansa" colors={colors} />
+
+            <FieldLabel label="Flight Number" colors={colors} />
+            <FormInput value={flightNumber} onChangeText={setFlightNumber} placeholder="e.g. LH401" colors={colors} autoCapitalize="characters" />
+
+            <View style={formStyles.row}>
+              <View style={{ flex: 1 }}>
+                <FieldLabel label="From (IATA)" colors={colors} />
+                <FormInput value={departureAirport} onChangeText={setDepartureAirport} placeholder="JFK" colors={colors} autoCapitalize="characters" maxLength={3} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <FieldLabel label="To (IATA)" colors={colors} />
+                <FormInput value={arrivalAirport} onChangeText={setArrivalAirport} placeholder="FRA" colors={colors} autoCapitalize="characters" maxLength={3} />
+              </View>
+            </View>
+
+            <FieldLabel label="Departure (YYYY-MM-DD HH:MM)" colors={colors} />
+            <FormInput value={departureDatetime} onChangeText={setDepartureDatetime} placeholder="2025-07-15 08:30" colors={colors} />
+
+            <FieldLabel label="Arrival (YYYY-MM-DD HH:MM)" colors={colors} />
+            <FormInput value={arrivalDatetime} onChangeText={setArrivalDatetime} placeholder="2025-07-15 20:15" colors={colors} />
+
+            <FieldLabel label="Direction" colors={colors} />
+            <View style={formStyles.chips}>
+              {DIRECTIONS.map((d) => (
+                <TouchableOpacity
+                  key={d}
+                  style={[formStyles.chip, { backgroundColor: direction === d ? colors.primary : colors.card, borderColor: direction === d ? colors.primary : colors.border }]}
+                  onPress={() => setDirection(d)}
+                >
+                  <Text style={[formStyles.chipText, { color: direction === d ? '#fff' : colors.foreground }]}>
+                    {d.charAt(0).toUpperCase() + d.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <FieldLabel label="Confirmation Code (optional)" colors={colors} />
+            <FormInput value={confirmationCode} onChangeText={setConfirmationCode} placeholder="ABC123" colors={colors} autoCapitalize="characters" />
+
+            <TouchableOpacity
+              style={[formStyles.submit, { backgroundColor: isPending ? colors.muted : colors.primary }]}
+              onPress={handleSubmit}
+              disabled={isPending}
+            >
+              {isPending ? <ActivityIndicator color="#fff" /> : (
+                <Text style={formStyles.submitText}>Save Changes</Text>
+              )}
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 export function TripFlightsSection({ tripId }: { tripId: number }) {
   const colors = useColors();
   const queryClient = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
+  const [editingItem, setEditingItem] = useState<any>(null);
 
   const { data: flights, isLoading, isError, refetch, isRefetching } = useListFlights(tripId, { query: { enabled: !!tripId } });
   const { mutate: deleteFlight } = useDeleteFlight({
@@ -281,7 +420,7 @@ export function TripFlightsSection({ tripId }: { tripId: number }) {
         </TouchableOpacity>
 
         {flights && flights.length > 0 ? flights.map((f) => (
-          <FlightCard key={f.id} tripId={tripId} flight={f} colors={colors} onDelete={(id) => deleteFlight({ tripId, flightId: id })} />
+          <FlightCard key={f.id} tripId={tripId} flight={f} colors={colors} onDelete={(id) => deleteFlight({ tripId, flightId: id })} onEdit={setEditingItem} />
         )) : (
           <View style={[s.empty, { borderColor: colors.border }]}>
             <Feather name="navigation" size={32} color={colors.mutedForeground} />
@@ -291,6 +430,7 @@ export function TripFlightsSection({ tripId }: { tripId: number }) {
         )}
       </ScrollView>
       <AddFlightModal tripId={tripId} visible={showAdd} onClose={() => setShowAdd(false)} colors={colors} />
+      <EditFlightModal tripId={tripId} item={editingItem} visible={!!editingItem} onClose={() => setEditingItem(null)} colors={colors} />
     </>
   );
 }

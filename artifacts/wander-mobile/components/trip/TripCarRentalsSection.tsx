@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, Modal, Alert, RefreshControl, KeyboardAvoidingView, Platform,
@@ -7,7 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import {
-  useListCarRentals, useCreateCarRental, useDeleteCarRental, getListCarRentalsQueryKey, getGetTripTimelineQueryKey,
+  useListCarRentals, useCreateCarRental, useDeleteCarRental, useUpdateCarRental, getListCarRentalsQueryKey, getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 import { FieldLabel, FormInput, formStyles } from './TripFlightsSection';
@@ -20,8 +20,8 @@ const CAR_COLORS: Record<CarType, string> = {
   suv: '#A78BFA', luxury: '#F472B6', van: '#2DD4BF', convertible: '#FB923C', other: '#A8A29E',
 };
 
-function CarRentalCard({ tripId, rental, colors, onDelete }: {
-  tripId: number; rental: any; colors: ReturnType<typeof useColors>; onDelete: (id: number) => void;
+function CarRentalCard({ tripId, rental, colors, onDelete, onEdit }: {
+  tripId: number; rental: any; colors: ReturnType<typeof useColors>; onDelete: (id: number) => void; onEdit: (rental: any) => void;
 }) {
   const accent = CAR_COLORS[(rental.carType as CarType) ?? 'other'];
   const pickup = rental.pickupDatetime ? new Date(rental.pickupDatetime) : null;
@@ -48,6 +48,9 @@ function CarRentalCard({ tripId, rental, colors, onDelete }: {
             <Text style={[cr.typeText, { color: accent }]}>{rental.carType ?? 'other'}</Text>
           </View>
         </View>
+        <TouchableOpacity onPress={() => onEdit(rental)} hitSlop={8} style={{ marginRight: 6 }}>
+          <Feather name="edit-2" size={14} color={colors.mutedForeground} />
+        </TouchableOpacity>
         <TouchableOpacity onPress={confirmDelete} hitSlop={8}>
           <Feather name="trash-2" size={14} color={colors.mutedForeground} />
         </TouchableOpacity>
@@ -208,10 +211,141 @@ function AddCarRentalModal({ tripId, visible, onClose, colors }: {
   );
 }
 
+function EditCarRentalModal({ tripId, item, visible, onClose, colors }: {
+  tripId: number; item: any; visible: boolean; onClose: () => void; colors: ReturnType<typeof useColors>;
+}) {
+  const queryClient = useQueryClient();
+  const { mutate: updateRental, isPending } = useUpdateCarRental({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListCarRentalsQueryKey(tripId) });
+        queryClient.invalidateQueries({ queryKey: getGetTripTimelineQueryKey(tripId) });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        onClose();
+      },
+      onError: () => Alert.alert('Error', 'Failed to update car rental'),
+    },
+  });
+
+  const [company, setCompany] = useState('');
+  const [carType, setCarType] = useState<CarType>('economy');
+  const [pickupLocation, setPickupLocation] = useState('');
+  const [dropoffLocation, setDropoffLocation] = useState('');
+  const [pickupDate, setPickupDate] = useState('');
+  const [pickupTime, setPickupTime] = useState('10:00');
+  const [dropoffDate, setDropoffDate] = useState('');
+  const [dropoffTime, setDropoffTime] = useState('10:00');
+  const [confirmationCode, setConfirmationCode] = useState('');
+  const [driverName, setDriverName] = useState('');
+
+  useEffect(() => {
+    if (item) {
+      setCompany(item.company ?? '');
+      setCarType((item.carType as CarType) ?? 'economy');
+      setPickupLocation(item.pickupLocation ?? '');
+      setDropoffLocation(item.dropoffLocation ?? '');
+      setPickupDate(item.pickupDatetime ? item.pickupDatetime.slice(0, 10) : '');
+      setPickupTime(item.pickupDatetime ? item.pickupDatetime.slice(11, 16) : '10:00');
+      setDropoffDate(item.dropoffDatetime ? item.dropoffDatetime.slice(0, 10) : '');
+      setDropoffTime(item.dropoffDatetime ? item.dropoffDatetime.slice(11, 16) : '10:00');
+      setConfirmationCode(item.confirmationCode ?? '');
+      setDriverName(item.driverName ?? '');
+    }
+  }, [item]);
+
+  function reset() {
+    setCompany(''); setCarType('economy'); setPickupLocation(''); setDropoffLocation('');
+    setPickupDate(''); setPickupTime('10:00'); setDropoffDate(''); setDropoffTime('10:00');
+    setConfirmationCode(''); setDriverName('');
+  }
+
+  function handleSubmit() {
+    if (!company.trim() || !pickupLocation.trim() || !pickupDate.trim() || !dropoffDate.trim()) {
+      Alert.alert('Missing fields', 'Company, pickup location, and dates are required.');
+      return;
+    }
+    updateRental({
+      tripId,
+      carRentalId: item.id,
+      data: {
+        company: company.trim(),
+        carType,
+        pickupLocation: pickupLocation.trim(),
+        dropoffLocation: dropoffLocation.trim() || undefined,
+        pickupDatetime: new Date(`${pickupDate}T${pickupTime}`).toISOString(),
+        dropoffDatetime: new Date(`${dropoffDate}T${dropoffTime}`).toISOString(),
+        confirmationCode: confirmationCode.trim() || undefined,
+        driverName: driverName.trim() || undefined,
+      },
+    });
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => { onClose(); reset(); }}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <View style={[formStyles.container, { backgroundColor: colors.background }]}>
+          <View style={[formStyles.header, { borderBottomColor: colors.border }]}>
+            <Text style={[formStyles.title, { color: colors.foreground }]}>Edit Car Rental</Text>
+            <TouchableOpacity onPress={() => { onClose(); reset(); }} hitSlop={8}>
+              <Feather name="x" size={22} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={formStyles.body} keyboardShouldPersistTaps="handled">
+            <FieldLabel label="Rental Company" colors={colors} />
+            <FormInput value={company} onChangeText={setCompany} placeholder="e.g. Hertz, Sixt" colors={colors} />
+            <FieldLabel label="Car Type" colors={colors} />
+            <View style={formStyles.chips}>
+              {CAR_TYPES.map((t) => (
+                <TouchableOpacity key={t} style={[formStyles.chip, { backgroundColor: carType === t ? CAR_COLORS[t] : colors.card, borderColor: carType === t ? CAR_COLORS[t] : colors.border }]} onPress={() => setCarType(t)}>
+                  <Text style={[formStyles.chipText, { color: carType === t ? '#fff' : colors.foreground }]}>
+                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <FieldLabel label="Pickup Location" colors={colors} />
+            <FormInput value={pickupLocation} onChangeText={setPickupLocation} placeholder="e.g. Munich Airport" colors={colors} />
+            <View style={formStyles.row}>
+              <View style={{ flex: 1 }}>
+                <FieldLabel label="Pickup Date" colors={colors} />
+                <FormInput value={pickupDate} onChangeText={setPickupDate} placeholder="YYYY-MM-DD" colors={colors} autoCapitalize="none" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <FieldLabel label="Time" colors={colors} />
+                <FormInput value={pickupTime} onChangeText={setPickupTime} placeholder="10:00" colors={colors} autoCapitalize="none" />
+              </View>
+            </View>
+            <FieldLabel label="Drop-off Location (if different)" colors={colors} />
+            <FormInput value={dropoffLocation} onChangeText={setDropoffLocation} placeholder="e.g. Frankfurt Airport" colors={colors} />
+            <View style={formStyles.row}>
+              <View style={{ flex: 1 }}>
+                <FieldLabel label="Drop-off Date" colors={colors} />
+                <FormInput value={dropoffDate} onChangeText={setDropoffDate} placeholder="YYYY-MM-DD" colors={colors} autoCapitalize="none" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <FieldLabel label="Time" colors={colors} />
+                <FormInput value={dropoffTime} onChangeText={setDropoffTime} placeholder="10:00" colors={colors} autoCapitalize="none" />
+              </View>
+            </View>
+            <FieldLabel label="Driver Name (optional)" colors={colors} />
+            <FormInput value={driverName} onChangeText={setDriverName} placeholder="e.g. John Doe" colors={colors} />
+            <FieldLabel label="Confirmation Code (optional)" colors={colors} />
+            <FormInput value={confirmationCode} onChangeText={setConfirmationCode} placeholder="ABC123" colors={colors} autoCapitalize="characters" />
+            <TouchableOpacity style={[formStyles.submit, { backgroundColor: isPending ? colors.muted : colors.primary }]} onPress={handleSubmit} disabled={isPending}>
+              {isPending ? <ActivityIndicator color="#fff" /> : <Text style={formStyles.submitText}>Save Changes</Text>}
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 export function TripCarRentalsSection({ tripId }: { tripId: number }) {
   const colors = useColors();
   const queryClient = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
+  const [editingItem, setEditingItem] = useState<any>(null);
 
   const { data: rentals, isLoading, refetch, isRefetching } = useListCarRentals(tripId, { query: { enabled: !!tripId } });
   const { mutate: deleteRental } = useDeleteCarRental({
@@ -229,7 +363,7 @@ export function TripCarRentalsSection({ tripId }: { tripId: number }) {
           <Text style={crs.addBtnText}>Add Car Rental</Text>
         </TouchableOpacity>
         {rentals && rentals.length > 0 ? rentals.map((r) => (
-          <CarRentalCard key={r.id} tripId={tripId} rental={r} colors={colors} onDelete={(id) => deleteRental({ tripId, carRentalId: id })} />
+          <CarRentalCard key={r.id} tripId={tripId} rental={r} colors={colors} onDelete={(id) => deleteRental({ tripId, carRentalId: id })} onEdit={setEditingItem} />
         )) : (
           <View style={[crs.empty, { borderColor: colors.border }]}>
             <Feather name="truck" size={32} color={colors.mutedForeground} />
@@ -239,6 +373,7 @@ export function TripCarRentalsSection({ tripId }: { tripId: number }) {
         )}
       </ScrollView>
       <AddCarRentalModal tripId={tripId} visible={showAdd} onClose={() => setShowAdd(false)} colors={colors} />
+      <EditCarRentalModal tripId={tripId} item={editingItem} visible={!!editingItem} onClose={() => setEditingItem(null)} colors={colors} />
     </>
   );
 }

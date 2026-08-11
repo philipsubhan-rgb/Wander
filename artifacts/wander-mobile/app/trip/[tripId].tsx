@@ -25,6 +25,8 @@ import { TripNotesSection } from '@/components/trip/TripNotesSection';
 import { TripExpensesSection } from '@/components/trip/TripExpensesSection';
 import { TripBalanceSection } from '@/components/trip/TripBalanceSection';
 import { TripTravelersSection } from '@/components/trip/TripTravelersSection';
+import { TripItinerarySection } from '@/components/trip/TripItinerarySection';
+import { TripSettingsSection } from '@/components/trip/TripSettingsSection';
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
 
@@ -39,7 +41,9 @@ type TabId =
   | 'notes'
   | 'expenses'
   | 'balance'
-  | 'travelers';
+  | 'travelers'
+  | 'itinerary'
+  | 'settings';
 
 const TABS: { id: TabId; label: string; icon: keyof typeof Feather.glyphMap }[] = [
   { id: 'overview',    label: 'Overview',    icon: 'grid' },
@@ -53,6 +57,8 @@ const TABS: { id: TabId; label: string; icon: keyof typeof Feather.glyphMap }[] 
   { id: 'expenses',    label: 'Expenses',    icon: 'credit-card' },
   { id: 'balance',     label: 'Balance',     icon: 'bar-chart-2' },
   { id: 'travelers',   label: 'Travelers',   icon: 'users' },
+  { id: 'itinerary',  label: 'Itinerary',   icon: 'calendar' },
+  { id: 'settings',   label: 'Settings',    icon: 'settings' },
 ];
 
 // ── Main screen ───────────────────────────────────────────────────────────────
@@ -90,6 +96,8 @@ export default function TripDetailScreen() {
       case 'expenses':    return <TripExpensesSection tripId={tripId} bottomPad={bottomPad} />;
       case 'balance':     return <TripBalanceSection tripId={tripId} bottomPad={bottomPad} />;
       case 'travelers':   return <TripTravelersSection tripId={tripId} />;
+      case 'itinerary':   return <TripItinerarySection tripId={tripId} />;
+      case 'settings':    return <TripSettingsSection tripId={tripId} />;
     }
   }
 

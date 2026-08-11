@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,11 +8,22 @@ import {
   ActivityIndicator,
   Platform,
   RefreshControl,
+  Modal,
+  TextInput,
+  ScrollView,
+  KeyboardAvoidingView,
+  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { useListTrips } from '@workspace/api-client-react';
+import { useQueryClient } from '@tanstack/react-query';
+import * as Haptics from 'expo-haptics';
+import {
+  useListTrips,
+  useCreateTrip,
+  getListTripsQueryKey,
+} from '@workspace/api-client-react';
 import type { Trip } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
@@ -90,11 +101,161 @@ function TripCard({ trip, colors }: { trip: Trip; colors: ReturnType<typeof useC
   );
 }
 
+function CreateTripModal({
+  visible,
+  onClose,
+  colors,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  colors: ReturnType<typeof useColors>;
+}) {
+  const queryClient = useQueryClient();
+  const { mutate: createTrip, isPending } = useCreateTrip({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListTripsQueryKey() });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        onClose();
+        reset();
+      },
+      onError: () => Alert.alert('Error', 'Failed to create trip. Please try again.'),
+    },
+  });
+
+  const [title, setTitle] = useState('');
+  const [destination, setDestination] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
+  function reset() {
+    setTitle('');
+    setDestination('');
+    setStartDate('');
+    setEndDate('');
+  }
+
+  function handleSubmit() {
+    if (!title.trim() || !destination.trim() || !startDate.trim() || !endDate.trim()) {
+      Alert.alert('Missing fields', 'Please fill in all required fields.');
+      return;
+    }
+    createTrip({
+      data: {
+        title: title.trim(),
+        destination: destination.trim(),
+        startDate: startDate.trim(),
+        endDate: endDate.trim(),
+      },
+    });
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={() => { onClose(); reset(); }}
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <View style={[modalStyles.container, { backgroundColor: colors.background }]}>
+          {/* Header */}
+          <View style={[modalStyles.header, { borderBottomColor: colors.border }]}>
+            <Text style={[modalStyles.title, { color: colors.foreground }]}>New Trip</Text>
+            <TouchableOpacity onPress={() => { onClose(); reset(); }} hitSlop={8}>
+              <Feather name="x" size={22} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={modalStyles.body} keyboardShouldPersistTaps="handled">
+            {/* Title */}
+            <Text style={[modalStyles.label, { color: colors.mutedForeground }]}>TITLE</Text>
+            <View style={[modalStyles.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <TextInput
+                style={[modalStyles.input, { color: colors.foreground }]}
+                value={title}
+                onChangeText={setTitle}
+                placeholder="e.g. Summer in Europe"
+                placeholderTextColor={colors.mutedForeground}
+                autoCapitalize="words"
+              />
+            </View>
+
+            {/* Destination */}
+            <Text style={[modalStyles.label, { color: colors.mutedForeground }]}>DESTINATION</Text>
+            <View style={[modalStyles.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Feather name="map-pin" size={14} color={colors.mutedForeground} style={{ marginRight: 6 }} />
+              <TextInput
+                style={[modalStyles.input, { color: colors.foreground }]}
+                value={destination}
+                onChangeText={setDestination}
+                placeholder="e.g. Paris, France"
+                placeholderTextColor={colors.mutedForeground}
+                autoCapitalize="words"
+              />
+            </View>
+
+            {/* Dates */}
+            <View style={modalStyles.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={[modalStyles.label, { color: colors.mutedForeground }]}>START DATE</Text>
+                <View style={[modalStyles.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <Feather name="calendar" size={14} color={colors.mutedForeground} style={{ marginRight: 6 }} />
+                  <TextInput
+                    style={[modalStyles.input, { color: colors.foreground }]}
+                    value={startDate}
+                    onChangeText={setStartDate}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor={colors.mutedForeground}
+                    autoCapitalize="none"
+                    keyboardType="numbers-and-punctuation"
+                  />
+                </View>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[modalStyles.label, { color: colors.mutedForeground }]}>END DATE</Text>
+                <View style={[modalStyles.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <Feather name="calendar" size={14} color={colors.mutedForeground} style={{ marginRight: 6 }} />
+                  <TextInput
+                    style={[modalStyles.input, { color: colors.foreground }]}
+                    value={endDate}
+                    onChangeText={setEndDate}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor={colors.mutedForeground}
+                    autoCapitalize="none"
+                    keyboardType="numbers-and-punctuation"
+                  />
+                </View>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[modalStyles.submit, { backgroundColor: isPending ? colors.muted : colors.primary }]}
+              onPress={handleSubmit}
+              disabled={isPending}
+            >
+              {isPending ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={modalStyles.submitText}>Create Trip</Text>
+              )}
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 export default function TripsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { user, isLoading: authLoading } = useAuth();
   const isWeb = Platform.OS === 'web';
+  const [showCreate, setShowCreate] = useState(false);
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -121,10 +282,23 @@ export default function TripsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>Trips</Text>
-        <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
-          {trips ? `${trips.length} trip${trips.length !== 1 ? 's' : ''}` : ''}
-        </Text>
+        <View style={styles.headerRow}>
+          <View>
+            <Text style={[styles.headerTitle, { color: colors.foreground }]}>Trips</Text>
+            <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
+              {trips ? `${trips.length} trip${trips.length !== 1 ? 's' : ''}` : ''}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.newTripBtn, { backgroundColor: colors.primary }]}
+            onPress={() => setShowCreate(true)}
+            activeOpacity={0.85}
+            testID="create-trip-button"
+          >
+            <Feather name="plus" size={16} color="#fff" />
+            <Text style={styles.newTripBtnText}>New Trip</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {isLoading ? (
@@ -162,15 +336,49 @@ export default function TripsScreen() {
               <Feather name="globe" size={40} color={colors.mutedForeground} />
               <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No trips yet</Text>
               <Text style={[styles.emptySub, { color: colors.mutedForeground }]}>
-                Your trips will appear here once an admin adds you to one.
+                Create your first trip or wait for an admin to add you to one.
               </Text>
             </View>
           }
         />
       )}
+
+      <CreateTripModal
+        visible={showCreate}
+        onClose={() => setShowCreate(false)}
+        colors={colors}
+      />
     </View>
   );
 }
+
+const modalStyles = StyleSheet.create({
+  container: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  title: { fontSize: 18, fontFamily: 'Inter_700Bold' },
+  body: { padding: 16, gap: 8, paddingBottom: 40 },
+  label: { fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 0.8, marginBottom: 2 },
+  inputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  input: { flex: 1, fontSize: 15, fontFamily: 'Inter_400Regular', padding: 0, margin: 0 },
+  row: { flexDirection: 'row', gap: 10 },
+  submit: { paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginTop: 8 },
+  submitText: { color: '#fff', fontSize: 16, fontFamily: 'Inter_600SemiBold' },
+});
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -179,7 +387,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 2,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
   },
   headerTitle: {
     fontSize: 28,
@@ -189,6 +401,20 @@ const styles = StyleSheet.create({
   headerSub: {
     fontSize: 13,
     fontFamily: 'Inter_400Regular',
+    marginTop: 2,
+  },
+  newTripBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  newTripBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
   },
   list: {
     padding: 16,

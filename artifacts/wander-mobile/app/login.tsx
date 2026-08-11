@@ -134,6 +134,15 @@ export default function LoginScreen() {
                 <Text style={styles.loginBtnText}>Sign In</Text>
               )}
             </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => router.push('/forgot-password')}
+              activeOpacity={0.7}
+              style={styles.forgotBtn}
+              testID="forgot-password-link"
+            >
+              <Text style={styles.forgotText}>Forgot password?</Text>
+            </TouchableOpacity>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -243,6 +252,15 @@ function makeStyles(colors: ReturnType<typeof useColors>, insets: { top: number;
       color: '#fff',
       fontSize: 15,
       fontFamily: 'Inter_600SemiBold',
+    },
+    forgotBtn: {
+      alignItems: 'center',
+      paddingVertical: 4,
+    },
+    forgotText: {
+      color: colors.primary,
+      fontSize: 14,
+      fontFamily: 'Inter_500Medium',
     },
   });
 }
