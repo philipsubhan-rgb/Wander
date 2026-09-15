@@ -174,3 +174,52 @@
     pointer-events: none;
   }
 }
+
+/* The guide is designed as a calm editorial document on screen and on paper. */
+.wander-guide-marker {
+  background: transparent;
+  border: 0;
+}
+.wander-guide-marker span {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 3px solid #f8fbfd;
+  border-radius: 999px;
+  background: #2475b8;
+  color: #f8fbfd;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 3px 10px rgba(21, 56, 81, .28);
+}
+.guide-page {
+  background:
+    radial-gradient(circle at 12% 8%, rgba(191, 221, 234, .28), transparent 26rem),
+    hsl(var(--background));
+}
+.guide-paper {
+  background: #fbfcfa;
+  box-shadow: 0 18px 60px rgba(21, 56, 81, .1);
+}
+.guide-card {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.guide-section-rule {
+  border-top: 1px solid rgba(36, 117, 184, .22);
+}
+
+@media print {
+  @page { size: A4; margin: 14mm 13mm 16mm; }
+  html, body { background: #fbfcfa !important; }
+  body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .guide-page { background: #fbfcfa !important; }
+  .guide-paper { box-shadow: none !important; max-width: none !important; }
+  .guide-controls, .app-shell, header, nav, aside { display: none !important; }
+  .guide-map-wrap { break-inside: avoid; page-break-inside: avoid; }
+  .wander-guide-map { height: 300px !important; }
+  .guide-cover { min-height: 235mm !important; }
+  a { color: inherit !important; text-decoration: none !important; }
+}

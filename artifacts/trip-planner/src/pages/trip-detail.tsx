@@ -6,7 +6,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Pencil, ArrowLeft, Loader2, CalendarDays, Check, X } from 'lucide-react';
+import { Pencil, ArrowLeft, Loader2, CalendarDays, Check, X, BookOpen } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { format, parseISO } from 'date-fns';
 import { useState } from 'react';
@@ -171,12 +171,21 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
                 </div>
               )}
             </div>
-            {!editMode && canAdmin && (
-              <Link href={`/trips/${trip.id}/edit`}>
-                <Button variant="secondary" className="bg-white text-black hover:bg-white/90 rounded-full shadow-sm hover-elevate">
-                  <Pencil className="h-4 w-4 mr-2" /> Edit Trip
+            {!editMode && (
+              <div className="flex flex-wrap gap-2">
+                <Button asChild variant="secondary" className="bg-white/90 text-black hover:bg-white rounded-full shadow-sm hover-elevate">
+                  <Link href={`/trips/${trip.id}/guide`} data-testid="link-generate-guide">
+                    <BookOpen className="h-4 w-4 mr-2" /> Generate Guide
+                  </Link>
                 </Button>
-              </Link>
+                {canAdmin && (
+                  <Link href={`/trips/${trip.id}/edit`}>
+                    <Button variant="secondary" className="bg-white text-black hover:bg-white/90 rounded-full shadow-sm hover-elevate">
+                      <Pencil className="h-4 w-4 mr-2" /> Edit Trip
+                    </Button>
+                  </Link>
+                )}
+              </div>
             )}
             {editMode && canAdmin && (
               <Link href={`/trips/${trip.id}`}>

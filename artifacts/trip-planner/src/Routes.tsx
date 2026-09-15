@@ -7,6 +7,7 @@ import ResetPassword from '@/pages/reset-password';
 import TripsDashboard from '@/pages/trips';
 import AdminUsers from '@/pages/admin-users';
 import TripDetail from '@/pages/trip-detail';
+import TripGuide from '@/pages/trip-guide';
 
 export default function Routes() {
   return (
@@ -24,6 +25,12 @@ export default function Routes() {
           <AppShell>
             <TripsDashboard />
           </AppShell>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/trips/:id/guide">
+        <ProtectedRoute>
+          <TripGuide />
         </ProtectedRoute>
       </Route>
 
