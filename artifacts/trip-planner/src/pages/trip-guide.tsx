@@ -42,10 +42,10 @@ import { format, isValid, parseISO, addDays, differenceInCalendarDays } from 'da
 import { Button } from '@/components/ui/button';
 import { fetchWikiImage } from '@/lib/wiki-image';
 import { GuideMap, type GuideMapStop } from '@/components/trip/GuideMap';
+import { buildGuideStops, buildRouteLegs, type GuideRouteStop } from '@/lib/trip-guide';
 
 type AnyRecord = Record<string, any>;
 type GuideEvent = AnyRecord & { date: string; title: string; type?: string };
-type RouteStop = { id: string; number: number; name: string; lat?: number; lon?: number };
 
 function asArray(value: unknown): AnyRecord[] {
   return Array.isArray(value) ? (value as AnyRecord[]) : [];
@@ -87,28 +87,6 @@ function titleCase(value?: string | null) {
 
 function compact(value?: string | null, fallback = 'Details to be confirmed') {
   return value?.trim() || fallback;
-}
-
-function haversineKm(a: GuideMapStop, b: GuideMapStop) {
-  const earthRadius = 6371;
-  const radians = (degrees: number) => degrees * Math.PI / 180;
-  const latitudeDelta = radians(b.lat - a.lat);
-  const longitudeDelta = radians(b.lon - a.lon);
-  const halfChord = Math.sin(latitudeDelta / 2) ** 2
-    + Math.cos(radians(a.lat)) * Math.cos(radians(b.lat)) * Math.sin(longitudeDelta / 2) ** 2;
-  return earthRadius * 2 * Math.atan2(Math.sqrt(halfChord), Math.sqrt(1 - halfChord));
-}
-
-function durationForLeg(km: number) {
-  const walkingMinutes = Math.max(4, Math.round(km / 4.8 * 60));
-  const drivingMinutes = Math.max(4, Math.round(km / 25 * 60));
-  return `${walkingMinutes} min walk · ${drivingMinutes} min drive`;
-}
-
-function hasCoordinates(record: AnyRecord) {
-  return record.lat !== null && record.lat !== undefined
-    && record.lon !== null && record.lon !== undefined
-    && Number.isFinite(Number(record.lat)) && Number.isFinite(Number(record.lon));
 }
 
 function ImageOrPlaceholder({
@@ -246,42 +224,15 @@ export default function TripGuide() {
   const reservations = asArray(reservationsQuery.data);
   const notes = asArray(notesQuery.data);
   const documents = asArray(documentsQuery.data);
-  const allStops = useMemo<RouteStop[]>(() => {
-    const raw: AnyRecord[] = [
-      ...stays.map((item) => ({ ...item, kind: 'stay', label: item.name })),
-      ...activities.map((item) => ({ ...item, kind: 'activity', label: item.title })),
-      ...reservations.map((item) => ({ ...item, kind: 'reservation', label: item.title })),
-      ...cars.map((item) => ({ ...item, kind: 'car', label: item.company })),
-    ];
-    return raw
-      .sort((a, b) => String(a.date || a.checkIn || a.pickupDatetime || '').localeCompare(String(b.date || b.checkIn || b.pickupDatetime || '')))
-      .map((item, index) => ({
-        id: `${item.kind}-${item.id}`,
-        number: index + 1,
-        name: compact(item.label, 'Trip stop'),
-        ...(hasCoordinates(item)
-          ? { lat: Number(item.lat), lon: Number(item.lon) }
-          : {}),
-      }));
-  }, [activities, cars, reservations, stays]);
+  const allStops = useMemo<GuideRouteStop[]>(
+    () => buildGuideStops({ stays, activities, reservations, cars }),
+    [activities, cars, reservations, stays],
+  );
   const stopData = useMemo<GuideMapStop[]>(
     () => allStops.filter((stop): stop is GuideMapStop => Number.isFinite(stop.lat) && Number.isFinite(stop.lon)),
     [allStops],
   );
-  const routeLegs = useMemo(() => allStops.slice(1).map((to, index) => {
-    const from = allStops[index];
-    const coordinatesAvailable = Number.isFinite(from.lat) && Number.isFinite(from.lon) && Number.isFinite(to.lat) && Number.isFinite(to.lon);
-    const distance = coordinatesAvailable
-      ? haversineKm(from as GuideMapStop, to as GuideMapStop)
-      : 0.8;
-    return {
-      from,
-      to,
-      distance: distance < 1 ? `${Math.round(distance * 1000)} m` : `${distance.toFixed(1)} km`,
-      duration: coordinatesAvailable ? durationForLeg(distance) : 'Approx. 12 min walk · 5 min drive',
-      approximate: !coordinatesAvailable,
-    };
-  }), [allStops]);
+  const routeLegs = useMemo(() => buildRouteLegs(allStops), [allStops]);
   const days = useMemo(() => getDays(trip?.startDate, trip?.endDate), [trip?.startDate, trip?.endDate]);
   const eventsByDate = useMemo(() => {
     const grouped = new Map<string, GuideEvent[]>();
