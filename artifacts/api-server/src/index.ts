@@ -30,17 +30,21 @@ async function ensureSessionTable() {
   `);
 }
 
-ensureSessionTable()
-  .then(() => {
-    app.listen(port, (err) => {
-      if (err) {
-        logger.error({ err }, "Error listening on port");
-        process.exit(1);
-      }
-      logger.info({ port }, "Server listening");
-    });
-  })
-  .catch((err) => {
-    logger.error({ err }, "Failed to ensure session table");
+app.listen(port, (err) => {
+  if (err) {
+    logger.error({ err }, "Error listening on port");
     process.exit(1);
+  }
+
+  logger.info({ port }, "Server listening");
+
+  // Do not block the HTTP startup probe on a database connection. Production
+  // databases can take time to become reachable while an autoscale instance is
+  // starting, but the health endpoint must respond promptly for promotion.
+  void ensureSessionTable().catch((sessionTableError) => {
+    logger.error(
+      { err: sessionTableError },
+      "Failed to ensure session table after server startup",
+    );
   });
+});

@@ -4,3 +4,4 @@
 - [Orval + TanStack Query v5 UseQueryOptions fix](orval-tanstack-v5-fix.md) — Orval 8.21.0 generates `query?:UseQueryOptions<>` but TQ v5 requires `queryKey`; post-codegen script wraps with `Partial<>`.
 - [OpenAPI path param renames cascade](openapi-param-rename-cascade.md) — renaming path params in spec regenerates Zod schemas AND changes Express `req.params` keys; both API routes and Zod schemas must be updated together.
 - [Email lookup flow for trip participants](email-participant-lookup.md) — participants are added by email lookup (not dropdown); email is required+unique on users table; `GET /users/lookup?email=` is auth-gated (not admin-only).
+- [API startup health](api-startup-health.md) — open the HTTP port before nonessential database setup so autoscale startup probes are not blocked by a cold database.
