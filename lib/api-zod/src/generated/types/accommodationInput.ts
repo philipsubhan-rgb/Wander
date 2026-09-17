@@ -19,4 +19,7 @@ export interface AccommodationInput {
   confirmationCode?: string;
   phone?: string;
   notes?: string;
+  nightlyRate?: string;
+  totalPrice?: string;
+  currency?: string;
 }

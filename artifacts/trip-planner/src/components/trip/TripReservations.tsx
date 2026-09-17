@@ -24,6 +24,12 @@ import {
 import { invalidateReservationQueries } from '@/lib/invalidate-trip-queries';
 import { useAuth } from '@/hooks/use-auth';
 import { fetchWikiImage } from '@/lib/wiki-image';
+import {
+  venueFieldsToClearOnVenueChange,
+  venueUpdatesForSuggestion,
+  mayReplaceVenueImage,
+  type VenueMetadataFields,
+} from '@/lib/venue-metadata';
 import { ImagePickerContent } from '@/components/ImageEditor';
 
 const API_BASE = `${import.meta.env.BASE_URL}api`;
@@ -383,6 +389,16 @@ function ReservationForm({
     },
   });
 
+  // Track the last selected (or originally saved) venue plus the values that
+  // were auto-filled from it, so stale venue metadata can be cleared when the
+  // venue text changes and replaced when a new suggestion is picked.
+  const selectedVenueRef = useRef<string | null>(reservation?.venue ?? null);
+  const autoFilledRef = useRef<VenueMetadataFields | null>(
+    reservation
+      ? { phone: reservation.phone ?? '', url: reservation.url ?? '', imageUrl: reservation.imageUrl ?? '' }
+      : null,
+  );
+
   const onSubmit = (values: z.infer<typeof schema>) => {
     const payload = {
       ...values,
@@ -458,20 +474,59 @@ function ReservationForm({
             <FormControl>
               <VenueInput
                 value={field.value ?? ''}
-                onChange={field.onChange}
+                onChange={v => {
+                  field.onChange(v);
+                  // Venue text edited away from the last selected/original venue:
+                  // drop the old venue's metadata instead of keeping it stale.
+                  const selected = selectedVenueRef.current;
+                  if (selected && v.trim() !== selected.trim()) {
+                    selectedVenueRef.current = null;
+                    const currentMeta: VenueMetadataFields = {
+                      address:  form.getValues('address'),
+                      url:      form.getValues('url'),
+                      phone:    form.getValues('phone'),
+                      imageUrl: form.getValues('imageUrl'),
+                      lat:      form.getValues('lat'),
+                      lon:      form.getValues('lon'),
+                    };
+                    const clear = venueFieldsToClearOnVenueChange(currentMeta, autoFilledRef.current);
+                    if (clear.includes('address'))  form.setValue('address', '');
+                    if (clear.includes('url'))      form.setValue('url', '');
+                    if (clear.includes('lat'))      form.setValue('lat', undefined);
+                    if (clear.includes('lon'))      form.setValue('lon', undefined);
+                    if (clear.includes('phone'))    form.setValue('phone', '');
+                    if (clear.includes('imageUrl')) form.setValue('imageUrl', '');
+                    autoFilledRef.current = null;
+                  }
+                }}
                 near={tripDestination}
                 onSelect={s => {
-                  form.setValue('venue',   s.name);
-                  form.setValue('address', s.address);
-                  form.setValue('lat',     s.lat);
-                  form.setValue('lon',     s.lon);
-                  if (s.phone   && !form.getValues('phone')) form.setValue('phone', s.phone);
-                  if (s.website && !form.getValues('url'))   form.setValue('url',   s.website);
+                  selectedVenueRef.current = s.name;
+                  // A new suggestion replaces the old venue's metadata (rather
+                  // than only filling blanks), while preserving values the
+                  // user typed by hand.
+                  const { updates, autoFilled } = venueUpdatesForSuggestion(
+                    { phone: form.getValues('phone'), url: form.getValues('url') },
+                    s,
+                    autoFilledRef.current,
+                  );
+                  form.setValue('venue', s.name);
+                  form.setValue('address', updates.address);
+                  form.setValue('lat', updates.lat);
+                  form.setValue('lon', updates.lon);
+                  if (updates.phone !== undefined)   form.setValue('phone', updates.phone);
+                  if (updates.url !== undefined)     form.setValue('url', updates.url);
+                  autoFilledRef.current = autoFilled;
                   // Auto-set title from venue name if title is empty
                   if (!form.getValues('title')) form.setValue('title', s.name);
-                  // Fetch wiki image
+                  // Fetch wiki image — only when the field is blank or still
+                  // holds the previously auto-filled photo.
                   fetchWikiImage(s.name).then(url => {
-                    if (url && !form.getValues('imageUrl')) form.setValue('imageUrl', url);
+                    if (!url) return;
+                    if (mayReplaceVenueImage(form.getValues('imageUrl'), autoFilledRef.current?.imageUrl)) {
+                      form.setValue('imageUrl', url);
+                      autoFilledRef.current = { ...autoFilledRef.current, imageUrl: url };
+                    }
                   });
                 }}
               />

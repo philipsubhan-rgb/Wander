@@ -1918,6 +1918,10 @@ components:
           type: string
         arrivalDatetime:
           type: string
+        departureTimezone:
+          type: ["string", "null"]
+        arrivalTimezone:
+          type: ["string", "null"]
         confirmationCode:
           type: ["string", "null"]
         notes:
@@ -1925,6 +1929,20 @@ components:
         direction:
           type: string
           enum: [outbound, return, connecting]
+        totalPrice:
+          type: ["string", "null"]
+        currency:
+          type: string
+        fareBrand:
+          type: ["string", "null"]
+        refundable:
+          type: ["boolean", "null"]
+        changeable:
+          type: ["boolean", "null"]
+        checkedBags:
+          type: ["string", "null"]
+        passengerCount:
+          type: ["integer", "null"]
 
     FlightInput:
       type: object
@@ -1942,6 +1960,10 @@ components:
           type: string
         arrivalDatetime:
           type: string
+        departureTimezone:
+          type: string
+        arrivalTimezone:
+          type: string
         confirmationCode:
           type: string
         notes:
@@ -1949,6 +1971,20 @@ components:
         direction:
           type: string
           enum: [outbound, return, connecting]
+        totalPrice:
+          type: string
+        currency:
+          type: string
+        fareBrand:
+          type: string
+        refundable:
+          type: boolean
+        changeable:
+          type: boolean
+        checkedBags:
+          type: string
+        passengerCount:
+          type: integer
 
     FlightUpdate:
       type: object
@@ -1965,6 +2001,10 @@ components:
           type: string
         arrivalDatetime:
           type: string
+        departureTimezone:
+          type: string
+        arrivalTimezone:
+          type: string
         confirmationCode:
           type: string
         notes:
@@ -1972,6 +2012,20 @@ components:
         direction:
           type: string
           enum: [outbound, return, connecting]
+        totalPrice:
+          type: string
+        currency:
+          type: string
+        fareBrand:
+          type: string
+        refundable:
+          type: boolean
+        changeable:
+          type: boolean
+        checkedBags:
+          type: string
+        passengerCount:
+          type: integer
 
     Accommodation:
       type: object
@@ -2004,6 +2058,12 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
+        nightlyRate:
+          type: ["string", "null"]
+        totalPrice:
+          type: ["string", "null"]
+        currency:
+          type: string
 
     AccommodationInput:
       type: object
@@ -2032,6 +2092,12 @@ components:
           type: string
         notes:
           type: string
+        nightlyRate:
+          type: string
+        totalPrice:
+          type: string
+        currency:
+          type: string
 
     AccommodationUpdate:
       type: object
@@ -2058,6 +2124,12 @@ components:
         phone:
           type: string
         notes:
+          type: string
+        nightlyRate:
+          type: string
+        totalPrice:
+          type: string
+        currency:
           type: string
 
     Activity:

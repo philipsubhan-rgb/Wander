@@ -14,7 +14,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plane, PlaneTakeoff, Plus, Trash2, Pencil, Loader2 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import {
+  formatFlightTime24, formatFlightFullDate, toDatetimeLocalValue,
+  airportTimeZone, formatMoney,
+} from '@workspace/flight-time';
+import { Checkbox } from '@/components/ui/checkbox';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type AirlineSuggestion = { code: string; name: string };
@@ -259,9 +263,9 @@ function FlightPicker({
                   <span className="font-mono font-semibold text-primary">{f.flightNumber}</span>
                   <span className="text-muted-foreground">{f.airline}</span>
                   <span className="font-medium">
-                    {format(parseISO(f.departureTime), 'HH:mm')}
+                    {formatFlightTime24(f.departureTime, null)}
                     {' → '}
-                    {format(parseISO(f.arrivalTime), 'HH:mm')}
+                    {formatFlightTime24(f.arrivalTime, null)}
                   </span>
                 </span>
               </SelectItem>
@@ -283,6 +287,13 @@ const flightSchema = z.object({
   arrivalDatetime: z.string().min(1, 'Arrival time is required'),
   confirmationCode: z.string().optional(),
   direction: z.enum(['outbound', 'return', 'connecting']).optional(),
+  totalPrice: z.string().optional(),
+  currency: z.string().optional(),
+  fareBrand: z.string().optional(),
+  refundable: z.boolean().optional(),
+  changeable: z.boolean().optional(),
+  checkedBags: z.string().optional(),
+  passengerCount: z.number().int().positive().optional(),
 });
 
 // ─── Trip flights list ────────────────────────────────────────────────────────
@@ -406,14 +417,33 @@ function FlightCard({ tripId, flight, editMode, tripStartDate }: { tripId: numbe
                   <><span>•</span><span className="font-mono">{flight.confirmationCode}</span></>
                 )}
               </p>
+              {(() => {
+                const price = formatMoney(flight.totalPrice, flight.currency);
+                const fareBits = [
+                  flight.passengerCount ? `${flight.passengerCount} ${flight.passengerCount === 1 ? 'passenger' : 'passengers'}` : null,
+                  flight.fareBrand || null,
+                  flight.refundable === true ? 'Refundable' : flight.refundable === false ? 'Non-refundable' : null,
+                  flight.changeable === true ? 'Changeable' : flight.changeable === false ? 'Non-changeable' : null,
+                  flight.checkedBags || null,
+                ].filter(Boolean);
+                if (!price && fareBits.length === 0) return null;
+                return (
+                  <p className="text-sm text-muted-foreground flex gap-2 flex-wrap mt-1">
+                    {price && <span className="font-semibold text-foreground">{price}</span>}
+                    {fareBits.map((b, i) => (
+                      <span key={i} className="flex gap-2"><span>•</span><span>{b}</span></span>
+                    ))}
+                  </p>
+                );
+              })()}
             </div>
           </div>
 
           <div className="flex items-center gap-4">
             <div className="flex-1 text-center md:text-left">
-              <p className="text-2xl font-bold">{format(parseISO(flight.departureDatetime), 'HH:mm')}</p>
+              <p className="text-2xl font-bold">{formatFlightTime24(flight.departureDatetime, flight.departureTimezone)}</p>
               <p className="text-lg text-primary">{flight.departureAirport}</p>
-              <p className="text-xs text-muted-foreground">{format(parseISO(flight.departureDatetime), 'MMM d, yyyy')}</p>
+              <p className="text-xs text-muted-foreground">{formatFlightFullDate(flight.departureDatetime, flight.departureTimezone)}</p>
             </div>
 
             <div className="flex flex-col items-center px-4 flex-1">
@@ -426,9 +456,9 @@ function FlightCard({ tripId, flight, editMode, tripStartDate }: { tripId: numbe
             </div>
 
             <div className="flex-1 text-center md:text-right">
-              <p className="text-2xl font-bold">{format(parseISO(flight.arrivalDatetime), 'HH:mm')}</p>
+              <p className="text-2xl font-bold">{formatFlightTime24(flight.arrivalDatetime, flight.arrivalTimezone)}</p>
               <p className="text-lg text-primary">{flight.arrivalAirport}</p>
-              <p className="text-xs text-muted-foreground">{format(parseISO(flight.arrivalDatetime), 'MMM d, yyyy')}</p>
+              <p className="text-xs text-muted-foreground">{formatFlightFullDate(flight.arrivalDatetime, flight.arrivalTimezone)}</p>
             </div>
           </div>
         </div>
@@ -448,12 +478,19 @@ function FlightForm({ tripId, flight, tripStartDate, onSuccess }: { tripId: numb
     defaultValues: flight
       ? {
           ...flight,
-          departureDatetime: flight.departureDatetime.slice(0, 16),
-          arrivalDatetime: flight.arrivalDatetime.slice(0, 16),
+          // Show airport-local wall time in the datetime-local inputs, even for
+          // legacy rows stored as UTC instants.
+          departureDatetime: toDatetimeLocalValue(flight.departureDatetime, flight.departureTimezone),
+          arrivalDatetime: toDatetimeLocalValue(flight.arrivalDatetime, flight.arrivalTimezone),
+          currency: flight.currency ?? 'USD',
+          passengerCount: flight.passengerCount ?? undefined,
+          refundable: flight.refundable ?? undefined,
+          changeable: flight.changeable ?? undefined,
         }
       : {
           flightNumber: '', airline: '', departureAirport: '', arrivalAirport: '',
           departureDatetime: '', arrivalDatetime: '', confirmationCode: '', direction: 'outbound',
+          currency: 'USD',
         },
   });
 
@@ -479,11 +516,18 @@ function FlightForm({ tripId, flight, tripStartDate, onSuccess }: { tripId: numb
   const onSubmit = (values: z.infer<typeof flightSchema>) => {
     const payload = {
       ...values,
-      // The datetime-local inputs are loaded from and must be saved as UTC.
-      // Appending :00.000Z treats the value as UTC, avoiding the local-offset
-      // shift that new Date(...).toISOString() would introduce.
-      departureDatetime: values.departureDatetime + ':00.000Z',
-      arrivalDatetime: values.arrivalDatetime + ':00.000Z',
+      // Store the datetime-local value as airport-local wall-clock time
+      // ("YYYY-MM-DDTHH:mm") together with the airport's IANA timezone, so
+      // rendering never shifts it across viewer timezones.
+      departureDatetime: values.departureDatetime.slice(0, 16),
+      arrivalDatetime: values.arrivalDatetime.slice(0, 16),
+      departureTimezone: airportTimeZone(values.departureAirport) ?? undefined,
+      arrivalTimezone: airportTimeZone(values.arrivalAirport) ?? undefined,
+      totalPrice: values.totalPrice || undefined,
+      currency: values.currency || undefined,
+      fareBrand: values.fareBrand || undefined,
+      checkedBags: values.checkedBags || undefined,
+      passengerCount: values.passengerCount ?? undefined,
     };
 
     if (flight) {
@@ -597,6 +641,71 @@ function FlightForm({ tripId, flight, tripStartDate, onSuccess }: { tripId: numb
               <FormLabel>Confirmation Code <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
               <FormControl><Input {...field} /></FormControl>
               <FormMessage />
+            </FormItem>
+          )} />
+        </div>
+
+        {/* Pricing */}
+        <div className="grid grid-cols-3 gap-4">
+          <FormField control={form.control} name="totalPrice" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Total Price <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
+              <FormControl><Input type="number" min={0} step="0.01" placeholder="e.g. 1286.26" {...field} /></FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+          <FormField control={form.control} name="currency" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Currency</FormLabel>
+              <FormControl><Input {...field} placeholder="USD" maxLength={3} /></FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+          <FormField control={form.control} name="passengerCount" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Passengers <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
+              <FormControl>
+                <Input type="number" min={1} placeholder="e.g. 2"
+                  value={field.value ?? ''}
+                  onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <FormField control={form.control} name="fareBrand" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Fare Brand <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
+              <FormControl><Input {...field} placeholder="e.g. Main Cabin" /></FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+          <FormField control={form.control} name="checkedBags" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Checked Bags <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
+              <FormControl><Input {...field} placeholder="e.g. 2 checked bags included" /></FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+        </div>
+
+        <div className="flex gap-6">
+          <FormField control={form.control} name="refundable" render={({ field }) => (
+            <FormItem className="flex items-center gap-2 space-y-0">
+              <FormControl>
+                <Checkbox checked={field.value ?? false} onCheckedChange={v => field.onChange(v === true)} />
+              </FormControl>
+              <FormLabel className="font-normal">Refundable</FormLabel>
+            </FormItem>
+          )} />
+          <FormField control={form.control} name="changeable" render={({ field }) => (
+            <FormItem className="flex items-center gap-2 space-y-0">
+              <FormControl>
+                <Checkbox checked={field.value ?? false} onCheckedChange={v => field.onChange(v === true)} />
+              </FormControl>
+              <FormLabel className="font-normal">Changeable</FormLabel>
             </FormItem>
           )} />
         </div>

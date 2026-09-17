@@ -270,10 +270,27 @@ export interface Flight {
   departureDatetime: string;
   arrivalDatetime: string;
   /** @nullable */
+  departureTimezone?: string | null;
+  /** @nullable */
+  arrivalTimezone?: string | null;
+  /** @nullable */
   confirmationCode?: string | null;
   /** @nullable */
   notes?: string | null;
   direction?: FlightDirection;
+  /** @nullable */
+  totalPrice?: string | null;
+  currency?: string;
+  /** @nullable */
+  fareBrand?: string | null;
+  /** @nullable */
+  refundable?: boolean | null;
+  /** @nullable */
+  changeable?: boolean | null;
+  /** @nullable */
+  checkedBags?: string | null;
+  /** @nullable */
+  passengerCount?: number | null;
 }
 
 export type FlightInputDirection = typeof FlightInputDirection[keyof typeof FlightInputDirection];
@@ -292,9 +309,18 @@ export interface FlightInput {
   arrivalAirport: string;
   departureDatetime: string;
   arrivalDatetime: string;
+  departureTimezone?: string;
+  arrivalTimezone?: string;
   confirmationCode?: string;
   notes?: string;
   direction?: FlightInputDirection;
+  totalPrice?: string;
+  currency?: string;
+  fareBrand?: string;
+  refundable?: boolean;
+  changeable?: boolean;
+  checkedBags?: string;
+  passengerCount?: number;
 }
 
 export type FlightUpdateDirection = typeof FlightUpdateDirection[keyof typeof FlightUpdateDirection];
@@ -313,9 +339,18 @@ export interface FlightUpdate {
   arrivalAirport?: string;
   departureDatetime?: string;
   arrivalDatetime?: string;
+  departureTimezone?: string;
+  arrivalTimezone?: string;
   confirmationCode?: string;
   notes?: string;
   direction?: FlightUpdateDirection;
+  totalPrice?: string;
+  currency?: string;
+  fareBrand?: string;
+  refundable?: boolean;
+  changeable?: boolean;
+  checkedBags?: string;
+  passengerCount?: number;
 }
 
 export type AccommodationType = typeof AccommodationType[keyof typeof AccommodationType];
@@ -349,6 +384,11 @@ export interface Accommodation {
   phone?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  nightlyRate?: string | null;
+  /** @nullable */
+  totalPrice?: string | null;
+  currency?: string;
 }
 
 export type AccommodationInputType = typeof AccommodationInputType[keyof typeof AccommodationInputType];
@@ -374,6 +414,9 @@ export interface AccommodationInput {
   confirmationCode?: string;
   phone?: string;
   notes?: string;
+  nightlyRate?: string;
+  totalPrice?: string;
+  currency?: string;
 }
 
 export type AccommodationUpdateType = typeof AccommodationUpdateType[keyof typeof AccommodationUpdateType];
@@ -399,6 +442,9 @@ export interface AccommodationUpdate {
   confirmationCode?: string;
   phone?: string;
   notes?: string;
+  nightlyRate?: string;
+  totalPrice?: string;
+  currency?: string;
 }
 
 export type ActivityType = typeof ActivityType[keyof typeof ActivityType];

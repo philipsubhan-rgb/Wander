@@ -27,4 +27,9 @@ export interface Accommodation {
   phone?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  nightlyRate?: string | null;
+  /** @nullable */
+  totalPrice?: string | null;
+  currency?: string;
 }

@@ -13,11 +13,28 @@ import { requireTripParticipant, requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
+// Normalise nullable columns to explicit nulls for the API response shape.
+function toFlightResponse(f: typeof flightsTable.$inferSelect) {
+  return {
+    ...f,
+    departureTimezone: f.departureTimezone ?? null,
+    arrivalTimezone: f.arrivalTimezone ?? null,
+    confirmationCode: f.confirmationCode ?? null,
+    notes: f.notes ?? null,
+    totalPrice: f.totalPrice ?? null,
+    fareBrand: f.fareBrand ?? null,
+    refundable: f.refundable ?? null,
+    changeable: f.changeable ?? null,
+    checkedBags: f.checkedBags ?? null,
+    passengerCount: f.passengerCount ?? null,
+  };
+}
+
 router.get("/trips/:tripId/flights", requireAuth, async (req, res): Promise<void> => {
   const params = ListFlightsParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const flights = await db.select().from(flightsTable).where(eq(flightsTable.tripId, params.data.tripId)).orderBy(flightsTable.departureDatetime);
-  res.json(flights.map(f => ({ ...f, confirmationCode: f.confirmationCode ?? null, notes: f.notes ?? null })));
+  res.json(flights.map(toFlightResponse));
 });
 
 router.post("/trips/:tripId/flights", requireTripParticipant(), async (req, res): Promise<void> => {
@@ -26,7 +43,7 @@ router.post("/trips/:tripId/flights", requireTripParticipant(), async (req, res)
   const parsed = CreateFlightBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [flight] = await db.insert(flightsTable).values({ ...parsed.data, tripId: params.data.tripId }).returning();
-  res.status(201).json({ ...flight, confirmationCode: flight.confirmationCode ?? null, notes: flight.notes ?? null });
+  res.status(201).json(toFlightResponse(flight));
 });
 
 router.patch("/trips/:tripId/flights/:flightId", requireTripParticipant(), async (req, res): Promise<void> => {
@@ -36,7 +53,7 @@ router.patch("/trips/:tripId/flights/:flightId", requireTripParticipant(), async
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [flight] = await db.update(flightsTable).set(parsed.data).where(and(eq(flightsTable.id, params.data.flightId), eq(flightsTable.tripId, params.data.tripId))).returning();
   if (!flight) { res.status(404).json({ error: "Flight not found" }); return; }
-  res.json({ ...flight, confirmationCode: flight.confirmationCode ?? null, notes: flight.notes ?? null });
+  res.json(toFlightResponse(flight));
 });
 
 router.delete("/trips/:tripId/flights/:flightId", requireTripParticipant(), async (req, res): Promise<void> => {

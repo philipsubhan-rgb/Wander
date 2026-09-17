@@ -17,8 +17,25 @@ export interface Flight {
   departureDatetime: string;
   arrivalDatetime: string;
   /** @nullable */
+  departureTimezone?: string | null;
+  /** @nullable */
+  arrivalTimezone?: string | null;
+  /** @nullable */
   confirmationCode?: string | null;
   /** @nullable */
   notes?: string | null;
   direction?: FlightDirection;
+  /** @nullable */
+  totalPrice?: string | null;
+  currency?: string;
+  /** @nullable */
+  fareBrand?: string | null;
+  /** @nullable */
+  refundable?: boolean | null;
+  /** @nullable */
+  changeable?: boolean | null;
+  /** @nullable */
+  checkedBags?: string | null;
+  /** @nullable */
+  passengerCount?: number | null;
 }

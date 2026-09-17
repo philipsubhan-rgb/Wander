@@ -19,6 +19,7 @@ import {
 } from "@workspace/api-zod";
 import { requireAdmin, requireAuth, requireTripAdmin, getAuthUserId, getAuthRole } from "../middlewares/auth";
 import { fetchDestinationImage } from "../lib/destination-image";
+import { flightEventDate, flightEventTime } from "@workspace/flight-time";
 import { recalcExpenseSplitsForTrip } from "./expenses";
 import { sendWelcomeEmail } from "../lib/email";
 
@@ -316,11 +317,11 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
     ...flights.map(f => ({
       id: f.id,
       type: "flight" as const,
-      date: f.departureDatetime.substring(0, 10),
+      date: flightEventDate(f.departureDatetime, f.departureTimezone),
       title: `${f.airline} ${f.flightNumber}: ${f.departureAirport} → ${f.arrivalAirport}`,
       description: f.notes ?? null,
       location: f.departureAirport,
-      time: f.departureDatetime.length > 10 ? f.departureDatetime.substring(11, 16) : null,
+      time: flightEventTime(f.departureDatetime, f.departureTimezone),
       imageUrl: null as string | null,
       carrierCode: f.flightNumber?.toUpperCase().match(/^([A-Z0-9]{2,3})\s*\d/)?.[1] ?? null,
       confirmationCode: f.confirmationCode ?? null,

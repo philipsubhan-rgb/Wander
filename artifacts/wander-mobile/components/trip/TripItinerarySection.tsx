@@ -31,22 +31,12 @@ function formatTime(timeStr: string | null): string | null {
   }
 }
 
-function formatDatetimeTime(dt: string | null): string | null {
-  if (!dt) return null;
-  try {
-    const d = new Date(dt);
-    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-  } catch {
-    return null;
-  }
-}
-
 // ── Event description builder ─────────────────────────────────────────────────
 
 function getEventLabel(event: any): string {
   switch (event.type) {
     case 'flight': {
-      const time = formatDatetimeTime(event.departureDatetime);
+      const time = formatTime(event.time);
       const from = event.departureAirport ?? '?';
       const to = event.arrivalAirport ?? '?';
       const flight = [event.airline, event.flightNumber].filter(Boolean).join(' ');

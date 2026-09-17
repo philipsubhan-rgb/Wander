@@ -1,7 +1,7 @@
 import { useListActivities, useCreateActivity, useUpdateActivity, useDeleteActivity } from '@workspace/api-client-react';
 import { invalidateActivityQueries } from '@/lib/invalidate-trip-queries';
 import { ImagePickerContent } from '@/components/ImageEditor';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -148,7 +148,14 @@ export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate, t
 
   if (isLoading) return <div>Loading...</div>;
 
-  const sortedActivities = activities?.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  // Copy before sorting: sorting the React Query cache array in place corrupts
+  // the cached data identity for every other consumer of this query.
+  // Copy before sorting: sorting the React Query cache array in place corrupts
+  // the cached data identity for every other consumer of this query.
+  const sortedActivities = useMemo(
+    () => [...(activities ?? [])].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
+    [activities],
+  );
 
   return (
     <div className="space-y-6">

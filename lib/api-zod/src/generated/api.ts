@@ -473,9 +473,18 @@ export const ListFlightsResponseItem = zod.object({
   "arrivalAirport": zod.string(),
   "departureDatetime": zod.string(),
   "arrivalDatetime": zod.string(),
+  "departureTimezone": zod.string().nullish(),
+  "arrivalTimezone": zod.string().nullish(),
   "confirmationCode": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "direction": zod.enum(['outbound', 'return', 'connecting']).optional()
+  "direction": zod.enum(['outbound', 'return', 'connecting']).optional(),
+  "totalPrice": zod.string().nullish(),
+  "currency": zod.string().optional(),
+  "fareBrand": zod.string().nullish(),
+  "refundable": zod.boolean().nullish(),
+  "changeable": zod.boolean().nullish(),
+  "checkedBags": zod.string().nullish(),
+  "passengerCount": zod.number().nullish()
 })
 export const ListFlightsResponse = zod.array(ListFlightsResponseItem)
 
@@ -491,9 +500,18 @@ export const CreateFlightBody = zod.object({
   "arrivalAirport": zod.string(),
   "departureDatetime": zod.string(),
   "arrivalDatetime": zod.string(),
+  "departureTimezone": zod.string().optional(),
+  "arrivalTimezone": zod.string().optional(),
   "confirmationCode": zod.string().optional(),
   "notes": zod.string().optional(),
-  "direction": zod.enum(['outbound', 'return', 'connecting']).optional()
+  "direction": zod.enum(['outbound', 'return', 'connecting']).optional(),
+  "totalPrice": zod.string().optional(),
+  "currency": zod.string().optional(),
+  "fareBrand": zod.string().optional(),
+  "refundable": zod.boolean().optional(),
+  "changeable": zod.boolean().optional(),
+  "checkedBags": zod.string().optional(),
+  "passengerCount": zod.number().optional()
 })
 
 export const CreateFlightResponse = zod.object({
@@ -505,9 +523,18 @@ export const CreateFlightResponse = zod.object({
   "arrivalAirport": zod.string(),
   "departureDatetime": zod.string(),
   "arrivalDatetime": zod.string(),
+  "departureTimezone": zod.string().nullish(),
+  "arrivalTimezone": zod.string().nullish(),
   "confirmationCode": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "direction": zod.enum(['outbound', 'return', 'connecting']).optional()
+  "direction": zod.enum(['outbound', 'return', 'connecting']).optional(),
+  "totalPrice": zod.string().nullish(),
+  "currency": zod.string().optional(),
+  "fareBrand": zod.string().nullish(),
+  "refundable": zod.boolean().nullish(),
+  "changeable": zod.boolean().nullish(),
+  "checkedBags": zod.string().nullish(),
+  "passengerCount": zod.number().nullish()
 })
 
 
@@ -523,9 +550,18 @@ export const UpdateFlightBody = zod.object({
   "arrivalAirport": zod.string().optional(),
   "departureDatetime": zod.string().optional(),
   "arrivalDatetime": zod.string().optional(),
+  "departureTimezone": zod.string().optional(),
+  "arrivalTimezone": zod.string().optional(),
   "confirmationCode": zod.string().optional(),
   "notes": zod.string().optional(),
-  "direction": zod.enum(['outbound', 'return', 'connecting']).optional()
+  "direction": zod.enum(['outbound', 'return', 'connecting']).optional(),
+  "totalPrice": zod.string().optional(),
+  "currency": zod.string().optional(),
+  "fareBrand": zod.string().optional(),
+  "refundable": zod.boolean().optional(),
+  "changeable": zod.boolean().optional(),
+  "checkedBags": zod.string().optional(),
+  "passengerCount": zod.number().optional()
 })
 
 export const UpdateFlightResponse = zod.object({
@@ -537,9 +573,18 @@ export const UpdateFlightResponse = zod.object({
   "arrivalAirport": zod.string(),
   "departureDatetime": zod.string(),
   "arrivalDatetime": zod.string(),
+  "departureTimezone": zod.string().nullish(),
+  "arrivalTimezone": zod.string().nullish(),
   "confirmationCode": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "direction": zod.enum(['outbound', 'return', 'connecting']).optional()
+  "direction": zod.enum(['outbound', 'return', 'connecting']).optional(),
+  "totalPrice": zod.string().nullish(),
+  "currency": zod.string().optional(),
+  "fareBrand": zod.string().nullish(),
+  "refundable": zod.boolean().nullish(),
+  "changeable": zod.boolean().nullish(),
+  "checkedBags": zod.string().nullish(),
+  "passengerCount": zod.number().nullish()
 })
 
 
@@ -570,7 +615,10 @@ export const ListAccommodationsResponseItem = zod.object({
   "imageUrl": zod.string().nullish(),
   "confirmationCode": zod.string().nullish(),
   "phone": zod.string().nullish(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "nightlyRate": zod.string().nullish(),
+  "totalPrice": zod.string().nullish(),
+  "currency": zod.string().optional()
 })
 export const ListAccommodationsResponse = zod.array(ListAccommodationsResponseItem)
 
@@ -590,7 +638,10 @@ export const CreateAccommodationBody = zod.object({
   "imageUrl": zod.string().optional(),
   "confirmationCode": zod.string().optional(),
   "phone": zod.string().optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "nightlyRate": zod.string().optional(),
+  "totalPrice": zod.string().optional(),
+  "currency": zod.string().optional()
 })
 
 export const CreateAccommodationResponse = zod.object({
@@ -606,7 +657,10 @@ export const CreateAccommodationResponse = zod.object({
   "imageUrl": zod.string().nullish(),
   "confirmationCode": zod.string().nullish(),
   "phone": zod.string().nullish(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "nightlyRate": zod.string().nullish(),
+  "totalPrice": zod.string().nullish(),
+  "currency": zod.string().optional()
 })
 
 
@@ -626,7 +680,10 @@ export const UpdateAccommodationBody = zod.object({
   "imageUrl": zod.string().optional(),
   "confirmationCode": zod.string().optional(),
   "phone": zod.string().optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "nightlyRate": zod.string().optional(),
+  "totalPrice": zod.string().optional(),
+  "currency": zod.string().optional()
 })
 
 export const UpdateAccommodationResponse = zod.object({
@@ -642,7 +699,10 @@ export const UpdateAccommodationResponse = zod.object({
   "imageUrl": zod.string().nullish(),
   "confirmationCode": zod.string().nullish(),
   "phone": zod.string().nullish(),
-  "notes": zod.string().nullish()
+  "notes": zod.string().nullish(),
+  "nightlyRate": zod.string().nullish(),
+  "totalPrice": zod.string().nullish(),
+  "currency": zod.string().optional()
 })
 
 

@@ -14,7 +14,16 @@ export interface FlightInput {
   arrivalAirport: string;
   departureDatetime: string;
   arrivalDatetime: string;
+  departureTimezone?: string;
+  arrivalTimezone?: string;
   confirmationCode?: string;
   notes?: string;
   direction?: FlightInputDirection;
+  totalPrice?: string;
+  currency?: string;
+  fareBrand?: string;
+  refundable?: boolean;
+  changeable?: boolean;
+  checkedBags?: string;
+  passengerCount?: number;
 }

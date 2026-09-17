@@ -9,6 +9,9 @@ import * as Haptics from 'expo-haptics';
 import {
   useListFlights, useCreateFlight, useDeleteFlight, useUpdateFlight, getListFlightsQueryKey, getGetTripTimelineQueryKey,
 } from '@workspace/api-client-react';
+import {
+  formatFlightTime, formatFlightMonthDay, toDatetimeLocalValue, airportTimeZone,
+} from '@workspace/flight-time';
 import { useColors } from '@/hooks/useColors';
 
 const DIRECTIONS = ['outbound', 'return', 'connecting'] as const;
@@ -38,14 +41,12 @@ function AirlineLogo({ code }: { code: string }) {
 function FlightCard({ tripId, flight, colors, onDelete, onEdit }: {
   tripId: number; flight: any; colors: ReturnType<typeof useColors>; onDelete: (id: number) => void; onEdit: (flight: any) => void;
 }) {
-  const dep = flight.departureDatetime ? new Date(flight.departureDatetime) : null;
-  const arr = flight.arrivalDatetime ? new Date(flight.arrivalDatetime) : null;
   const carrierCode = (flight.flightNumber ?? '').toUpperCase().match(/^([A-Z0-9]{2,3})\s*\d/)?.[1] ?? null;
 
-  const fmt = (d: Date | null) =>
-    d ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : '–';
-  const fmtDate = (d: Date | null) =>
-    d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+  const fmt = (dt: string | null | undefined, tz: string | null | undefined) =>
+    dt ? formatFlightTime(dt, tz) : '–';
+  const fmtDate = (dt: string | null | undefined, tz: string | null | undefined) =>
+    dt ? formatFlightMonthDay(dt, tz) : '';
 
   function confirmDelete() {
     Alert.alert('Delete Flight', `Remove flight ${flight.flightNumber}?`, [
@@ -85,14 +86,14 @@ function FlightCard({ tripId, flight, colors, onDelete, onEdit }: {
       <View style={cardStyles.route}>
         <View style={cardStyles.airport}>
           <Text style={[cardStyles.iata, { color: colors.foreground }]}>{flight.departureAirport}</Text>
-          <Text style={[cardStyles.time, { color: colors.primary }]}>{fmt(dep)}</Text>
-          <Text style={[cardStyles.dateStr, { color: colors.mutedForeground }]}>{fmtDate(dep)}</Text>
+          <Text style={[cardStyles.time, { color: colors.primary }]}>{fmt(flight.departureDatetime, flight.departureTimezone)}</Text>
+          <Text style={[cardStyles.dateStr, { color: colors.mutedForeground }]}>{fmtDate(flight.departureDatetime, flight.departureTimezone)}</Text>
         </View>
         <Feather name="arrow-right" size={16} color={colors.mutedForeground} />
         <View style={[cardStyles.airport, { alignItems: 'flex-end' }]}>
           <Text style={[cardStyles.iata, { color: colors.foreground }]}>{flight.arrivalAirport}</Text>
-          <Text style={[cardStyles.time, { color: colors.primary }]}>{fmt(arr)}</Text>
-          <Text style={[cardStyles.dateStr, { color: colors.mutedForeground }]}>{fmtDate(arr)}</Text>
+          <Text style={[cardStyles.time, { color: colors.primary }]}>{fmt(flight.arrivalDatetime, flight.arrivalTimezone)}</Text>
+          <Text style={[cardStyles.dateStr, { color: colors.mutedForeground }]}>{fmtDate(flight.arrivalDatetime, flight.arrivalTimezone)}</Text>
         </View>
       </View>
 
@@ -162,9 +163,10 @@ function AddFlightModal({ tripId, visible, onClose, colors }: {
       Alert.alert('Missing fields', 'Please fill in airline, flight number, airports, and times.');
       return;
     }
-    // Convert local datetime strings to ISO
-    const depIso = new Date(departureDatetime.replace(' ', 'T')).toISOString();
-    const arrIso = new Date(arrivalDatetime.replace(' ', 'T')).toISOString();
+    // Store airport-local wall-clock time ("YYYY-MM-DDTHH:mm") plus the
+    // airport's IANA timezone, so rendering never shifts across viewer timezones.
+    const depWall = departureDatetime.replace(' ', 'T').slice(0, 16);
+    const arrWall = arrivalDatetime.replace(' ', 'T').slice(0, 16);
     createFlight({
       tripId,
       data: {
@@ -172,8 +174,10 @@ function AddFlightModal({ tripId, visible, onClose, colors }: {
         flightNumber: flightNumber.trim(),
         departureAirport: departureAirport.trim().toUpperCase(),
         arrivalAirport: arrivalAirport.trim().toUpperCase(),
-        departureDatetime: depIso,
-        arrivalDatetime: arrIso,
+        departureDatetime: depWall,
+        arrivalDatetime: arrWall,
+        departureTimezone: airportTimeZone(departureAirport) ?? undefined,
+        arrivalTimezone: airportTimeZone(arrivalAirport) ?? undefined,
         confirmationCode: confirmationCode.trim() || undefined,
         direction,
       },
@@ -280,8 +284,8 @@ function EditFlightModal({ tripId, item, visible, onClose, colors }: {
       setFlightNumber(item.flightNumber ?? '');
       setDepartureAirport(item.departureAirport ?? '');
       setArrivalAirport(item.arrivalAirport ?? '');
-      setDepartureDatetime(item.departureDatetime ? item.departureDatetime.slice(0, 16).replace('T', ' ') : '');
-      setArrivalDatetime(item.arrivalDatetime ? item.arrivalDatetime.slice(0, 16).replace('T', ' ') : '');
+      setDepartureDatetime(item.departureDatetime ? toDatetimeLocalValue(item.departureDatetime, item.departureTimezone).replace('T', ' ') : '');
+      setArrivalDatetime(item.arrivalDatetime ? toDatetimeLocalValue(item.arrivalDatetime, item.arrivalTimezone).replace('T', ' ') : '');
       setConfirmationCode(item.confirmationCode ?? '');
       setDirection((item.direction as Direction) ?? 'outbound');
     }
@@ -297,8 +301,8 @@ function EditFlightModal({ tripId, item, visible, onClose, colors }: {
       Alert.alert('Missing fields', 'Please fill in airline, flight number, airports, and times.');
       return;
     }
-    const depIso = new Date(departureDatetime.replace(' ', 'T')).toISOString();
-    const arrIso = new Date(arrivalDatetime.replace(' ', 'T')).toISOString();
+    const depWall = departureDatetime.replace(' ', 'T').slice(0, 16);
+    const arrWall = arrivalDatetime.replace(' ', 'T').slice(0, 16);
     updateFlight({
       tripId,
       flightId: item.id,
@@ -307,8 +311,10 @@ function EditFlightModal({ tripId, item, visible, onClose, colors }: {
         flightNumber: flightNumber.trim(),
         departureAirport: departureAirport.trim().toUpperCase(),
         arrivalAirport: arrivalAirport.trim().toUpperCase(),
-        departureDatetime: depIso,
-        arrivalDatetime: arrIso,
+        departureDatetime: depWall,
+        arrivalDatetime: arrWall,
+        departureTimezone: airportTimeZone(departureAirport) ?? undefined,
+        arrivalTimezone: airportTimeZone(arrivalAirport) ?? undefined,
         confirmationCode: confirmationCode.trim() || undefined,
         direction,
       },

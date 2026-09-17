@@ -12,8 +12,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Home, MapPin, Calendar, Plus, Trash2, Pencil, Camera, Phone } from 'lucide-react';
+import { Home, MapPin, Calendar, Plus, Trash2, Pencil, Camera, Phone, DollarSign } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+import { formatMoney } from '@workspace/flight-time';
 import { MiniMap } from './MiniMap';
 import { useAuth } from '@/hooks/use-auth';
 import { fetchWikiImage } from '@/lib/wiki-image';
@@ -44,6 +45,9 @@ const accommSchema = z.object({
   checkOutTime: z.string().min(1, 'Check-out time is required'),
   type: z.enum(['hotel', 'airbnb', 'hostel', 'resort', 'other']).optional(),
   confirmationCode: z.string().optional(),
+  nightlyRate: z.string().optional(),
+  totalPrice: z.string().optional(),
+  currency: z.string().optional(),
 });
 
 // ── Hotel name autocomplete ───────────────────────────────────────────────────
@@ -291,6 +295,21 @@ function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tr
               Code: {stay.confirmationCode}
             </div>
           )}
+          {(() => {
+            const nightly = formatMoney(stay.nightlyRate, stay.currency);
+            const total = formatMoney(stay.totalPrice, stay.currency);
+            if (!nightly && !total) return null;
+            return (
+              <div className="flex items-center gap-2">
+                <DollarSign className="h-4 w-4 shrink-0" />
+                <span>
+                  {nightly && <span>{nightly} / night</span>}
+                  {nightly && total && <span className="text-muted-foreground"> · </span>}
+                  {total && <span className={nightly ? '' : 'font-semibold text-foreground'}>{total} total</span>}
+                </span>
+              </div>
+            );
+          })()}
         </div>
       </div>
 
@@ -325,6 +344,9 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
         lon:              stay.lon              ?? undefined,
         imageUrl:         stay.imageUrl         ?? undefined,
         confirmationCode: stay.confirmationCode ?? '',
+        nightlyRate: stay.nightlyRate ?? '',
+        totalPrice: stay.totalPrice ?? '',
+        currency: stay.currency ?? '',
         checkInDate:  ci.date,
         checkInTime:  ci.time,
         checkOutDate: co.date,
@@ -345,6 +367,9 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
       phone: values.phone || undefined,
       type: values.type,
       confirmationCode: values.confirmationCode || undefined,
+      nightlyRate: values.nightlyRate || undefined,
+      totalPrice: values.totalPrice || undefined,
+      currency: values.currency || undefined,
       lat: values.lat,
       lon: values.lon,
       imageUrl: values.imageUrl || undefined,
@@ -445,6 +470,31 @@ function AccommForm({ tripId, stay, tripStartDate, tripEndDate, onSuccess }: { t
           )} />
           <FormField control={form.control} name="confirmationCode" render={({ field }) => (
             <FormItem><FormLabel>Confirmation Code <span className="text-muted-foreground font-normal">(optional)</span></FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+        </div>
+
+        {/* Pricing */}
+        <div className="grid grid-cols-3 gap-4">
+          <FormField control={form.control} name="nightlyRate" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Nightly Rate <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
+              <FormControl><Input type="number" min={0} step="0.01" placeholder="e.g. 450.00" {...field} /></FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+          <FormField control={form.control} name="totalPrice" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Total Price <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
+              <FormControl><Input type="number" min={0} step="0.01" placeholder="e.g. 2250.00" {...field} /></FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+          <FormField control={form.control} name="currency" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Currency</FormLabel>
+              <FormControl><Input {...field} placeholder="USD" maxLength={3} /></FormControl>
+              <FormMessage />
+            </FormItem>
           )} />
         </div>
 
