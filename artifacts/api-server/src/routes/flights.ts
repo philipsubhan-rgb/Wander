@@ -9,7 +9,7 @@ import {
   UpdateFlightBody,
   DeleteFlightParams,
 } from "@workspace/api-zod";
-import { requireTripParticipant, requireAuth } from "../middlewares/auth";
+import { requireTripParticipant } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -30,7 +30,7 @@ function toFlightResponse(f: typeof flightsTable.$inferSelect) {
   };
 }
 
-router.get("/trips/:tripId/flights", requireAuth, async (req, res): Promise<void> => {
+router.get("/trips/:tripId/flights", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = ListFlightsParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const flights = await db.select().from(flightsTable).where(eq(flightsTable.tripId, params.data.tripId)).orderBy(flightsTable.departureDatetime);

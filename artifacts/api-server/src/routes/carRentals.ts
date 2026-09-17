@@ -9,7 +9,7 @@ import {
   UpdateCarRentalBody,
   DeleteCarRentalParams,
 } from "@workspace/api-zod";
-import { requireTripParticipant, requireAuth } from "../middlewares/auth";
+import { requireTripParticipant } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -25,7 +25,7 @@ const mapItem = (r: typeof carRentalsTable.$inferSelect) => ({
   notes: r.notes ?? null,
 });
 
-router.get("/trips/:tripId/car-rentals", requireAuth, async (req, res): Promise<void> => {
+router.get("/trips/:tripId/car-rentals", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = ListCarRentalsParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const items = await db.select().from(carRentalsTable)

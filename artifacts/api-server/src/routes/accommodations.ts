@@ -9,7 +9,7 @@ import {
   UpdateAccommodationBody,
   DeleteAccommodationParams,
 } from "@workspace/api-zod";
-import { requireTripParticipant, requireAuth } from "../middlewares/auth";
+import { requireTripParticipant } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -28,7 +28,7 @@ function toAccommodationResponse(a: typeof accommodationsTable.$inferSelect) {
   };
 }
 
-router.get("/trips/:tripId/accommodations", requireAuth, async (req, res): Promise<void> => {
+router.get("/trips/:tripId/accommodations", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = ListAccommodationsParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const items = await db.select().from(accommodationsTable).where(eq(accommodationsTable.tripId, params.data.tripId)).orderBy(accommodationsTable.checkIn);

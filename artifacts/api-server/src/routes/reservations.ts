@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, asc } from "drizzle-orm";
 import { db, reservationsTable } from "@workspace/db";
-import { requireAuth, requireTripParticipant } from "../middlewares/auth";
+import { requireTripParticipant } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -29,7 +29,7 @@ function map(r: typeof reservationsTable.$inferSelect) {
 }
 
 // GET /api/trips/:tripId/reservations
-router.get("/trips/:tripId/reservations", requireAuth, async (req, res): Promise<void> => {
+router.get("/trips/:tripId/reservations", requireTripParticipant(), async (req, res): Promise<void> => {
   const tripId = Number(req.params.tripId);
   if (isNaN(tripId)) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const rows = await db.select().from(reservationsTable).where(eq(reservationsTable.tripId, tripId));
@@ -63,7 +63,7 @@ router.patch("/trips/:tripId/reservations/:reservationId", requireTripParticipan
   } = req.body;
   const [row] = await db.update(reservationsTable)
     .set({ type, title, venue, address, date, time, endTime, confirmationCode, numberOfPeople, phone, notes, url, imageUrl, lat, lon })
-    .where(eq(reservationsTable.id, reservationId))
+    .where(and(eq(reservationsTable.id, reservationId), eq(reservationsTable.tripId, tripId)))
     .returning();
   if (!row) { res.status(404).json({ error: "Not found" }); return; }
   res.json(map(row));

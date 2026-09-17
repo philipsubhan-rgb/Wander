@@ -17,7 +17,7 @@ import {
   AddTripParticipantParams,
   RemoveTripParticipantParams,
 } from "@workspace/api-zod";
-import { requireAdmin, requireAuth, requireTripAdmin, getAuthUserId, getAuthRole } from "../middlewares/auth";
+import { requireAdmin, requireAuth, requireTripAdmin, requireTripParticipant, getAuthUserId, getAuthRole } from "../middlewares/auth";
 import { fetchDestinationImage } from "../lib/destination-image";
 import { flightEventDate, flightEventTime, airportTimeZone } from "@workspace/flight-time";
 import { recalcExpenseSplitsForTrip } from "./expenses";
@@ -261,7 +261,7 @@ router.delete("/trips/:tripId", requireTripAdmin(), async (req, res): Promise<vo
 // Summary & Timeline
 // ──────────────────────────────────────────────────────────────────
 
-router.get("/trips/:tripId/summary", requireAuth, async (req, res): Promise<void> => {
+router.get("/trips/:tripId/summary", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = GetTripSummaryParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid tripId" });
@@ -296,7 +296,7 @@ router.get("/trips/:tripId/summary", requireAuth, async (req, res): Promise<void
   });
 });
 
-router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<void> => {
+router.get("/trips/:tripId/timeline", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = GetTripTimelineParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid tripId" });
@@ -514,7 +514,7 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
 // Participants
 // ──────────────────────────────────────────────────────────────────
 
-router.get("/trips/:tripId/participants", requireAuth, async (req, res): Promise<void> => {
+router.get("/trips/:tripId/participants", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = ListTripParticipantsParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid tripId" });

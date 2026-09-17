@@ -9,11 +9,11 @@ import {
   UpdateActivityBody,
   DeleteActivityParams,
 } from "@workspace/api-zod";
-import { requireTripParticipant, requireAuth } from "../middlewares/auth";
+import { requireTripParticipant } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
-router.get("/trips/:tripId/activities", requireAuth, async (req, res): Promise<void> => {
+router.get("/trips/:tripId/activities", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = ListActivitiesParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const items = await db.select().from(activitiesTable).where(eq(activitiesTable.tripId, params.data.tripId)).orderBy(activitiesTable.date, activitiesTable.time);

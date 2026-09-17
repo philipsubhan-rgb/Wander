@@ -9,11 +9,11 @@ import {
   UpdateItineraryDayBody,
   DeleteItineraryDayParams,
 } from "@workspace/api-zod";
-import { requireTripParticipant, requireAuth } from "../middlewares/auth";
+import { requireTripParticipant } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
-router.get("/trips/:tripId/itinerary", requireAuth, async (req, res): Promise<void> => {
+router.get("/trips/:tripId/itinerary", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = ListItineraryDaysParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid tripId" }); return; }
   const items = await db.select().from(itineraryDaysTable).where(eq(itineraryDaysTable.tripId, params.data.tripId)).orderBy(itineraryDaysTable.date);
