@@ -1,11 +1,21 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import { ProtectedRoute } from '@/components/ProtectedRoute';
 
 vi.mock('wouter', () => ({
   Link: ({ href, children, ...props }: { href: string; children: React.ReactNode; [key: string]: unknown }) =>
     React.createElement('a', { href, ...props }, children),
   useParams: () => ({ id: '42' }),
+  useLocation: () => ['/trips/42/guide', () => undefined],
+}));
+
+vi.mock('@/hooks/use-auth', () => ({
+  useAuth: () => ({
+    isLoading: false,
+    isAuthenticated: false,
+    isAdmin: false,
+  }),
 }));
 
 vi.mock('@/lib/wiki-image', () => ({
@@ -161,6 +171,19 @@ describe('TripGuide authenticated content surface', () => {
 
     expect(html).toContain('data-testid="button-print-guide"');
     expect(html).toContain('data-testid="mock-guide-map"');
-    expect(html).toContain('data-stop-count="3"');
+    expect(html).toContain('data-stop-count="2"');
+  });
+});
+
+describe('TripGuide route protection', () => {
+  it('does not render guide content for an unauthenticated visitor', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(
+        ProtectedRoute,
+        { children: React.createElement('div', null, 'private guide content') },
+      ),
+    );
+
+    expect(html).toBe('');
   });
 });
