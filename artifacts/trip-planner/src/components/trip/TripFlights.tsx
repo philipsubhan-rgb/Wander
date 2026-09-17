@@ -441,9 +441,9 @@ function FlightCard({ tripId, flight, editMode, tripStartDate }: { tripId: numbe
 
           <div className="flex items-center gap-4">
             <div className="flex-1 text-center md:text-left">
-              <p className="text-2xl font-bold">{formatFlightTime24(flight.departureDatetime, flight.departureTimezone)}</p>
+              <p className="text-2xl font-bold">{formatFlightTime24(flight.departureDatetime, flight.departureTimezone ?? airportTimeZone(flight.departureAirport))}</p>
               <p className="text-lg text-primary">{flight.departureAirport}</p>
-              <p className="text-xs text-muted-foreground">{formatFlightFullDate(flight.departureDatetime, flight.departureTimezone)}</p>
+              <p className="text-xs text-muted-foreground">{formatFlightFullDate(flight.departureDatetime, flight.departureTimezone ?? airportTimeZone(flight.departureAirport))}</p>
             </div>
 
             <div className="flex flex-col items-center px-4 flex-1">
@@ -456,9 +456,9 @@ function FlightCard({ tripId, flight, editMode, tripStartDate }: { tripId: numbe
             </div>
 
             <div className="flex-1 text-center md:text-right">
-              <p className="text-2xl font-bold">{formatFlightTime24(flight.arrivalDatetime, flight.arrivalTimezone)}</p>
+              <p className="text-2xl font-bold">{formatFlightTime24(flight.arrivalDatetime, flight.arrivalTimezone ?? airportTimeZone(flight.arrivalAirport))}</p>
               <p className="text-lg text-primary">{flight.arrivalAirport}</p>
-              <p className="text-xs text-muted-foreground">{formatFlightFullDate(flight.arrivalDatetime, flight.arrivalTimezone)}</p>
+              <p className="text-xs text-muted-foreground">{formatFlightFullDate(flight.arrivalDatetime, flight.arrivalTimezone ?? airportTimeZone(flight.arrivalAirport))}</p>
             </div>
           </div>
         </div>
@@ -480,8 +480,8 @@ function FlightForm({ tripId, flight, tripStartDate, onSuccess }: { tripId: numb
           ...flight,
           // Show airport-local wall time in the datetime-local inputs, even for
           // legacy rows stored as UTC instants.
-          departureDatetime: toDatetimeLocalValue(flight.departureDatetime, flight.departureTimezone),
-          arrivalDatetime: toDatetimeLocalValue(flight.arrivalDatetime, flight.arrivalTimezone),
+          departureDatetime: toDatetimeLocalValue(flight.departureDatetime, flight.departureTimezone ?? airportTimeZone(flight.departureAirport)),
+          arrivalDatetime: toDatetimeLocalValue(flight.arrivalDatetime, flight.arrivalTimezone ?? airportTimeZone(flight.arrivalAirport)),
           currency: flight.currency ?? 'USD',
           passengerCount: flight.passengerCount ?? undefined,
           refundable: flight.refundable ?? undefined,

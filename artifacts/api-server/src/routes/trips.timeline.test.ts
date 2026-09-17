@@ -2192,4 +2192,43 @@ describe("GET /trips/:tripId/timeline — five-way same-datetime priority order"
     expect(dec01[4].type).toBe("reservation");
     expect(dec01[4].title).toBe("Welcome Dinner");
   });
+
+  /**
+   * Legacy flight rows (saved before airport timezones were stored) keep a
+   * Z-suffixed UTC instant and a null departureTimezone. The timeline API runs
+   * on a UTC server, so without an airport-zone fallback the event would show
+   * the raw UTC instant ("11:30") instead of the airport wall-clock time
+   * ("07:30" for a 7:30 AM Newark departure). Regression test for the
+   * Overview/Itinerary timeline showing shifted times on legacy flights.
+   */
+  it("renders a legacy Z-suffixed flight without stored timezone in the departure airport's wall-clock time", async () => {
+    enqueueTimeline({
+      flights: [
+        {
+          id: 70,
+          tripId: 1,
+          airline: "United",
+          flightNumber: "UA449",
+          departureAirport: "EWR",
+          arrivalAirport: "UVF",
+          departureDatetime: "2027-05-08T11:30:00.000Z",
+          arrivalDatetime: "2027-05-08T16:10:00.000Z",
+          departureTimezone: null,
+          arrivalTimezone: null,
+          notes: null,
+          confirmationCode: null,
+        },
+      ],
+    });
+
+    const { status, body } = await get("/trips/1/timeline");
+
+    expect(status).toBe(200);
+
+    const flight = body.find((e: any) => e.type === "flight");
+    expect(flight).toBeDefined();
+    // 11:30 UTC is 07:30 in America/New_York (EDT) — the airport wall time.
+    expect(flight.time).toBe("07:30");
+    expect(flight.date).toBe("2027-05-08");
+  });
 });

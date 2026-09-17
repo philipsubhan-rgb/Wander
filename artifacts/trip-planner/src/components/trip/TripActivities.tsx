@@ -146,16 +146,16 @@ export function TripActivities({ tripId, editMode, tripStartDate, tripEndDate, t
   const { data: activities, isLoading } = useListActivities(tripId, { query: { enabled: !!tripId } });
   const [isAddOpen, setIsAddOpen] = useState(false);
 
-  if (isLoading) return <div>Loading...</div>;
-
   // Copy before sorting: sorting the React Query cache array in place corrupts
   // the cached data identity for every other consumer of this query.
-  // Copy before sorting: sorting the React Query cache array in place corrupts
-  // the cached data identity for every other consumer of this query.
+  // NOTE: this hook must stay above the early return — calling it conditionally
+  // breaks hook order and crashes the tab once loading finishes.
   const sortedActivities = useMemo(
     () => [...(activities ?? [])].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
     [activities],
   );
+
+  if (isLoading) return <div>Loading...</div>;
 
   return (
     <div className="space-y-6">

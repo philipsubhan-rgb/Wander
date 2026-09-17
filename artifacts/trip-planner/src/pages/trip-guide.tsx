@@ -40,7 +40,7 @@ import {
 } from '@workspace/api-client-react';
 import { format, isValid, parseISO, addDays, differenceInCalendarDays } from 'date-fns';
 import { Button } from '@/components/ui/button';
-import { formatFlightDateTime, formatFlightTime } from '@workspace/flight-time';
+import { formatFlightDateTime, formatFlightTime, airportTimeZone } from '@workspace/flight-time';
 import { fetchWikiImage } from '@/lib/wiki-image';
 import { GuideMap, type GuideMapStop } from '@/components/trip/GuideMap';
 import { buildGuideStops, buildRouteLegs, type GuideRouteStop } from '@/lib/trip-guide';
@@ -441,7 +441,7 @@ export default function TripGuide() {
                         <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-primary">{titleCase(flight.direction || 'flight')}</span>
                       </div>
                       <div className="mt-4 flex items-center gap-3 text-sm text-[#16334d]"><span>{compact(flight.departureAirport)}</span><ArrowUpRight className="h-4 w-4 text-primary" /><span>{compact(flight.arrivalAirport)}</span></div>
-                      <p className="mt-3 text-xs leading-5 text-muted-foreground">{formatFlightDateTime(flight.departureDatetime, flight.departureTimezone)} — {formatFlightTime(flight.arrivalDatetime, flight.arrivalTimezone)}</p>
+                      <p className="mt-3 text-xs leading-5 text-muted-foreground">{formatFlightDateTime(flight.departureDatetime, flight.departureTimezone ?? airportTimeZone(flight.departureAirport))} — {formatFlightTime(flight.arrivalDatetime, flight.arrivalTimezone ?? airportTimeZone(flight.arrivalAirport))}</p>
                       {flight.confirmationCode && <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">Confirmation <span className="font-semibold tracking-wider text-[#16334d]">{flight.confirmationCode}</span></p>}
                     </div>
                   ))}

@@ -19,7 +19,7 @@ import {
 } from "@workspace/api-zod";
 import { requireAdmin, requireAuth, requireTripAdmin, getAuthUserId, getAuthRole } from "../middlewares/auth";
 import { fetchDestinationImage } from "../lib/destination-image";
-import { flightEventDate, flightEventTime } from "@workspace/flight-time";
+import { flightEventDate, flightEventTime, airportTimeZone } from "@workspace/flight-time";
 import { recalcExpenseSplitsForTrip } from "./expenses";
 import { sendWelcomeEmail } from "../lib/email";
 
@@ -314,18 +314,24 @@ router.get("/trips/:tripId/timeline", requireAuth, async (req, res): Promise<voi
   ]);
 
   const events = [
-    ...flights.map(f => ({
-      id: f.id,
-      type: "flight" as const,
-      date: flightEventDate(f.departureDatetime, f.departureTimezone),
-      title: `${f.airline} ${f.flightNumber}: ${f.departureAirport} → ${f.arrivalAirport}`,
-      description: f.notes ?? null,
-      location: f.departureAirport,
-      time: flightEventTime(f.departureDatetime, f.departureTimezone),
-      imageUrl: null as string | null,
-      carrierCode: f.flightNumber?.toUpperCase().match(/^([A-Z0-9]{2,3})\s*\d/)?.[1] ?? null,
-      confirmationCode: f.confirmationCode ?? null,
-    })),
+    ...flights.map(f => {
+      // Legacy rows predate stored timezones: resolve the airport's zone so the
+      // timeline renders airport wall-clock time instead of the raw UTC instant
+      // (the server formats in UTC, so without this every legacy flight shifts).
+      const depTz = f.departureTimezone ?? airportTimeZone(f.departureAirport);
+      return {
+        id: f.id,
+        type: "flight" as const,
+        date: flightEventDate(f.departureDatetime, depTz),
+        title: `${f.airline} ${f.flightNumber}: ${f.departureAirport} → ${f.arrivalAirport}`,
+        description: f.notes ?? null,
+        location: f.departureAirport,
+        time: flightEventTime(f.departureDatetime, depTz),
+        imageUrl: null as string | null,
+        carrierCode: f.flightNumber?.toUpperCase().match(/^([A-Z0-9]{2,3})\s*\d/)?.[1] ?? null,
+        confirmationCode: f.confirmationCode ?? null,
+      };
+    }),
     ...accommodations.flatMap(a => ([
       {
         id: a.id,

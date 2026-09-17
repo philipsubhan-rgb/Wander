@@ -48,12 +48,12 @@ const baseActivities = [
 ];
 
 const { activityData } = vi.hoisted(() => ({
-  activityData: { current: [] as readonly unknown[] },
+  activityData: { current: [] as readonly unknown[], loading: false },
 }));
 activityData.current = baseActivities;
 
 vi.mock('@workspace/api-client-react', () => ({
-  useListActivities: () => ({ data: activityData.current, isLoading: false }),
+  useListActivities: () => ({ data: activityData.current, isLoading: activityData.loading }),
   useCreateActivity: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateActivity: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteActivity: () => ({ mutate: vi.fn(), isPending: false }),
@@ -70,6 +70,7 @@ import { TripActivities } from '@/components/trip/TripActivities';
 describe('TripActivities cards', () => {
   beforeEach(() => {
     activityData.current = baseActivities;
+    activityData.loading = false;
   });
 
   it('renders each activity time and location when present', () => {
@@ -90,5 +91,20 @@ describe('TripActivities cards', () => {
 
     expect(() => render(<TripActivities tripId={7} />)).not.toThrow();
     expect(frozen.map(a => a.id)).toEqual(orderBefore);
+  });
+
+  it('survives the loading → loaded transition without a hook-order crash', () => {
+    // Regression: the sorted-list memo once sat below the `isLoading` early
+    // return, so the first loaded render called one more hook than the loading
+    // render and React tore the whole tab down to a blank page.
+    activityData.loading = true;
+    activityData.current = [];
+    const { rerender } = render(<TripActivities tripId={7} />);
+    expect(screen.getByText('Loading...')).toBeTruthy();
+
+    activityData.loading = false;
+    activityData.current = baseActivities;
+    expect(() => rerender(<TripActivities tripId={7} />)).not.toThrow();
+    expect(screen.getAllByText('Coco Bistro, Grace Bay').length).toBeGreaterThan(0);
   });
 });
