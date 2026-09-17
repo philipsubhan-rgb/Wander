@@ -344,7 +344,9 @@ function DayCard({
     const payload = {
       date,
       title: note?.title || '',
-      description: trimmed || undefined,
+      // Send '' (not undefined) when cleared: undefined fields are ignored by
+      // the API, which made it impossible to clear a day description.
+      description: trimmed,
       notes: note?.notes || undefined,
     };
     const opts = {
