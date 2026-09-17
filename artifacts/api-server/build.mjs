@@ -100,6 +100,11 @@ async function buildAll() {
       "puppeteer",
       "puppeteer-core",
       "electron",
+      // pdfkit uses package self-reference subpath imports ("#standard-fonts/*")
+      // that do not survive bundling — the bundled output leaves a bare
+      // require("#standard-fonts/Helvetica") that Node cannot resolve at
+      // runtime, 500ing every PDF render. Load it from node_modules instead.
+      "pdfkit",
     ],
     sourcemap: "linked",
     plugins: [
