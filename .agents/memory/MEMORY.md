@@ -6,3 +6,4 @@
 - [Email lookup flow for trip participants](email-participant-lookup.md) — participants are added by email lookup (not dropdown); email is required+unique on users table; `GET /users/lookup?email=` is auth-gated (not admin-only).
 - [API startup health](api-startup-health.md) — open the HTTP port before nonessential database setup so autoscale startup probes are not blocked by a cold database.
 - [Publishing layer upload failures](publishing-layer-upload.md) — a closed-pipe error after all artifact builds pass points to a transient image-layer upload interruption, not app code.
+- [Externalized runtime dependencies](externalized-runtime-deps.md) — packages excluded from esbuild must be direct runtime dependencies or production startup can fail after a successful build.
