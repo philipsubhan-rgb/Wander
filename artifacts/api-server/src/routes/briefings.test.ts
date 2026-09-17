@@ -66,6 +66,7 @@ vi.mock("@workspace/db", () => ({
 // ── Mock the scheduler / day-sheet / PDF collaborators ───────────────────────
 
 const mocks = vi.hoisted(() => ({
+  todayISO: "2026-09-17",
   sendTripBriefing: vi.fn(
     async (_briefing: unknown, _trip: unknown, _dateISO: string) => ({ sent: true, recipientCount: 2 })
   ),
@@ -88,7 +89,7 @@ vi.mock("../lib/briefingScheduler.js", () => ({
       return false;
     }
   },
-  todayInZone: () => "2026-09-17",
+  todayInZone: () => mocks.todayISO,
   sendTripBriefing: mocks.sendTripBriefing,
   attachWeather: mocks.attachWeather,
 }));
@@ -137,6 +138,7 @@ afterAll(() => server.close());
 
 beforeEach(() => {
   resultQueue.length = 0;
+  mocks.todayISO = "2026-09-17"; // outside the mocked trip window (Sep 24–27)
   vi.clearAllMocks();
 });
 
@@ -377,7 +379,7 @@ describe("POST /trips/:tripId/briefing/send-now", () => {
     expect(briefingArg.enabled).toBe(false); // transient defaults
     expect(briefingArg.id).toBeUndefined(); // no persisted row → no id
     expect(tripArg.id).toBe(1);
-    expect(dateArg).toBe("2026-09-17"); // mocked todayInZone
+    expect(dateArg).toBe("2026-09-24"); // today (2026-09-17) is outside the trip window → trip start
   });
 
   it("honours an explicit ?date= parameter", async () => {
@@ -426,11 +428,23 @@ describe("GET /trips/:tripId/briefing/preview.pdf", () => {
     expect(status).toBe(200);
     expect(headers.get("content-type")).toContain("application/pdf");
     expect(headers.get("content-disposition")).toContain("inline");
-    expect(headers.get("content-disposition")).toContain("wander-preview-1-2026-09-17.pdf");
+    expect(headers.get("content-disposition")).toContain("wander-preview-1-2026-09-24.pdf");
     expect(Buffer.from(body as ArrayBuffer).toString()).toBe("%PDF-mock");
-    expect(mocks.buildDaySheet).toHaveBeenCalledWith(1, "2026-09-17");
+    expect(mocks.buildDaySheet).toHaveBeenCalledWith(1, "2026-09-24"); // today outside trip window → day 1
     expect(mocks.attachWeather).toHaveBeenCalledTimes(1);
     expect(mocks.renderDaySheetPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses today when it falls inside the trip window", async () => {
+    mocks.todayISO = "2026-09-25";
+    enqueue([participantRow]);
+    enqueue([tripRow]);
+    enqueue([briefingRow]);
+
+    const { status } = await get("/trips/1/briefing/preview.pdf");
+
+    expect(status).toBe(200);
+    expect(mocks.buildDaySheet).toHaveBeenCalledWith(1, "2026-09-25");
   });
 
   it("honours ?date= in the preview", async () => {

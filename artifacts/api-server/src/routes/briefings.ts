@@ -103,6 +103,19 @@ async function loadTripOr404(tripId: number): Promise<Trip | null> {
   return trip ?? null;
 }
 
+/**
+ * The date a manual preview / test-send renders when no ?date= is given:
+ * today while the trip is running, otherwise the trip's first day so the
+ * preview is never a blank page outside the travel window.
+ */
+function defaultBriefingDate(trip: Trip, briefing: TripBriefing): string {
+  const today = todayInZone(briefing.timezone || "America/New_York");
+  const start = trip.startDate.substring(0, 10);
+  const end = trip.endDate.substring(0, 10);
+  if (today >= start && today <= end) return today;
+  return start;
+}
+
 /** Parse ?date=; 400 on invalid, otherwise the value or the fallback. */
 function resolveDateParam(
   req: { query: { date?: unknown } },
@@ -221,7 +234,7 @@ router.post(
 
     const dateISO = resolveDateParam(
       req,
-      () => todayInZone(briefing.timezone || "America/New_York"),
+      () => defaultBriefingDate(trip, briefing),
       res
     );
     if (dateISO === null) return;
@@ -257,7 +270,7 @@ router.get(
 
     const dateISO = resolveDateParam(
       req,
-      () => todayInZone(briefing.timezone || "America/New_York"),
+      () => defaultBriefingDate(trip, briefing),
       res
     );
     if (dateISO === null) return;
