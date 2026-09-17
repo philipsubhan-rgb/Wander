@@ -9,13 +9,15 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { toast } from 'sonner';
-import { Users, Trash2, Shield, TriangleAlert, Search, UserCheck, AlertCircle, Crown, Copy, Check, KeyRound, Camera, RefreshCw, ImageOff } from 'lucide-react';
+import { Users, Trash2, Shield, TriangleAlert, Search, UserCheck, AlertCircle, Crown, Copy, Check, KeyRound, Camera, RefreshCw, ImageOff, Newspaper } from 'lucide-react';
 
 const tripSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -332,6 +334,257 @@ function AddTravelerByEmail({
   );
 }
 
+// ── Daily one-pager settings ──────────────────────────────────────────────────
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const TIMEZONE_SUGGESTIONS = [
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'Pacific/Honolulu',
+  'Europe/London',
+  'Europe/Berlin',
+  'Asia/Tokyo',
+  'Australia/Sydney',
+];
+
+type BriefingSettings = {
+  enabled: boolean;
+  sendTimeLocal: string;
+  timezone: string;
+  extraEmails: string[];
+  lastSentForDate: string | null;
+};
+
+function parseEmailList(raw: string): { emails: string[]; invalid: string[] } {
+  const emails: string[] = [];
+  const invalid: string[] = [];
+  const seen = new Set<string>();
+  for (const part of raw.split(',')) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (EMAIL_RE.test(trimmed)) {
+      emails.push(trimmed);
+    } else {
+      invalid.push(trimmed);
+    }
+  }
+  return { emails, invalid };
+}
+
+function DailyOnePagerSettings({ tripId }: { tripId: number }) {
+  const [loading, setLoading] = useState(true);
+  const [enabled, setEnabled] = useState(false);
+  const [sendTimeLocal, setSendTimeLocal] = useState('07:00');
+  const [timezone, setTimezone] = useState('');
+  const [extraEmailsText, setExtraEmailsText] = useState('');
+  const [lastSentForDate, setLastSentForDate] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/trips/${tripId}/briefing`, { credentials: 'include' })
+      .then(async res => {
+        if (!res.ok) throw new Error('load failed');
+        const data = (await res.json()) as Partial<BriefingSettings>;
+        if (cancelled) return;
+        setEnabled(!!data.enabled);
+        setSendTimeLocal(data.sendTimeLocal || '07:00');
+        setTimezone(data.timezone || '');
+        setExtraEmailsText(Array.isArray(data.extraEmails) ? data.extraEmails.join(', ') : '');
+        setLastSentForDate(data.lastSentForDate ?? null);
+        setEmailError(null);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error('Failed to load daily one-pager settings');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [tripId]);
+
+  const handleEmailsChange = (value: string) => {
+    setExtraEmailsText(value);
+    const { invalid } = parseEmailList(value);
+    setEmailError(
+      invalid.length > 0
+        ? `Invalid email${invalid.length !== 1 ? 's' : ''}: ${invalid.join(', ')}`
+        : null
+    );
+  };
+
+  const handleSave = async () => {
+    const time = sendTimeLocal.trim().slice(0, 5);
+    if (!TIME_RE.test(time)) {
+      toast.error('Send time must be in HH:MM format');
+      return;
+    }
+    if (!timezone.trim()) {
+      toast.error('Timezone is required');
+      return;
+    }
+    const { emails, invalid } = parseEmailList(extraEmailsText);
+    if (invalid.length > 0) {
+      setEmailError(`Invalid email${invalid.length !== 1 ? 's' : ''}: ${invalid.join(', ')}`);
+      toast.error('Fix the invalid email addresses before saving');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/trips/${tripId}/briefing`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          enabled,
+          sendTimeLocal: time,
+          timezone: timezone.trim(),
+          extraEmails: emails,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error || 'Failed to save daily one-pager settings');
+        return;
+      }
+      setEnabled(!!data.enabled);
+      setSendTimeLocal(data.sendTimeLocal ?? time);
+      setTimezone(data.timezone ?? timezone.trim());
+      setExtraEmailsText(Array.isArray(data.extraEmails) ? data.extraEmails.join(', ') : extraEmailsText);
+      setLastSentForDate(data.lastSentForDate ?? lastSentForDate);
+      toast.success('Daily one-pager settings saved');
+    } catch {
+      toast.error('Failed to save daily one-pager settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSendNow = async () => {
+    setSending(true);
+    try {
+      const res = await fetch(`/api/trips/${tripId}/briefing/send-now`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error || 'Failed to send daily one-pager');
+        return;
+      }
+      if (data.sent) {
+        const count = data.recipientCount ?? 0;
+        toast.success(`Sent to ${count} recipient${count !== 1 ? 's' : ''}`);
+        if (typeof data.lastSentForDate === 'string') setLastSentForDate(data.lastSentForDate);
+      } else {
+        toast.error('Email not configured — SMTP not set up');
+      }
+    } catch {
+      toast.error('Failed to send daily one-pager');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <h3 className="font-semibold text-base flex items-center gap-2">
+        <Newspaper className="h-4 w-4" /> Daily one-pager
+      </h3>
+      <div className="bg-card border rounded-xl p-6 shadow-sm">
+        {loading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="h-4 w-4 animate-spin inline-block border-2 border-current border-t-transparent rounded-full" />
+            Loading one-pager settings…
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <Label htmlFor="briefing-enabled" className="text-sm font-medium">Enabled</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Email a daily one-pager PDF to travelers each morning.
+                </p>
+              </div>
+              <Switch id="briefing-enabled" checked={enabled} onCheckedChange={setEnabled} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="briefing-time" className="text-sm font-medium">Send time</Label>
+                <Input
+                  id="briefing-time"
+                  type="time"
+                  value={sendTimeLocal}
+                  onChange={e => setSendTimeLocal(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="briefing-timezone" className="text-sm font-medium">Timezone</Label>
+                <Input
+                  id="briefing-timezone"
+                  type="text"
+                  list="briefing-timezones"
+                  placeholder="America/New_York"
+                  value={timezone}
+                  onChange={e => setTimezone(e.target.value)}
+                />
+                <datalist id="briefing-timezones">
+                  {TIMEZONE_SUGGESTIONS.map(tz => (
+                    <option key={tz} value={tz} />
+                  ))}
+                </datalist>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="briefing-emails" className="text-sm font-medium">Extra email recipients</Label>
+              <Input
+                id="briefing-emails"
+                type="text"
+                placeholder="friend@example.com, family@example.com"
+                value={extraEmailsText}
+                onChange={e => handleEmailsChange(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Comma-separated — emailed in addition to trip travelers.
+              </p>
+              {emailError && <p className="text-xs text-destructive">{emailError}</p>}
+            </div>
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Button type="button" onClick={handleSave} disabled={saving || sending || !!emailError}>
+                {saving ? 'Saving…' : 'Save'}
+              </Button>
+              <Button type="button" variant="outline" asChild>
+                <a href={`/api/trips/${tripId}/briefing/preview.pdf`} target="_blank" rel="noreferrer">
+                  Preview PDF
+                </a>
+              </Button>
+              <Button type="button" variant="outline" onClick={handleSendNow} disabled={sending || saving}>
+                {sending ? 'Sending…' : 'Send now'}
+              </Button>
+            </div>
+
+            {lastSentForDate && (
+              <p className="text-xs text-muted-foreground">Last sent for {lastSentForDate}</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main TripSettings component ───────────────────────────────────────────────
 
 export function TripSettings({ trip }: { trip: any }) {
@@ -623,6 +876,9 @@ export function TripSettings({ trip }: { trip: any }) {
             </div>
           </div>
         </div>
+
+        {/* Daily one-pager */}
+        <DailyOnePagerSettings tripId={trip.id} />
       </div>
 
       <div className="space-y-6">

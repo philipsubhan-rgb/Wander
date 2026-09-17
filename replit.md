@@ -11,6 +11,14 @@ A shared group travel coordination app — the admin plans everything (trips, fl
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string, `SESSION_SECRET` — session signing secret
+- Optional env (daily one-pager emails): `SMTP_HOST`, `SMTP_PORT` (default 587), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` — without these, briefing emails log and report `{sent:false}` instead of sending
+
+## Daily trip one-pager (briefing emails)
+
+- Per-trip opt-in: `trip_briefings` table (`lib/db/drizzle/0002_daily_trip_briefings.sql` — apply with `psql "$DATABASE_URL" -f lib/db/drizzle/0002_daily_trip_briefings.sql` on production **before** redeploying)
+- `src/lib/briefingScheduler.ts` runs every 15 min (`node-cron`): sends a one-page PDF (timeline + stay + notes + Open-Meteo weather, no API key) to trip participants + extra emails when the trip is `confirmed`/`active`, today is within the trip dates, and local time >= the trip's `sendTimeLocal` in its IANA timezone. One send per day per trip (`lastSentForDate`); failures retry next tick, never marked sent.
+- Enable per trip in the web UI: trip Settings → "Daily one-pager" (trip admins only) — toggle, send time, timezone, extra emails, Preview PDF, Send now.
+- API: `GET/PUT /api/trips/:tripId/briefing`, `POST /api/trips/:tripId/briefing/send-now`, `GET /api/trips/:tripId/briefing/preview.pdf` (`src/routes/briefings.ts`; zod schemas local to the route file, not in the OpenAPI spec)
 
 ## Stack
 

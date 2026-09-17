@@ -1,5 +1,6 @@
 export * from "./users";
 export * from "./trips";
+export * from "./tripBriefings";
 export * from "./flights";
 export * from "./accommodations";
 export * from "./activities";

@@ -18,7 +18,7 @@
 import nodemailer from "nodemailer";
 import { logger } from "./logger.js";
 
-interface SendResult {
+export interface SendResult {
   sent: boolean;
 }
 
@@ -136,6 +136,56 @@ export async function sendWelcomeEmail(opts: {
     return { sent: true };
   } catch (err) {
     logger.error({ err, to }, "Failed to send welcome email — invite continues without email");
+    return { sent: false };
+  }
+}
+
+/**
+ * Send the daily one-page trip briefing email with the PDF attached.
+ *
+ * `to` may hold multiple recipients. When SMTP is not configured the email
+ * is skipped (not queued) and `{ sent: false }` is returned. Never throws.
+ */
+export async function sendDailyBriefingEmail(opts: {
+  to: string[];
+  tripTitle: string;
+  dateLabel: string;
+  pdfBuffer: Buffer;
+  filename: string;
+}): Promise<SendResult> {
+  const { to, tripTitle, dateLabel, pdfBuffer, filename } = opts;
+
+  const subject = `Wander one-pager: ${tripTitle} — ${dateLabel}`;
+  const text = `Your one-page briefing for ${dateLabel} is attached.\n\n— The Wander team`;
+
+  const transport = buildTransport();
+
+  if (!transport) {
+    // Log only the recipient count — never individual addresses here.
+    logger.info(
+      { recipientCount: to.length },
+      "SMTP not configured — daily briefing email not sent"
+    );
+    return { sent: false };
+  }
+
+  try {
+    await transport.sendMail({
+      from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+      to,
+      subject,
+      text,
+      attachments: [
+        {
+          filename,
+          content: pdfBuffer,
+          contentType: "application/pdf",
+        },
+      ],
+    });
+    return { sent: true };
+  } catch (err) {
+    logger.error({ err, recipientCount: to.length }, "Failed to send daily briefing email");
     return { sent: false };
   }
 }
