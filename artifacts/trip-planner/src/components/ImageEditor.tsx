@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { Camera, Search, Link, Trash2, Check } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Button } from 
+  '@/components/ui/button';
+import { Input } from 
+  '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { searchImages } from '@/lib/wiki-image';
 
 interface WikiResult {
   title: string;
@@ -10,24 +13,12 @@ interface WikiResult {
 }
 
 async function searchWikiImages(query: string): Promise<WikiResult[]> {
-  const params = new URLSearchParams({
-    action: 'query',
-    generator: 'search',
-    gsrsearch: query,
-    gsrlimit: '18',
-    prop: 'pageimages',
-    pithumbsize: '500',
-    pilimit: '18',
-    format: 'json',
-    origin: '*',
-  });
-  const res = await fetch(`https://en.wikipedia.org/w/api.php?${params}`);
-  if (!res.ok) return [];
-  const data = await res.json();
-  const pages = Object.values(data.query?.pages ?? {}) as any[];
-  return pages
-    .filter(p => p.thumbnail?.source)
-    .map(p => ({ title: p.title, url: p.thumbnail.source }));
+  try {
+    const results = await searchImages(query, 18);
+    return results.map((r) => ({ title: r.title, url: r.url }));
+  } catch {
+    return [];
+  }
 }
 
 function Tab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
