@@ -1,0 +1,202 @@
+=== build.mjs ===
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { build as esbuild } from "esbuild";
+import esbuildPluginPino from "esbuild-plugin-pino";
+import { rm } from "node:fs/promises";
+
+// Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
+globalThis.require = createRequire(import.meta.url);
+
+const artifactDir = path.dirname(fileURLToPath(import.meta.url));
+
+async function buildAll() {
+  const distDir = path.resolve(artifactDir, "dist");
+  await rm(distDir, { recursive: true, force: true });
+
+  await esbuild({
+    entryPoints: [path.resolve(artifactDir, "src/index.ts")],
+    platform: "node",
+    bundle: true,
+    format: "esm",
+    outdir: distDir,
+    outExtension: { ".js": ".mjs" },
+    logLevel: "info",
+    // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
+    // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.
+    // Examples of unbundleable packages:
+    // - uses native modules and loads them dynamically (e.g. sharp)
+    // - use path traversal to read files (e.g. @google-cloud/secret-manager loads sibling .proto files)
+    external: [
+      "*.node",
+      "sharp",
+      "better-sqlite3",
+      "sqlite3",
+      "canvas",
+      "bcrypt",
+      "argon2",
+      "fsevents",
+      "re2",
+      "farmhash",
+      "xxhash-addon",
+      "bufferutil",
+      "utf-8-validate",
+      "ssh2",
+      "cpu-features",
+      "dtrace-provider",
+      "isolated-vm",
+      "lightningcss",
+      "pg-native",
+      "oracledb",
+      "mongodb-client-encryption",
+      "nodemailer",
+      "handlebars",
+      "knex",
+      "typeorm",
+      "protobufjs",
+      "onnxruntime-node",
+      "@tensorflow/*",
+      "@prisma/client",
+      "@mikro-orm/*",
+      "@grpc/*",
+      "@swc/*",
+      "@aws-sdk/*",
+      "@azure/*",
+      "@opentelemetry/*",
+      "@google-cloud/*",
+      "@google/*",
+      "googleapis",
+      "firebase-admin",
+      "@parcel/watcher",
+      "@sentry/profiling-node",
+      "@tree-sitter/*",
+      "aws-sdk",
+      "classic-level",
+      "dd-trace",
+      "ffi-napi",
+      "grpc",
+      "hiredis",
+      "kerberos",
+      "leveldown",
+      "miniflare",
+      "mysql2",
+      "newrelic",
+      "odbc",
+      "piscina",
+      "realm",
+      "ref-napi",
+      "rocksdb",
+      "sass-embedded",
+      "sequelize",
+      "serialport",
+      "snappy",
+      "tinypool",
+      "usb",
+      "workerd",
+      "wrangler",
+      "zeromq",
+      "zeromq-prebuilt",
+      "playwright",
+      "puppeteer",
+      "puppeteer-core",
+      "electron",
+      // pdfkit uses package self-reference subpath imports ("#standard-fonts/*")
+      // that do not survive bundling — the bundled output leaves a bare
+      // require("#standard-fonts/Helvetica") that Node cannot resolve at
+      // runtime, 500ing every PDF render. Load it from node_modules instead.
+      "pdfkit",
+    ],
+    sourcemap: "linked",
+    plugins: [
+      // pino relies on workers to handle logging, instead of externalizing it we use a plugin to handle it
+      esbuildPluginPino({ transports: ["pino-pretty"] })
+    ],
+    // Make sure packages that are cjs only (e.g. express) but are bundled continue to work in our esm output file
+    banner: {
+      js: `import { createRequire as __bannerCrReq } from 'node:module';
+import __bannerPath from 'node:path';
+import __bannerUrl from 'node:url';
+
+globalThis.require = __bannerCrReq(import.meta.url);
+globalThis.__filename = __bannerUrl.fileURLToPath(import.meta.url);
+globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
+    `,
+    },
+  });
+}
+
+buildAll().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+=== scripts ===
+6:  "scripts": {
+7-    "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
+8-    "build": "node ./build.mjs",
+9-    "start": "node --enable-source-maps ./dist/index.mjs",
+10-    "typecheck": "tsc -p tsconfig.json --noEmit",
+11-    "test": "vitest run"
+12-  },
+13-  "dependencies": {
+14-    "@google-cloud/storage": "^7.21.0",
+15-    "@modelcontextprotocol/sdk": "^1.30.0",
+16-    "@swc/helpers": "0.5.23",
+17-    "@workspace/api-zod": "workspace:*",
+18-    "@workspace/db": "workspace:*",
+=== daySheetPdf head-55 ===
+/**
+ * PDF rendering for the daily trip one-pager (day sheet).
+ *
+ * Uses pdfkit directly (no HTML). `renderDaySheetPdf` renders a single sheet
+ * on one US Letter page; `renderDaySheetsPdf` renders several sheets — one
+ * page per sheet. The rendering is defensive by design: any combination of
+ * empty items, null weather/stay/notes, or oversized strings must still
+ * produce a valid PDF and must never throw.
+ */
+
+import PDFDocument from "pdfkit";
+import type { DaySheet } from "./daySheet.js";
+
+const PAGE_WIDTH = 612;
+const PAGE_HEIGHT = 792;
+const MARGIN = 48;
+const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+const BOTTOM_LIMIT = 700; // stop adding body content below this y
+const NAVY = "#1f3a5f";
+const LIGHT_BLUE_GRAY = "#eaf0f6";
+const BODY = "#1a1a1a";
+const GRAY = "#6b7280";
+const ELLIPSIS = "…";
+
+const FONT = "Helvetica";
+const FONT_BOLD = "Helvetica-Bold";
+const FONT_OBLIQUE = "Helvetica-Oblique";
+
+/** Render a single DaySheet to a one-page PDF buffer. Never throws. */
+export async function renderDaySheetPdf(sheet: DaySheet): Promise<Buffer> {
+  return renderDaySheetsPdf([sheet]);
+}
+
+/** Render several DaySheets — one US Letter page per sheet — into a single PDF buffer. Never throws. */
+export async function renderDaySheetsPdf(sheets: DaySheet[]): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({
+        size: "LETTER",
+        margins: { top: 0, bottom: 0, left: 0, right: 0 },
+        info: { Title: `Day Sheet — ${sheets[0]?.tripTitle ?? "Trip"}` },
+      });
+
+      const chunks: Buffer[] = [];
+      doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", (err: unknown) => reject(err instanceof Error ? err : new Error(String(err))));
+
+      sheets.forEach((sheet, i) => {
+        if (i > 0) {
+          doc.addPage({
+            size: "LETTER",
+            margins: { top: 0, bottom: 0, left: 0, right: 0 },
+          });
+        }

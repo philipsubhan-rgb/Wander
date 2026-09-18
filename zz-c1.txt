@@ -1,0 +1,104 @@
+import PDFDocument from "pdfkit";
+import type { DaySheet, DaySheetItem } from "./daySheet.js";
+import type { WeatherSnapshot } from "./weather.js";
+
+/**
+ * Designed day-sheet PDF renderer.
+ *
+ * US Letter, one page per day via renderDaySheetsPdf. From top to bottom:
+ *
+ *  1. Header — full-bleed hero photo (~200pt, cover-fit) with a dark scrim,
+ *     overlaid gold uppercase kicker (trip title), huge "DAY N", date label,
+ *     and an italic one-line tagline (the itinerary-day description,
+ *     truncated). A "DAY N OF M" badge sits top-right. With no photo the
+ *     header falls back to solid navy with a gold rule.
+ *  2. Weather strip — a navy pill such as
+ *     "FRIDAY · 78°F / 51°F · OVERCAST · 8% CHANCE OF RAIN".
+ *     Omitted when the sheet has no weather.
+ *  3. Two-column body — left (wider) "DAY PLAN": items sorted by time with
+ *     bold time, bold uppercase title, status chip (BOOKED gold when a
+ *     confirmation code exists, FLIGHT blue, STAY green, FLEX gray when
+ *     untimed), a 1–2 line description, and a 58px thumbnail when the event
+ *     has a photo. Right: stacked "RESERVATIONS & ANCHORS",
+ *     "HIGHLIGHTS OF THE DAY" (up to 4 photos, 2-col grid; omitted when
+ *     empty), and "NOTES" (ruled lines) cards.
+ *  4. Footer — navy strip with a gold rule: "BASE: <stay name>",
+ *     "HARD TIMES: <Title 9:00 AM · …>", "DAY N OF M · <trip title>".
+ *
+ * Defensive: the exported renderers never throw, every string is truncated
+ * with an ellipsis to fit its slot, and a valid PDF is always returned.
+ * Every image is optional — downloads use a 10s abort timeout, require an
+ * image/* content-type, and are capped at 5MB.
+ *
+ * The pdfkit import/bundling is unchanged: `import PDFDocument from "pdfkit"`
+ * and build.mjs externalizes pdfkit so its `#standard-fonts/*`
+ * self-reference imports keep resolving in the production bundle.
+ */
+
+type PdfDoc = InstanceType<typeof PDFDocument>;
+type ImageGetter = (url: string | null | undefined) => Buffer | null;
+
+/* --------------------------------- constants -------------------------------- */
+
+const PAGE_W = 612; // US Letter
+const PAGE_H = 792;
+const MARGIN = 36;
+const HEADER_H = 200;
+const FOOTER_H = 52;
+
+const NAVY = "#1B2B4A";
+const GOLD = "#C9A24B";
+const INK = "#232A35";
+const BODY = "#3A414B";
+const MUTED = "#6B7280";
+const CARD_BG = "#F8F5EC";
+const CARD_LINE = "#E4DCC8";
+const DIVIDER = "#E7E1D1";
+const RULE_LINE = "#D9D3BF";
+const WHITE = "#FFFFFF";
+
+const CHIP_BLUE = "#2563EB";
+const CHIP_GREEN = "#15803D";
+const CHIP_GRAY = "#9CA3AF";
+
+const F_HELV = "Helvetica";
+const F_BOLD = "Helvetica-Bold";
+const F_ITALIC = "Helvetica-Oblique";
+
+const IMAGE_TIMEOUT_MS = 10_000;
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const THUMB = 58; // day-plan thumbnail, pt
+
+/* ---------------------------------- helpers --------------------------------- */
+
+/** Coerce anything to a safe string. */
+function s(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (v == null) return "";
+  return String(v);
+}
+
+/** Coerce to a positive integer, else the fallback. */
+function num(v: unknown, fallback: number): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+/**
+ * Truncate `text` with an ellipsis so it fits `maxWidth` at the document's
+ * current font/size. The caller must set font + size before calling.
+ */
+function fitWidth(doc: PdfDoc, text: string, maxWidth: number): string {
+  const t = s(text);
+  if (maxWidth <= 0) return "";
+  if (!t || doc.widthOfString(t) <= maxWidth) return t;
+  let lo = 0;
+  let hi = t.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const cand = `${t.slice(0, mid).replace(/\s+$/, "")}…`;
+    if (doc.widthOfString(cand) <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+  return `${t.slice(0, lo).replace(/\s+$/, "")}…`;
+}

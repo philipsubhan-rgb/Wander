@@ -1,0 +1,58 @@
+=== TimelineEvent ===
+22:export interface TimelineEvent {
+23-  id: number | string;
+24-  type: "flight" | "accommodation" | "activity" | "car_rental" | "itinerary" | "reservation";
+25-  date: string;
+26-  title: string;
+27-  description: string | null;
+28-  location: string | null;
+29-  time: string | null;
+30-  imageUrl: string | null;
+31-  carrierCode: string | null;
+32-  confirmationCode: string | null;
+33-}
+34-
+35-export async function buildTimelineEvents(tripId: number): Promise<TimelineEvent[]> {
+36-  const [flights, accommodations, activities, itinerary, carRentals, reservations] = await Promise.all([
+37-    db.select().from(flightsTable).where(eq(flightsTable.tripId, tripId)),
+38-    db.select().from(accommodationsTable).where(eq(accommodationsTable.tripId, tripId)),
+39-    db.select().from(activitiesTable).where(eq(activitiesTable.tripId, tripId)),
+40-    db.select().from(itineraryDaysTable).where(eq(itineraryDaysTable.tripId, tripId)),
+41-    db.select().from(carRentalsTable).where(eq(carRentalsTable.tripId, tripId)),
+42-    db.select().from(reservationsTable).where(eq(reservationsTable.tripId, tripId)),
+43-  ]);
+44-
+45-  const events = [
+46-    ...flights.map(f => {
+47-      // Legacy rows predate stored timezones: resolve the airport's zone so the
+48-      // timeline renders airport wall-clock time instead of the raw UTC instant
+49-      // (the server formats in UTC, so without this every legacy flight shifts).
+50-      const depTz = f.departureTimezone ?? airportTimeZone(f.departureAirport);
+51-      return {
+52-        id: f.id,
+53-        type: "flight" as const,
+54-        date: flightEventDate(f.departureDatetime, depTz),
+=== WeatherSnapshot ===
+9:export interface WeatherSnapshot {
+10-  highF: number;
+11-  lowF: number;
+12-  condition: string;
+13-  rainChancePct: number;
+14-}
+15-
+16-const FETCH_TIMEOUT_MS = 5_000;
+17-
+18-async function fetchWithTimeout(url: string): Promise<Response> {
+19-  const controller = new AbortController();
+20-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+21-  try {
+22-    return await fetch(url, { signal: controller.signal });
+23-  } finally {
+24-    clearTimeout(timer);
+25-  }
+26-}
+27-
+28-/**
+29- * Geocode a free-text destination to lat/lon via Open-Meteo.
+30- * Returns null when the lookup fails, yields no results, or times out.
+31- */

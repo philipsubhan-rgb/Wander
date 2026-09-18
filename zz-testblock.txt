@@ -1,0 +1,30 @@
+      { name: "Second", address: null, checkIn: "2026-09-25", checkOut: "2026-09-28" },
+    ];
+    expect(pickStayTonight(overlapping, "2026-09-25")?.name).toBe("First");
+  });
+});
+
+describe("timelineEventToItem", () => {
+  it("maps the relevant fields onto a DaySheetItem", () => {
+    expect(
+      timelineEventToItem({
+        id: 7,
+        type: "flight",
+        date: "2026-09-24",
+        title: "Lufthansa LH401: JFK → FRA",
+        description: "notes",
+        location: "JFK",
+        time: "18:45",
+        imageUrl: null,
+        carrierCode: "LH",
+        confirmationCode: "ABC123",
+      }),
+    ).toEqual({
+      time: "18:45",
+      title: "Lufthansa LH401: JFK → FRA",
+      location: "JFK",
+      confirmationCode: "ABC123",
+      type: "flight",
+    });
+  });
+});

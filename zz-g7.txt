@@ -1,0 +1,27 @@
+=== coverImage usages ===
+artifacts/api-server/src/routes/trips.ts:33:    coverImage: trip.coverImage ?? null,
+artifacts/api-server/src/routes/trips.ts:90:  if (!trip.coverImage && trip.destination) {
+artifacts/api-server/src/routes/trips.ts:93:        await db.update(tripsTable).set({ coverImage: imgUrl }).where(eq(tripsTable.id, trip.id));
+artifacts/api-server/src/routes/trips.ts:161:  if (parsed.data.destination && !parsed.data.coverImage) {
+artifacts/api-server/src/routes/trips.ts:164:        await db.update(tripsTable).set({ coverImage: imgUrl }).where(eq(tripsTable.id, trip.id));
+artifacts/api-server/src/routes/trips.ts:177:  const [row] = await db.select({ coverImage: tripsTable.coverImage }).from(tripsTable).where(eq(tripsTable.id, tripId));
+artifacts/api-server/src/routes/trips.ts:178:  if (!row?.coverImage) { res.status(404).end(); return; }
+artifacts/api-server/src/routes/trips.ts:180:  const { coverImage } = row;
+=== renderDaySheet usages ===
+artifacts/api-server/src/lib/briefingScheduler.test.ts:23:  renderDaySheetPdf: vi.fn(),
+artifacts/api-server/src/lib/briefingScheduler.test.ts:51:  renderDaySheetPdf: mocks.renderDaySheetPdf,
+artifacts/api-server/src/lib/briefingScheduler.test.ts:133:  mocks.renderDaySheetPdf.mockResolvedValue(Buffer.from("%PDF-mock"));
+artifacts/api-server/src/lib/briefingScheduler.ts:32:import { renderDaySheetPdf, renderDaySheetsPdf } from "./daySheetPdf.js";
+artifacts/api-server/src/lib/briefingScheduler.ts:215:    const pdf = await renderDaySheetPdf(sheet);
+artifacts/api-server/src/lib/briefingScheduler.ts:286:    const pdf = await renderDaySheetsPdf(sheets);
+artifacts/api-server/src/routes/briefings.test.ts:83:  renderDaySheetPdf: vi.fn(async () => Buffer.from("%PDF-mock")),
+artifacts/api-server/src/routes/briefings.test.ts:84:  renderDaySheetsPdf: vi.fn(async () => Buffer.from("%PDF-mock-all")),
+=== vitest.config ===
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts"],
+  },
+});

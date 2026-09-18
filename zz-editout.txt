@@ -1,0 +1,6 @@
+OK: DaySheetItem fields
+OK: DaySheet.heroPhotoUrl
+OK: timelineEventToItem mapping
+OK: buildDaySheet heroPhotoUrl
+FAIL: daySheet.test.ts toEqual: found 0 occurrences (expected 1)
+exit:1

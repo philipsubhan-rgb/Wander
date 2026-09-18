@@ -1,0 +1,55 @@
+=== daySheet mapping greps ===
+16:  time: string | null;
+17:  title: string;
+18:  location: string | null;
+19:  confirmationCode: string | null;
+20:  type: string;
+124:    time: event.time,
+125:    title: event.title,
+126:    location: event.location,
+127:    confirmationCode: event.confirmationCode,
+128:    type: event.type,
+173:    dayNotes: itineraryForDay?.description ?? null,
+=== trips cover field ===
+15:  coverImage: text("cover_image"),
+=== daySheet.test.ts head-40 ===
+/**
+ * Unit tests for the pure day-sheet helpers in ../lib/daySheet.
+ *
+ * buildDaySheet itself touches the DB, so these tests cover the pure,
+ * extractable pieces: date-label formatting, day-number/day-count math,
+ * item sorting (null times last), and stay-tonight selection.
+ */
+
+import { describe, it, expect, vi } from "vitest";
+
+// daySheet.ts imports @workspace/db at module top level, and the real module
+// throws when DATABASE_URL is unset. These tests only cover the pure helpers,
+// so mock the DB module the same way the route tests do.
+vi.mock("@workspace/db", () => ({
+  db: { select: vi.fn(), insert: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  tripsTable: new Proxy({}, { get: (_t, p) => p }),
+  accommodationsTable: new Proxy({}, { get: (_t, p) => p }),
+  tripBriefingsTable: new Proxy({}, { get: (_t, p) => p }),
+}));
+
+import {
+  formatDayLabel,
+  dayNumberFor,
+  dayCountFor,
+  tripDates,
+  sortDayItems,
+  pickStayTonight,
+  timelineEventToItem,
+  type DaySheetItem,
+} from "./daySheet.js";
+
+describe("formatDayLabel", () => {
+  it('formats "2026-09-24" as "Thursday, September 24" in America/New_York', () => {
+    expect(formatDayLabel("2026-09-24", "America/New_York")).toBe("Thursday, September 24");
+  });
+
+  it("formats in the trip's briefing timezone (Munich day sheet example)", () => {
+    // Same calendar date rendered from a different zone — the date must not shift.
+    expect(formatDayLabel("2026-09-24", "Europe/Berlin")).toBe("Thursday, September 24");
+  });

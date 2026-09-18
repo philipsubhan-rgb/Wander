@@ -1,0 +1,48 @@
+=== pdfkit in build.mjs ===
+103:      // pdfkit uses package self-reference subpath imports ("#standard-fonts/*")
+107:      "pdfkit",
+=== scripts ===
+6:  "scripts": {
+7-    "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
+8-    "build": "node ./build.mjs",
+9-    "start": "node --enable-source-maps ./dist/index.mjs",
+10-    "typecheck": "tsc -p tsconfig.json --noEmit",
+11-    "test": "vitest run"
+12-  },
+13-  "dependencies": {
+14-    "@google-cloud/storage": "^7.21.0",
+15-    "@modelcontextprotocol/sdk": "^1.30.0",
+16-    "@swc/helpers": "0.5.23",
+17-    "@workspace/api-zod": "workspace:*",
+18-    "@workspace/db": "workspace:*",
+=== daySheetPdf imports ===
+/**
+ * PDF rendering for the daily trip one-pager (day sheet).
+ *
+ * Uses pdfkit directly (no HTML). `renderDaySheetPdf` renders a single sheet
+ * on one US Letter page; `renderDaySheetsPdf` renders several sheets — one
+ * page per sheet. The rendering is defensive by design: any combination of
+ * empty items, null weather/stay/notes, or oversized strings must still
+ * produce a valid PDF and must never throw.
+ */
+
+import PDFDocument from "pdfkit";
+import type { DaySheet } from "./daySheet.js";
+=== daySheetPdf exports ===
+30:export async function renderDaySheetPdf(sheet: DaySheet): Promise<Buffer> {
+35:export async function renderDaySheetsPdf(sheets: DaySheet[]): Promise<Buffer> {
+=== daySheet.ts wc ===
+177 artifacts/api-server/src/lib/daySheet.ts
+=== daySheet.ts structure ===
+24:  tripTitle: string;
+30:  items: DaySheetItem[];
+43:export function formatDayLabel(dateISO: string, timeZone: string): string {
+57:export function dayNumberFor(dateISO: string, startISO: string): number {
+65:export function dayCountFor(startISO: string, endISO: string): number {
+75:export function tripDates(startISO: string, endISO: string): string[] {
+87:export function sortDayItems(items: DaySheetItem[]): DaySheetItem[] {
+107:export function pickStayTonight(
+122:export function timelineEventToItem(event: TimelineEvent): DaySheetItem {
+134:export async function buildDaySheet(tripId: number, dateISO: string): Promise<DaySheet> {
+155:    dayEvents.filter(e => e.type !== "itinerary").map(timelineEventToItem),
+165:    tripTitle: trip.title,
