@@ -111,7 +111,6 @@ describe("renderDaySheetPdf", () => {
 
 describe("renderDaySheetsPdf", () => {
   const day2: DaySheet = { ...realisticSheet, dateISO: "2026-09-26", dateLabel: "Saturday, September 26", dayNumber: 3 };
-
   it("renders one page per sheet", async () => {
     const pdf = await renderDaySheetsPdf([realisticSheet, day2]);
     expect(Buffer.isBuffer(pdf)).toBe(true);
@@ -132,4 +131,27 @@ describe("renderDaySheetsPdf", () => {
     expect(Buffer.isBuffer(pdf)).toBe(true);
     expect(pdf.subarray(0, 4).toString("ascii")).toBe("%PDF");
   });
+});
+
+describe("renderDaySheetPdf image handling", () => {
+  // Unreachable image URLs must degrade gracefully — no throw, valid PDF,
+  // navy header fallback and no thumbnails.
+  const deadUrl = "http://127.0.0.1:9/unreachable.jpg";
+  const sheetWithDeadImages: DaySheet = {
+    ...realisticSheet,
+    heroPhotoUrl: deadUrl,
+    items: realisticSheet.items.map(item => ({
+      ...item,
+      description: "A short description of the plan item.",
+      photoUrl: deadUrl,
+    })),
+  };
+
+  it("renders a valid one-page PDF when every image URL is unreachable", async () => {
+    const pdf = await renderDaySheetPdf(sheetWithDeadImages);
+    expect(Buffer.isBuffer(pdf)).toBe(true);
+    expect(pdf.subarray(0, 4).toString("ascii")).toBe("%PDF");
+    const pageRefs = pdf.toString("ascii").match(/\/Type\s*\/Page\b/g) ?? [];
+    expect(pageRefs.length).toBe(1);
+  }, 30000);
 });

@@ -194,6 +194,8 @@ describe("timelineEventToItem", () => {
       location: "JFK",
       confirmationCode: "ABC123",
       type: "flight",
+      description: "notes",
+      photoUrl: null,
     });
   });
 });

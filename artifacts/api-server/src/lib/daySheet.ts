@@ -18,6 +18,8 @@ export interface DaySheetItem {
   location: string | null;
   confirmationCode: string | null;
   type: string;
+  description?: string | null;
+  photoUrl?: string | null;
 }
 
 export interface DaySheet {
@@ -31,6 +33,7 @@ export interface DaySheet {
   stayTonight: { name: string; address: string | null } | null;
   dayNotes: string | null;
   weather: WeatherSnapshot | null;
+  heroPhotoUrl?: string | null;
 }
 
 // ── Pure helpers (unit-tested in daySheet.test.ts) ────────────────────────────
@@ -126,6 +129,8 @@ export function timelineEventToItem(event: TimelineEvent): DaySheetItem {
     location: event.location,
     confirmationCode: event.confirmationCode,
     type: event.type,
+    description: event.description ?? null,
+    photoUrl: event.imageUrl ?? null,
   };
 }
 
@@ -173,5 +178,11 @@ export async function buildDaySheet(tripId: number, dateISO: string): Promise<Da
     dayNotes: itineraryForDay?.description ?? null,
     // The scheduler fills this in later — never fetched here.
     weather: null,
+    // Hero photo for the PDF header: the trip cover, else the first item
+    // photo, else null (the renderer falls back to a navy header).
+    heroPhotoUrl:
+      trip.coverImage ??
+      items.find(i => i.photoUrl)?.photoUrl ??
+      null,
   };
 }
