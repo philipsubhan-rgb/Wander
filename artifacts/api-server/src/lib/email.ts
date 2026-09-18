@@ -145,6 +145,9 @@ export async function sendWelcomeEmail(opts: {
  *
  * `to` may hold multiple recipients. When SMTP is not configured the email
  * is skipped (not queued) and `{ sent: false }` is returned. Never throws.
+ *
+ * Pass `ics` to also attach the trip itinerary as a calendar file — the
+ * traveler can import it into Apple/Google/Outlook calendars.
  */
 export async function sendDailyBriefingEmail(opts: {
   to: string[];
@@ -152,11 +155,14 @@ export async function sendDailyBriefingEmail(opts: {
   dateLabel: string;
   pdfBuffer: Buffer;
   filename: string;
+  ics?: { filename: string; content: string };
 }): Promise<SendResult> {
-  const { to, tripTitle, dateLabel, pdfBuffer, filename } = opts;
+  const { to, tripTitle, dateLabel, pdfBuffer, filename, ics } = opts;
 
   const subject = `Wander one-pager: ${tripTitle} — ${dateLabel}`;
-  const text = `Your one-page briefing for ${dateLabel} is attached.\n\n— The Wander team`;
+  const text = ics
+    ? `Your one-page briefing for ${dateLabel} is attached, along with the trip itinerary as a calendar file (.ics) — import it into your calendar app.\n\n— The Wander team`
+    : `Your one-page briefing for ${dateLabel} is attached.\n\n— The Wander team`;
 
   const transport = buildTransport();
 
@@ -181,6 +187,15 @@ export async function sendDailyBriefingEmail(opts: {
           content: pdfBuffer,
           contentType: "application/pdf",
         },
+        ...(ics
+          ? [
+              {
+                filename: ics.filename,
+                content: ics.content,
+                contentType: "text/calendar",
+              },
+            ]
+          : []),
       ],
     });
     return { sent: true };

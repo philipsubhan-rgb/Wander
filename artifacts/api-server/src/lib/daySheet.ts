@@ -68,6 +68,21 @@ export function dayCountFor(startISO: string, endISO: string): number {
   return Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
 }
 
+/**
+ * All YYYY-MM-DD dates from startISO through endISO, inclusive. Never empty;
+ * falls back to [startISO] when the range is degenerate.
+ */
+export function tripDates(startISO: string, endISO: string): string[] {
+  const dates: string[] = [];
+  const cursor = new Date(`${startISO}T12:00:00Z`);
+  const last = new Date(`${endISO}T12:00:00Z`);
+  while (cursor <= last && dates.length < 366) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates.length > 0 ? dates : [startISO];
+}
+
 /** Sort day items by time; items with no time sort last. */
 export function sortDayItems(items: DaySheetItem[]): DaySheetItem[] {
   return [...items].sort((a, b) => {

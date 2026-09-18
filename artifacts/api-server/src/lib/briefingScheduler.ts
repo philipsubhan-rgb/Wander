@@ -27,10 +27,11 @@ import {
   type Trip,
 } from "@workspace/db";
 import { logger } from "./logger.js";
-import { buildDaySheet, type DaySheet } from "./daySheet.js";
+import { buildDaySheet, tripDates, type DaySheet } from "./daySheet.js";
 import { geocodeDestination, fetchWeatherForDate } from "./weather.js";
-import { renderDaySheetPdf } from "./daySheetPdf.js";
+import { renderDaySheetPdf, renderDaySheetsPdf } from "./daySheetPdf.js";
 import { sendDailyBriefingEmail } from "./email.js";
+import { buildTripIcs } from "./tripIcs.js";
 
 // ---------------------------------------------------------------------------
 // Timezone helpers (pure, unit-testable)
@@ -196,11 +197,16 @@ export interface SendTripBriefingResult {
  * `briefing.id` may be unset when the caller is working from transient
  * defaults (send-now with no persisted row); in that case persistence steps
  * are skipped but the email is still sent.
+ *
+ * Pass `attachIcs: true` to also attach the whole-trip itinerary as a
+ * calendar (.ics) file. The scheduled daily tick keeps its PDF-only format;
+ * only manual sends attach the ICS.
  */
 export async function sendTripBriefing(
   briefing: TripBriefing,
   trip: Trip,
-  dateISO: string
+  dateISO: string,
+  opts?: { attachIcs?: boolean }
 ): Promise<SendTripBriefingResult> {
   try {
     const sheet = await buildDaySheet(trip.id, dateISO);
@@ -214,12 +220,24 @@ export async function sendTripBriefing(
       return { sent: false, recipientCount: 0 };
     }
 
+    let ics: { filename: string; content: string } | undefined;
+    if (opts?.attachIcs) {
+      try {
+        const built = await buildTripIcs(trip.id);
+        ics = { filename: built.filename, content: built.ics };
+      } catch (err) {
+        // ICS is a bonus attachment — never let it sink the email.
+        logger.warn({ err, tripId: trip.id }, "ICS itinerary build failed — sending PDF only");
+      }
+    }
+
     const result = await sendDailyBriefingEmail({
       to: recipients,
       tripTitle: trip.title,
       dateLabel: sheet.dateLabel,
       pdfBuffer: pdf,
       filename: `wander-one-pager-${trip.id}-${dateISO}.pdf`,
+      ...(ics ? { ics } : {}),
     });
 
     if (result.sent && briefing.id != null) {
@@ -234,6 +252,70 @@ export async function sendTripBriefing(
     // Never mark sent on exception — the next tick retries.
     logger.error({ err, tripId: trip.id }, "Failed to send trip briefing");
     return { sent: false, recipientCount: 0 };
+  }
+}
+
+export interface SendAllBriefingsResult {
+  sent: boolean;
+  recipientCount: number;
+  dayCount: number;
+}
+
+/**
+ * Build and send a combined briefing — one PDF page per trip day — for the
+ * whole trip. Used by the admin "send all days" action. Unlike the daily
+ * tick, this does not touch lastSentForDate: it is an explicit one-off, not
+ * part of the scheduled per-day cadence.
+ */
+export async function sendAllBriefings(
+  briefing: TripBriefing,
+  trip: Trip
+): Promise<SendAllBriefingsResult> {
+  try {
+    const start = trip.startDate.substring(0, 10);
+    const end = trip.endDate.substring(0, 10);
+    const dates = tripDates(start, end);
+
+    const sheets: DaySheet[] = [];
+    for (const dateISO of dates) {
+      const sheet = await buildDaySheet(trip.id, dateISO);
+      await attachWeather(sheet, briefing, trip, dateISO);
+      sheets.push(sheet);
+    }
+
+    const pdf = await renderDaySheetsPdf(sheets);
+
+    const recipients = await loadBriefingRecipients(briefing, trip.id);
+    if (recipients.length === 0) {
+      logger.info({ tripId: trip.id }, "All-days briefing not sent — no recipients");
+      return { sent: false, recipientCount: 0, dayCount: dates.length };
+    }
+
+    const dateLabel = `${dates[0]} – ${dates[dates.length - 1]} (${dates.length} day${
+      dates.length === 1 ? "" : "s"
+    })`;
+
+    let ics: { filename: string; content: string } | undefined;
+    try {
+      const built = await buildTripIcs(trip.id);
+      ics = { filename: built.filename, content: built.ics };
+    } catch (err) {
+      logger.warn({ err, tripId: trip.id }, "ICS itinerary build failed — sending PDF only");
+    }
+
+    const result = await sendDailyBriefingEmail({
+      to: recipients,
+      tripTitle: trip.title,
+      dateLabel,
+      pdfBuffer: pdf,
+      filename: `wander-all-days-${trip.id}-${dates[0]}-to-${dates[dates.length - 1]}.pdf`,
+      ...(ics ? { ics } : {}),
+    });
+
+    return { sent: result.sent, recipientCount: recipients.length, dayCount: dates.length };
+  } catch (err) {
+    logger.error({ err, tripId: trip.id }, "Failed to send all-days trip briefing");
+    return { sent: false, recipientCount: 0, dayCount: 0 };
   }
 }
 

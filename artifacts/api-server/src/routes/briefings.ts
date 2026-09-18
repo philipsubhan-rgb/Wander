@@ -1,10 +1,17 @@
 /**
  * Daily briefing routes.
  *
- *   GET  /trips/:tripId/briefing            — briefing settings (or defaults)
- *   PUT  /trips/:tripId/briefing            — upsert settings (trip admin)
- *   POST /trips/:tripId/briefing/send-now   — send immediately (trip admin)
- *   GET  /trips/:tripId/briefing/preview.pdf — render the PDF inline
+ *   GET  /trips/:tripId/briefing                 — briefing settings (or defaults)
+ *   PUT  /trips/:tripId/briefing                 — upsert settings (trip admin)
+ *   POST /trips/:tripId/briefing/send-now        — send immediately (trip admin);
+ *                                                  ?date=YYYY-MM-DD sends one day,
+ *                                                  ?all=true sends all days
+ *   GET  /trips/:tripId/briefing/preview.pdf     — render one day's PDF inline
+ *                                                  (?date=YYYY-MM-DD, else default day)
+ *   GET  /trips/:tripId/briefing/preview-all.pdf — render all days' PDF inline,
+ *                                                  one page per day
+ *   GET  /trips/:tripId/itinerary.ics             — download the trip itinerary
+ *                                                  as a calendar file
  *
  * Briefing endpoints are not part of the OpenAPI spec yet, so the zod
  * schemas live here rather than in @workspace/api-zod (generated files
@@ -25,11 +32,14 @@ import { requireTripAdmin, requireTripParticipant } from "../middlewares/auth";
 import {
   attachWeather,
   isValidTimeZone,
+  sendAllBriefings,
   sendTripBriefing,
   todayInZone,
 } from "../lib/briefingScheduler.js";
-import { buildDaySheet } from "../lib/daySheet.js";
-import { renderDaySheetPdf } from "../lib/daySheetPdf.js";
+import { buildDaySheet, tripDates } from "../lib/daySheet.js";
+import { renderDaySheetPdf, renderDaySheetsPdf } from "../lib/daySheetPdf.js";
+import { buildTripIcs } from "../lib/tripIcs.js";
+import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 
@@ -207,8 +217,10 @@ router.put(
   }
 );
 
-// Trip admins can force-send the briefing for a date. Unlike the scheduler
-// tick, this skips the status/date-range gating — the admin explicitly asked.
+// Trip admins can force-send the briefing. By default (or with ?date=) one
+// day is sent; with ?all=true the combined all-days PDF is sent instead.
+// Unlike the scheduler tick, this skips the status/date-range gating — the
+// admin explicitly asked.
 router.post(
   "/trips/:tripId/briefing/send-now",
   requireTripAdmin("tripId"),
@@ -232,6 +244,16 @@ router.post(
       .where(eq(tripBriefingsTable.tripId, tripId));
     const briefing = briefingRow ?? defaultBriefing(tripId);
 
+    if (req.query.all === "true") {
+      const result = await sendAllBriefings(briefing, trip);
+      res.json({
+        sent: result.sent,
+        recipientCount: result.recipientCount,
+        dayCount: result.dayCount,
+      });
+      return;
+    }
+
     const dateISO = resolveDateParam(
       req,
       () => defaultBriefingDate(trip, briefing),
@@ -239,7 +261,7 @@ router.post(
     );
     if (dateISO === null) return;
 
-    const result = await sendTripBriefing(briefing, trip, dateISO);
+    const result = await sendTripBriefing(briefing, trip, dateISO, { attachIcs: true });
     res.json({ sent: result.sent, recipientCount: result.recipientCount });
   }
 );
@@ -285,6 +307,80 @@ router.get(
       `inline; filename="wander-preview-${tripId}-${dateISO}.pdf"`
     );
     res.send(pdf);
+  }
+);
+
+// Any participant can preview the combined all-days PDF inline: one page per
+// trip day, in trip order.
+router.get(
+  "/trips/:tripId/briefing/preview-all.pdf",
+  requireTripParticipant("tripId"),
+  async (req, res): Promise<void> => {
+    const params = TripIdParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Invalid tripId" });
+      return;
+    }
+    const tripId = params.data.tripId;
+
+    const trip = await loadTripOr404(tripId);
+    if (!trip) {
+      res.status(404).json({ error: "Trip not found" });
+      return;
+    }
+
+    const [briefingRow] = await db
+      .select()
+      .from(tripBriefingsTable)
+      .where(eq(tripBriefingsTable.tripId, tripId));
+    const briefing = briefingRow ?? defaultBriefing(tripId);
+
+    const dates = tripDates(
+      trip.startDate.substring(0, 10),
+      trip.endDate.substring(0, 10)
+    );
+    const sheets = [];
+    for (const dateISO of dates) {
+      const sheet = await buildDaySheet(trip.id, dateISO);
+      await attachWeather(sheet, briefing, trip, dateISO);
+      sheets.push(sheet);
+    }
+    const pdf = await renderDaySheetsPdf(sheets);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="wander-preview-all-${tripId}-${dates[0]}-to-${dates[dates.length - 1]}.pdf"`
+    );
+    res.send(pdf);
+  }
+);
+
+// Any participant can download the whole trip itinerary as a calendar file:
+// one VEVENT per timeline event, ready to import into Apple/Google/Outlook.
+router.get(
+  "/trips/:tripId/itinerary.ics",
+  requireTripParticipant("tripId"),
+  async (req, res): Promise<void> => {
+    const params = TripIdParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Invalid tripId" });
+      return;
+    }
+    const tripId = params.data.tripId;
+
+    try {
+      const { ics, filename } = await buildTripIcs(tripId);
+      res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`
+      );
+      res.send(ics);
+    } catch (err) {
+      logger.error({ err, tripId }, "Failed to build itinerary ICS");
+      res.status(404).json({ error: "Trip not found" });
+    }
   }
 );
 

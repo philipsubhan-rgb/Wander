@@ -22,6 +22,7 @@ import {
   formatDayLabel,
   dayNumberFor,
   dayCountFor,
+  tripDates,
   sortDayItems,
   pickStayTonight,
   timelineEventToItem,
@@ -64,6 +65,25 @@ describe("dayCountFor", () => {
 
   it("counts a single-day trip as 1", () => {
     expect(dayCountFor("2026-09-24", "2026-09-24")).toBe(1);
+  });
+});
+
+describe("tripDates", () => {
+  it("lists every date from start through end, inclusive", () => {
+    expect(tripDates("2026-09-24", "2026-09-27")).toEqual([
+      "2026-09-24",
+      "2026-09-25",
+      "2026-09-26",
+      "2026-09-27",
+    ]);
+  });
+
+  it("returns a single-element list for a one-day trip", () => {
+    expect(tripDates("2026-09-24", "2026-09-24")).toEqual(["2026-09-24"]);
+  });
+
+  it("falls back to the start date on a degenerate range", () => {
+    expect(tripDates("2026-09-27", "2026-09-24")).toEqual(["2026-09-27"]);
   });
 });
 

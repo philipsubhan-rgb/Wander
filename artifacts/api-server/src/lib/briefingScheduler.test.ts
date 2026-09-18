@@ -22,6 +22,11 @@ const mocks = vi.hoisted(() => ({
   fetchWeatherForDate: vi.fn(),
   renderDaySheetPdf: vi.fn(),
   sendDailyBriefingEmail: vi.fn(),
+  buildTripIcs: vi.fn(async (tripId: number) => ({
+    ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n",
+    filename: `wander-itinerary-${tripId}.ics`,
+    eventCount: 3,
+  })),
   schedule: vi.fn(),
 }));
 
@@ -48,6 +53,10 @@ vi.mock("./daySheetPdf.js", () => ({
 
 vi.mock("./email.js", () => ({
   sendDailyBriefingEmail: mocks.sendDailyBriefingEmail,
+}));
+
+vi.mock("./tripIcs.js", () => ({
+  buildTripIcs: mocks.buildTripIcs,
 }));
 
 // ── Lazy-dequeue DB mock ──────────────────────────────────────────────────────
@@ -288,6 +297,52 @@ describe("sendTripBriefing", () => {
     // lastSentForDate was persisted
     expect(setCalls).toHaveLength(1);
     expect(setCalls[0]).toMatchObject({ lastSentForDate: "2026-09-25" });
+    // no ICS on the plain call (the scheduled tick stays PDF-only)
+    expect(mocks.buildTripIcs).not.toHaveBeenCalled();
+    expect("ics" in emailArgs).toBe(false);
+  });
+
+  it("attaches the itinerary .ics when opts.attachIcs is true", async () => {
+    const briefing = makeBriefing({ cachedLat: 48.1351, cachedLon: 11.582 });
+    mocks.sendDailyBriefingEmail.mockResolvedValue({ sent: true });
+
+    enqueue([{ email: "alice@example.com" }]);
+    enqueue([]); // lastSentForDate update
+
+    const result = await scheduler.sendTripBriefing(
+      briefing as any,
+      makeTrip() as any,
+      "2026-09-25",
+      { attachIcs: true }
+    );
+
+    expect(result).toEqual({ sent: true, recipientCount: 1 });
+    expect(mocks.buildTripIcs).toHaveBeenCalledWith(1);
+    const emailArgs = mocks.sendDailyBriefingEmail.mock.calls[0][0];
+    expect(emailArgs.ics).toEqual({
+      filename: "wander-itinerary-1.ics",
+      content: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n",
+    });
+  });
+
+  it("still sends the PDF when the ICS build fails", async () => {
+    const briefing = makeBriefing({ cachedLat: 48.1351, cachedLon: 11.582 });
+    mocks.buildTripIcs.mockRejectedValueOnce(new Error("ics exploded"));
+    mocks.sendDailyBriefingEmail.mockResolvedValue({ sent: true });
+
+    enqueue([{ email: "alice@example.com" }]);
+    enqueue([]); // lastSentForDate update
+
+    const result = await scheduler.sendTripBriefing(
+      briefing as any,
+      makeTrip() as any,
+      "2026-09-25",
+      { attachIcs: true }
+    );
+
+    expect(result).toEqual({ sent: true, recipientCount: 1 });
+    const emailArgs = mocks.sendDailyBriefingEmail.mock.calls[0][0];
+    expect("ics" in emailArgs).toBe(false);
   });
 
   it("does not mark sent when the email fails", async () => {

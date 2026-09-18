@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DaySheet } from "./daySheet.js";
-import { renderDaySheetPdf } from "./daySheetPdf.js";
+import { renderDaySheetPdf, renderDaySheetsPdf } from "./daySheetPdf.js";
 
 const realisticSheet: DaySheet = {
   tripTitle: "Oktoberfest Guys' Trip",
@@ -104,6 +104,31 @@ describe("renderDaySheetPdf", () => {
 
   it("never throws on minimal/oversized data", async () => {
     const pdf = await renderDaySheetPdf(minimalSheet);
+    expect(Buffer.isBuffer(pdf)).toBe(true);
+    expect(pdf.subarray(0, 4).toString("ascii")).toBe("%PDF");
+  });
+});
+
+describe("renderDaySheetsPdf", () => {
+  const day2: DaySheet = { ...realisticSheet, dateISO: "2026-09-26", dateLabel: "Saturday, September 26", dayNumber: 3 };
+
+  it("renders one page per sheet", async () => {
+    const pdf = await renderDaySheetsPdf([realisticSheet, day2]);
+    expect(Buffer.isBuffer(pdf)).toBe(true);
+    expect(pdf.subarray(0, 4).toString("ascii")).toBe("%PDF");
+    expect(pdf.length).toBeGreaterThan(1000);
+    const pageRefs = pdf.toString("ascii").match(/\/Type\s*\/Page\b/g) ?? [];
+    expect(pageRefs.length).toBe(2);
+  });
+
+  it("still renders a single-page PDF for one sheet", async () => {
+    const pdf = await renderDaySheetsPdf([realisticSheet]);
+    const pageRefs = pdf.toString("ascii").match(/\/Type\s*\/Page\b/g) ?? [];
+    expect(pageRefs.length).toBe(1);
+  });
+
+  it("renders an empty list without throwing", async () => {
+    const pdf = await renderDaySheetsPdf([]);
     expect(Buffer.isBuffer(pdf)).toBe(true);
     expect(pdf.subarray(0, 4).toString("ascii")).toBe("%PDF");
   });

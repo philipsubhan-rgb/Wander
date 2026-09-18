@@ -70,6 +70,9 @@ const mocks = vi.hoisted(() => ({
   sendTripBriefing: vi.fn(
     async (_briefing: unknown, _trip: unknown, _dateISO: string) => ({ sent: true, recipientCount: 2 })
   ),
+  sendAllBriefings: vi.fn(
+    async (_briefing: unknown, _trip: unknown) => ({ sent: true, recipientCount: 2, dayCount: 4 })
+  ),
   attachWeather: vi.fn(async () => {}),
   buildDaySheet: vi.fn(async (tripId: number, dateISO: string) => ({
     tripId,
@@ -78,6 +81,19 @@ const mocks = vi.hoisted(() => ({
     weather: null,
   })),
   renderDaySheetPdf: vi.fn(async () => Buffer.from("%PDF-mock")),
+  renderDaySheetsPdf: vi.fn(async () => Buffer.from("%PDF-mock-all")),
+  buildTripIcs: vi.fn(async (tripId: number) => {
+    if (tripId === 999) throw new Error("Trip 999 not found");
+    return {
+      ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n",
+      filename: `wander-itinerary-${tripId}.ics`,
+      eventCount: 3,
+    };
+  }),
+}));
+
+vi.mock("../lib/tripIcs.js", () => ({
+  buildTripIcs: mocks.buildTripIcs,
 }));
 
 vi.mock("../lib/briefingScheduler.js", () => ({
@@ -91,15 +107,27 @@ vi.mock("../lib/briefingScheduler.js", () => ({
   },
   todayInZone: () => mocks.todayISO,
   sendTripBriefing: mocks.sendTripBriefing,
+  sendAllBriefings: mocks.sendAllBriefings,
   attachWeather: mocks.attachWeather,
 }));
 
 vi.mock("../lib/daySheet.js", () => ({
   buildDaySheet: mocks.buildDaySheet,
+  tripDates: (startISO: string, endISO: string) => {
+    const dates: string[] = [];
+    const cursor = new Date(`${startISO}T12:00:00Z`);
+    const last = new Date(`${endISO}T12:00:00Z`);
+    while (cursor <= last && dates.length < 366) {
+      dates.push(cursor.toISOString().slice(0, 10));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    return dates.length > 0 ? dates : [startISO];
+  },
 }));
 
 vi.mock("../lib/daySheetPdf.js", () => ({
   renderDaySheetPdf: mocks.renderDaySheetPdf,
+  renderDaySheetsPdf: mocks.renderDaySheetsPdf,
 }));
 
 // ── Test app ──────────────────────────────────────────────────────────────────
@@ -380,6 +408,10 @@ describe("POST /trips/:tripId/briefing/send-now", () => {
     expect(briefingArg.id).toBeUndefined(); // no persisted row → no id
     expect(tripArg.id).toBe(1);
     expect(dateArg).toBe("2026-09-24"); // today (2026-09-17) is outside the trip window → trip start
+    const optsArg = (mocks.sendTripBriefing.mock.calls[0] as unknown[])[3] as
+      | { attachIcs?: boolean }
+      | undefined;
+    expect(optsArg).toEqual({ attachIcs: true }); // manual sends attach the itinerary .ics
   });
 
   it("honours an explicit ?date= parameter", async () => {
@@ -404,6 +436,22 @@ describe("POST /trips/:tripId/briefing/send-now", () => {
     expect(status).toBe(400);
     expect(typeof body.error).toBe("string");
     expect(mocks.sendTripBriefing).not.toHaveBeenCalled();
+  });
+
+  it("sends the combined all-days PDF with ?all=true", async () => {
+    enqueue([adminRow]);
+    enqueue([tripRow]);
+    enqueue([briefingRow]);
+
+    const { status, body } = await post("/trips/1/briefing/send-now?all=true");
+
+    expect(status).toBe(200);
+    expect(body).toEqual({ sent: true, recipientCount: 2, dayCount: 4 });
+    expect(mocks.sendAllBriefings).toHaveBeenCalledTimes(1);
+    expect(mocks.sendTripBriefing).not.toHaveBeenCalled();
+    const [briefingArg, tripArg] = mocks.sendAllBriefings.mock.calls[0] as [any, any];
+    expect(briefingArg.id).toBe(5);
+    expect(tripArg.id).toBe(1);
   });
 });
 
@@ -457,5 +505,95 @@ describe("GET /trips/:tripId/briefing/preview.pdf", () => {
     expect(status).toBe(200);
     expect(mocks.buildDaySheet).toHaveBeenCalledWith(1, "2026-09-20");
     expect(headers.get("content-disposition")).toContain("wander-preview-1-2026-09-20.pdf");
+  });
+});
+
+// ── GET /trips/:tripId/briefing/preview-all.pdf ──────────────────────────────
+
+describe("GET /trips/:tripId/briefing/preview-all.pdf", () => {
+  it("returns 403 for a non-participant", async () => {
+    enqueue([]);
+
+    const { status } = await get("/trips/1/briefing/preview-all.pdf");
+
+    expect(status).toBe(403);
+  });
+
+  it("renders one page per trip day for a participant", async () => {
+    enqueue([participantRow]);
+    enqueue([tripRow]);
+    enqueue([briefingRow]);
+
+    const { status, body, headers } = await get("/trips/1/briefing/preview-all.pdf");
+
+    expect(status).toBe(200);
+    expect(headers.get("content-type")).toContain("application/pdf");
+    expect(headers.get("content-disposition")).toContain("inline");
+    expect(headers.get("content-disposition")).toContain(
+      "wander-preview-all-1-2026-09-24-to-2026-09-27.pdf"
+    );
+    expect(Buffer.from(body as ArrayBuffer).toString()).toBe("%PDF-mock-all");
+
+    // One sheet per day of the Sep 24–27 trip, in order.
+    const expectedDates = ["2026-09-24", "2026-09-25", "2026-09-26", "2026-09-27"];
+    expect(mocks.buildDaySheet).toHaveBeenCalledTimes(4);
+    expectedDates.forEach((dateISO, i) => {
+      expect(mocks.buildDaySheet).toHaveBeenNthCalledWith(i + 1, 1, dateISO);
+    });
+    expect(mocks.attachWeather).toHaveBeenCalledTimes(4);
+    expect(mocks.renderDaySheetsPdf).toHaveBeenCalledTimes(1);
+    const sheets = ((mocks.renderDaySheetsPdf.mock.calls as unknown as unknown[][])[0]?.[0] ?? []) as any[];
+    expect(sheets).toHaveLength(4);
+    expect(sheets.map((s) => s.date)).toEqual(expectedDates);
+  });
+
+  it("returns 404 when the trip does not exist", async () => {
+    enqueue([participantRow]);
+    enqueue([]);
+
+    const { status } = await get("/trips/1/briefing/preview-all.pdf");
+
+    expect(status).toBe(404);
+  });
+});
+
+// ── GET /trips/:tripId/itinerary.ics ─────────────────────────────────────────
+
+describe("GET /trips/:tripId/itinerary.ics", () => {
+  it("returns 403 for a non-participant", async () => {
+    enqueue([]);
+
+    const { status } = await get("/trips/1/itinerary.ics");
+
+    expect(status).toBe(403);
+  });
+
+  it("returns 400 for an invalid tripId", async () => {
+    enqueue([participantRow]);
+
+    const { status } = await get("/trips/abc/itinerary.ics");
+
+    expect(status).toBe(400);
+  });
+
+  it("downloads the itinerary .ics for a participant", async () => {
+    enqueue([participantRow]);
+
+    const { status, body, headers } = await get("/trips/1/itinerary.ics");
+
+    expect(status).toBe(200);
+    expect(headers.get("content-type")).toContain("text/calendar");
+    expect(headers.get("content-disposition")).toContain("attachment");
+    expect(headers.get("content-disposition")).toContain("wander-itinerary-1.ics");
+    expect(Buffer.from(body as ArrayBuffer).toString()).toContain("BEGIN:VCALENDAR");
+    expect(mocks.buildTripIcs).toHaveBeenCalledWith(1);
+  });
+
+  it("returns 404 when the trip does not exist", async () => {
+    enqueue([participantRow]);
+
+    const { status } = await get("/trips/999/itinerary.ics");
+
+    expect(status).toBe(404);
   });
 });

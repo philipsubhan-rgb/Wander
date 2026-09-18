@@ -3,7 +3,7 @@ import {
   useLookupUserByEmail, requestUploadUrl,
   getGetTripQueryKey, getListTripParticipantsQueryKey, getListExpensesQueryKey, getGetExpenseBalanceQueryKey,
 } from '@workspace/api-client-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -377,7 +377,44 @@ function parseEmailList(raw: string): { emails: string[]; invalid: string[] } {
   return { emails, invalid };
 }
 
-function DailyOnePagerSettings({ tripId }: { tripId: number }) {
+/** One option in the day picker: 'all' for the whole trip, or a YYYY-MM-DD date. */
+type DayChoice = string; // 'all' | YYYY-MM-DD
+
+function dayOptionsFor(startISO: string, endISO: string): { iso: string; label: string }[] {
+  const dates: string[] = [];
+  const cursor = new Date(`${startISO}T12:00:00Z`);
+  const last = new Date(`${endISO}T12:00:00Z`);
+  while (cursor <= last && dates.length < 366) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates.map((iso, i) => {
+    const d = new Date(`${iso}T12:00:00Z`);
+    const label = d.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    });
+    return { iso, label: `Day ${i + 1} — ${label}` };
+  });
+}
+
+/** Mirror of the server's defaultBriefingDate: today while the trip runs, else day 1. */
+function defaultDayChoice(startISO: string, endISO: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return today >= startISO && today <= endISO ? today : startISO;
+}
+
+function DailyOnePagerSettings({
+  tripId,
+  tripStart,
+  tripEnd,
+}: {
+  tripId: number;
+  tripStart: string;
+  tripEnd: string;
+}) {
   const [loading, setLoading] = useState(true);
   const [enabled, setEnabled] = useState(false);
   const [sendTimeLocal, setSendTimeLocal] = useState('07:00');
@@ -387,6 +424,22 @@ function DailyOnePagerSettings({ tripId }: { tripId: number }) {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
+  const [dayChoice, setDayChoice] = useState<DayChoice>('all');
+
+  const startISO = (tripStart ?? '').slice(0, 10);
+  const endISO = (tripEnd ?? '').slice(0, 10);
+  const dayOptions = useMemo(
+    () => (startISO && endISO ? dayOptionsFor(startISO, endISO) : []),
+    [startISO, endISO]
+  );
+
+  // Default the picker to the day the server would render for an unqualified
+  // preview (today while the trip runs, else day 1), unless the user picks.
+  useEffect(() => {
+    if (startISO && endISO) {
+      setDayChoice(prev => (prev === 'all' ? defaultDayChoice(startISO, endISO) : prev));
+    }
+  }, [startISO, endISO]);
 
   useEffect(() => {
     let cancelled = false;
@@ -471,8 +524,10 @@ function DailyOnePagerSettings({ tripId }: { tripId: number }) {
 
   const handleSendNow = async () => {
     setSending(true);
+    const sendingAll = dayChoice === 'all';
+    const qs = sendingAll ? 'all=true' : `date=${dayChoice}`;
     try {
-      const res = await fetch(`/api/trips/${tripId}/briefing/send-now`, {
+      const res = await fetch(`/api/trips/${tripId}/briefing/send-now?${qs}`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -483,7 +538,11 @@ function DailyOnePagerSettings({ tripId }: { tripId: number }) {
       }
       if (data.sent) {
         const count = data.recipientCount ?? 0;
-        toast.success(`Sent to ${count} recipient${count !== 1 ? 's' : ''}`);
+        const what =
+          sendingAll && typeof data.dayCount === 'number'
+            ? `all ${data.dayCount} days`
+            : 'the one-pager';
+        toast.success(`Sent ${what} to ${count} recipient${count !== 1 ? 's' : ''}`);
         if (typeof data.lastSentForDate === 'string') setLastSentForDate(data.lastSentForDate);
       } else {
         toast.error('Email not configured — SMTP not set up');
@@ -494,6 +553,11 @@ function DailyOnePagerSettings({ tripId }: { tripId: number }) {
       setSending(false);
     }
   };
+
+  const previewHref =
+    dayChoice === 'all'
+      ? `/api/trips/${tripId}/briefing/preview-all.pdf`
+      : `/api/trips/${tripId}/briefing/preview.pdf?date=${dayChoice}`;
 
   return (
     <div className="space-y-3">
@@ -561,13 +625,39 @@ function DailyOnePagerSettings({ tripId }: { tripId: number }) {
               {emailError && <p className="text-xs text-destructive">{emailError}</p>}
             </div>
 
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">Day to preview / send</Label>
+              <Select value={dayChoice} onValueChange={setDayChoice}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Pick a day" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All days (full trip)</SelectItem>
+                  {dayOptions.map(d => (
+                    <SelectItem key={d.iso} value={d.iso}>
+                      {d.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Pick one day or print/send the whole trip in one PDF. Sent emails
+                also include the itinerary as a calendar (.ics) file.
+              </p>
+            </div>
+
             <div className="flex flex-wrap gap-2 pt-1">
               <Button type="button" onClick={handleSave} disabled={saving || sending || !!emailError}>
                 {saving ? 'Saving…' : 'Save'}
               </Button>
               <Button type="button" variant="outline" asChild>
-                <a href={`/api/trips/${tripId}/briefing/preview.pdf`} target="_blank" rel="noreferrer">
+                <a href={previewHref} target="_blank" rel="noreferrer">
                   Preview PDF
+                </a>
+              </Button>
+              <Button type="button" variant="outline" asChild>
+                <a href={`/api/trips/${tripId}/itinerary.ics`} download>
+                  Download .ics
                 </a>
               </Button>
               <Button type="button" variant="outline" onClick={handleSendNow} disabled={sending || saving}>
@@ -878,7 +968,11 @@ export function TripSettings({ trip }: { trip: any }) {
         </div>
 
         {/* Daily one-pager */}
-        <DailyOnePagerSettings tripId={trip.id} />
+        <DailyOnePagerSettings
+          tripId={trip.id}
+          tripStart={trip.startDate}
+          tripEnd={trip.endDate}
+        />
       </div>
 
       <div className="space-y-6">

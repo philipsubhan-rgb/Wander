@@ -1,10 +1,11 @@
 /**
  * PDF rendering for the daily trip one-pager (day sheet).
  *
- * Uses pdfkit directly (no HTML) and renders everything on a single US Letter
- * page. The function is defensive by design: any combination of empty items,
- * null weather/stay/notes, or oversized strings must still produce a valid
- * one-page PDF and must never throw.
+ * Uses pdfkit directly (no HTML). `renderDaySheetPdf` renders a single sheet
+ * on one US Letter page; `renderDaySheetsPdf` renders several sheets — one
+ * page per sheet. The rendering is defensive by design: any combination of
+ * empty items, null weather/stay/notes, or oversized strings must still
+ * produce a valid PDF and must never throw.
  */
 
 import PDFDocument from "pdfkit";
@@ -27,12 +28,17 @@ const FONT_OBLIQUE = "Helvetica-Oblique";
 
 /** Render a single DaySheet to a one-page PDF buffer. Never throws. */
 export async function renderDaySheetPdf(sheet: DaySheet): Promise<Buffer> {
+  return renderDaySheetsPdf([sheet]);
+}
+
+/** Render several DaySheets — one US Letter page per sheet — into a single PDF buffer. Never throws. */
+export async function renderDaySheetsPdf(sheets: DaySheet[]): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     try {
       const doc = new PDFDocument({
         size: "LETTER",
         margins: { top: 0, bottom: 0, left: 0, right: 0 },
-        info: { Title: `Day Sheet — ${sheet.tripTitle ?? "Trip"}` },
+        info: { Title: `Day Sheet — ${sheets[0]?.tripTitle ?? "Trip"}` },
       });
 
       const chunks: Buffer[] = [];
@@ -40,7 +46,15 @@ export async function renderDaySheetPdf(sheet: DaySheet): Promise<Buffer> {
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", (err: unknown) => reject(err instanceof Error ? err : new Error(String(err))));
 
-      render(doc, sheet);
+      sheets.forEach((sheet, i) => {
+        if (i > 0) {
+          doc.addPage({
+            size: "LETTER",
+            margins: { top: 0, bottom: 0, left: 0, right: 0 },
+          });
+        }
+        render(doc, sheet);
+      });
 
       doc.end();
     } catch (err) {
