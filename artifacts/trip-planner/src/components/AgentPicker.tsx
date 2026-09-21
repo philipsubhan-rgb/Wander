@@ -14,6 +14,8 @@ export interface AgentOption {
   id: string;
   name: string;
   description: string;
+  /** Optional avatar image shown next to the option. */
+  icon?: string;
 }
 
 export const AGENT_OPTIONS: AgentOption[] = [
@@ -24,8 +26,9 @@ export const AGENT_OPTIONS: AgentOption[] = [
   },
   {
     id: "muse-spark",
-    name: "Marco (Polo)",
-    description: "Marco Polo — your travel agent, powered by Meta's Muse Spark",
+    name: "Marco",
+    description: "Your travel agent, powered by Meta's Muse Spark",
+    icon: "/marco-icon.webp",
   },
 ];
 
@@ -86,6 +89,13 @@ export default function AgentPicker({ tripId, onSelect }: AgentPickerProps) {
             onChange={() => setSelected(option.id)}
             className="mt-1"
           />
+          {option.icon && (
+            <img
+              src={option.icon}
+              alt=""
+              className="mt-0.5 h-8 w-8 shrink-0 rounded-full object-cover"
+            />
+          )}
           <span>
             <span className="block text-sm font-medium">{option.name}</span>
             <span className="block text-xs text-muted-foreground">

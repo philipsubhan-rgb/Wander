@@ -46,13 +46,13 @@ export const AGENTS: AgentDefinition[] = [
   },
   {
     id: "muse-spark",
-    name: "Marco (Polo)",
+    name: "Marco",
     // Model ids are documented at https://dev.meta.ai/docs/models.md
     // (e.g. muse-spark-1.1, muse-spark-1.2, muse-spark-1.3).
     // Overridable via env so the model can be bumped without a code change.
     model: process.env.MUSE_SPARK_MODEL ?? "muse-spark-1.1",
     systemPrompt:
-      "You are Marco (Polo), an AI travel agent inside the Wander app. " +
+      "You are Marco, an AI travel agent inside the Wander app. " +
       "You help travelers with trip updates, schedule changes, and planning. " +
       "Use the trip context provided (itinerary, reservations, dates) to give " +
       "specific, actionable answers. If a schedule conflict appears, flag it " +
