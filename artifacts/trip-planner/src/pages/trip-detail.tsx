@@ -25,6 +25,7 @@ import { TripNotes, TripDocuments } from '@/components/trip/TripPrivate';
 import { TripSettings } from '@/components/trip/TripSettings';
 import { TripTravelers } from '@/components/trip/TripTravelers';
 import { TripExpenses } from '@/components/trip/TripExpenses';
+import MarcoBar from '@/components/MarcoBar';
 
 function getGradientForDestination(destination: string) {
   const hash = destination.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -208,6 +209,9 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
       </div>
 
       <div className="max-w-7xl mx-auto px-4 md:px-10 py-8">
+        <div className="mb-6">
+          <MarcoBar tripId={tripId} tripContext={marcoTripContext} />
+        </div>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="overflow-x-auto pb-2 scrollbar-hide">
             <TabsList className="inline-flex w-max min-w-full justify-start md:justify-center border-b rounded-none h-auto p-0 bg-transparent gap-8">
@@ -232,7 +236,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
           </div>
 
           <div className="mt-10">
-            <TabsContent value="overview" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripOverview tripId={tripId} onNavigate={setActiveTab} tripContext={marcoTripContext} /></TabsContent>
+            <TabsContent value="overview" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripOverview tripId={tripId} onNavigate={setActiveTab} /></TabsContent>
             <TabsContent value="itinerary" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripItinerary tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} tripDestination={trip.destination} tripCoverImage={trip.coverImage} /></TabsContent>
             <TabsContent value="flights" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripFlights tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} /></TabsContent>
             <TabsContent value="accommodations" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripAccommodations tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} /></TabsContent>
