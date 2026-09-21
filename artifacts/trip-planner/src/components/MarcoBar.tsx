@@ -20,11 +20,9 @@ const MARCO_ICON = "/marco-icon.webp";
 
 interface MarcoBarProps {
   tripId: number;
-  /** Trip snapshot (itinerary, reservations) from Drizzle — see README. */
-  tripContext?: Record<string, unknown>;
 }
 
-export default function MarcoBar({ tripId, tripContext }: MarcoBarProps) {
+export default function MarcoBar({ tripId }: MarcoBarProps) {
   const [open, setOpen] = useState(false);
   const [hasOpened, setHasOpened] = useState(false);
   const [seed, setSeed] = useState<string | null>(null);
@@ -116,7 +114,6 @@ export default function MarcoBar({ tripId, tripContext }: MarcoBarProps) {
             <AgentChat
               bare
               tripId={tripId}
-              tripContext={tripContext}
               initialMessage={seed}
               onInitialMessageConsumed={() => setSeed(null)}
               onEmptyChange={setChatEmpty}

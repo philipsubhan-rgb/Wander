@@ -122,15 +122,6 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
   // canAdmin = global admin OR the user is a trip admin for this specific trip
   const canAdmin = isAdmin || !!(trip as any).isTripAdmin;
 
-  /** Light trip snapshot handed to the Marco bar on the overview tab. */
-  const marcoTripContext = {
-    id: trip.id,
-    title: (trip as any).title,
-    destination: (trip as any).destination,
-    startDate: (trip as any).startDate,
-    endDate: (trip as any).endDate,
-  };
-
   return (
     <div className="min-h-screen pb-20 bg-background">
       <div className="relative h-[40vh] min-h-[300px] w-full bg-muted">
@@ -210,7 +201,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
 
       <div className="max-w-7xl mx-auto px-4 md:px-10 py-8">
         <div className="mb-6">
-          <MarcoBar tripId={tripId} tripContext={marcoTripContext} />
+          <MarcoBar tripId={tripId} />
         </div>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="overflow-x-auto pb-2 scrollbar-hide">

@@ -2,8 +2,8 @@
  * SPIKE — AgentChat for Wander.
  *
  * Chat panel wired to POST /api/agent/chat. Sends the selected agentId
- * (from AgentPicker / localStorage) plus optional tripContext so the model
- * can answer with real itinerary/reservation data.
+ * (from AgentPicker / localStorage) plus the tripId — the server loads the
+ * trip context itself (Stage 1: client no longer sends trip data).
  *
  * Streaming-like UX: the spike endpoint is non-streaming, so we reveal the
  * assistant reply with a lightweight typewriter effect instead of true
@@ -22,8 +22,6 @@ interface Message {
 }
 
 interface AgentChatProps {
-  /** Trip snapshot (itinerary, reservations) from Drizzle — see README. */
-  tripContext?: Record<string, unknown>;
   /** Scope agent selection to a trip (per-trip choice from settings). */
   tripId?: string | number;
   /** Override the agent; defaults to the picker's localStorage selection. */
@@ -46,13 +44,13 @@ interface AgentChatProps {
 async function postChat(
   agentId: string,
   messages: Message[],
-  tripContext?: Record<string, unknown>,
+  tripId?: string | number,
 ): Promise<string> {
   const res = await fetch("/api/agent/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include", // session cookie, like the rest of Wander's API
-    body: JSON.stringify({ agentId, messages, tripContext }),
+    body: JSON.stringify({ agentId, messages, tripId }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -88,7 +86,7 @@ function AssistantBubble({ content, streaming }: { content: string; streaming: b
   return <div className="whitespace-pre-wrap text-sm">{shown}</div>;
 }
 
-export default function AgentChat({ tripContext, tripId, agentId, initialMessage, onInitialMessageConsumed, bare, onEmptyChange }: AgentChatProps) {
+export default function AgentChat({ tripId, agentId, initialMessage, onInitialMessageConsumed, bare, onEmptyChange }: AgentChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -139,7 +137,7 @@ export default function AgentChat({ tripContext, tripId, agentId, initialMessage
     setMessages(next);
     setSending(true);
     try {
-      const reply = await postChat(resolvedAgentId, next, tripContext);
+      const reply = await postChat(resolvedAgentId, next, tripId);
       setMessages([...next, { role: "assistant", content: reply }]);
       setStreamingId(next.length); // index of the new assistant message
     } catch (err) {
