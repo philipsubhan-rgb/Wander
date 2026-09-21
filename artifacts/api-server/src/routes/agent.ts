@@ -413,6 +413,7 @@ router.post("/agent/chat", requireAuth, async (req: Request, res: Response) => {
     res.json({ agentId: agent.id, reply, mock: false });
   } catch (err) {
     // 502: our server is fine, the upstream model call failed.
+    logger.error({ err, userId, tripId }, "[Agent] chat failed");
     res.status(502).json({
       error: "Agent request failed",
       detail: err instanceof Error ? err.message : String(err),

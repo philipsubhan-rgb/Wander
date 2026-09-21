@@ -54,8 +54,11 @@ async function postChat(
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    const body = data as { error?: string; detail?: string };
     throw new Error(
-      (data as { error?: string }).error ?? `Chat failed (${res.status})`,
+      body.detail
+        ? `${body.error ?? "Chat failed"}: ${body.detail}`
+        : (body.error ?? `Chat failed (${res.status})`),
     );
   }
   return (data as { reply: string }).reply ?? "";
