@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { toast } from 'sonner';
+import AgentPicker from '@/components/AgentPicker';
 import { Users, Trash2, Shield, TriangleAlert, Search, UserCheck, AlertCircle, Crown, Copy, Check, KeyRound, Camera, RefreshCw, ImageOff, Newspaper } from 'lucide-react';
 
 const tripSchema = z.object({
@@ -902,6 +903,14 @@ export function TripSettings({ trip }: { trip: any }) {
           </Form>
         </div>
 
+        {/* AI travel agent selection (per trip) */}
+        <div className="space-y-3">
+          <h3 className="font-semibold text-base">AI Travel Agent</h3>
+          <div className="bg-card border rounded-xl p-6 shadow-sm">
+            <AgentPicker tripId={trip.id} />
+          </div>
+        </div>
+
         {/* Cover image editor */}
         <div className="space-y-3">
           <h3 className="font-semibold text-base">Cover Photo</h3>
@@ -1004,7 +1013,7 @@ export function TripSettings({ trip }: { trip: any }) {
                       <p className="font-medium text-sm flex items-center gap-1">
                         {user.name}
                         {(['admin', 'super_admin'] as string[]).includes(user.role) && <Shield className="h-3 w-3 text-primary" />}
-                        {isTripAdmin && <Crown className="h-3 w-3 text-amber-500" title="Trip admin" />}
+                        {isTripAdmin && <span title="Trip admin"><Crown className="h-3 w-3 text-amber-500" /></span>}
                       </p>
                       <p className="text-xs text-muted-foreground">{user.email ?? `@${user.username}`}</p>
                     </div>

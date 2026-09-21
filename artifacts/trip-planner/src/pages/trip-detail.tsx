@@ -121,6 +121,15 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
   // canAdmin = global admin OR the user is a trip admin for this specific trip
   const canAdmin = isAdmin || !!(trip as any).isTripAdmin;
 
+  /** Light trip snapshot handed to the Marco bar on the overview tab. */
+  const marcoTripContext = {
+    id: trip.id,
+    title: (trip as any).title,
+    destination: (trip as any).destination,
+    startDate: (trip as any).startDate,
+    endDate: (trip as any).endDate,
+  };
+
   return (
     <div className="min-h-screen pb-20 bg-background">
       <div className="relative h-[40vh] min-h-[300px] w-full bg-muted">
@@ -223,7 +232,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
           </div>
 
           <div className="mt-10">
-            <TabsContent value="overview" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripOverview tripId={tripId} onNavigate={setActiveTab} /></TabsContent>
+            <TabsContent value="overview" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripOverview tripId={tripId} onNavigate={setActiveTab} tripContext={marcoTripContext} /></TabsContent>
             <TabsContent value="itinerary" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripItinerary tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} tripDestination={trip.destination} tripCoverImage={trip.coverImage} /></TabsContent>
             <TabsContent value="flights" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripFlights tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} /></TabsContent>
             <TabsContent value="accommodations" className="mt-0 focus-visible:outline-none focus-visible:ring-0"><TripAccommodations tripId={tripId} editMode={editMode} tripStartDate={trip.startDate?.slice(0, 10)} tripEndDate={trip.endDate?.slice(0, 10)} /></TabsContent>

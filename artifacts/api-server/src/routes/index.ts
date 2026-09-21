@@ -15,6 +15,7 @@ import notesRouter from "./notes";
 import searchRouter from "./search";
 import expensesRouter from "./expenses";
 import briefingsRouter from "./briefings";
+import agentRouter from "./agent";
 
 const router: IRouter = Router();
 
@@ -34,5 +35,6 @@ router.use(notesRouter);
 router.use(searchRouter);
 router.use(expensesRouter);
 router.use(briefingsRouter);
+router.use(agentRouter);
 
 export default router;

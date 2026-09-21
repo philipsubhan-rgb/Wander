@@ -1,6 +1,7 @@
 import { useGetTripSummary, useGetTripTimeline, getGetTripTimelineQueryKey } from '@workspace/api-client-react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Calendar, Plane, Home, Compass, Users, CheckSquare, Car, UtensilsCrossed, GripVertical } from 'lucide-react';
+import MarcoBar from '@/components/MarcoBar';
 import { format, parseISO } from 'date-fns';
 import { fetchWikiImage } from '@/lib/wiki-image';
 import { useQueryClient } from '@tanstack/react-query';
@@ -42,7 +43,7 @@ function isDraggable(e: TimelineEvent) {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export function TripOverview({ tripId, onNavigate }: { tripId: number; onNavigate?: (tab: string) => void }) {
+export function TripOverview({ tripId, onNavigate, tripContext }: { tripId: number; onNavigate?: (tab: string) => void; tripContext?: Record<string, unknown> }) {
   const { data: summary } = useGetTripSummary(tripId, { query: { enabled: !!tripId } });
   const { data: rawTimeline } = useGetTripTimeline(tripId, { query: { enabled: !!tripId } });
   const queryClient = useQueryClient();
@@ -124,6 +125,7 @@ export function TripOverview({ tripId, onNavigate }: { tripId: number; onNavigat
 
   return (
     <div className="space-y-10">
+      <MarcoBar tripId={tripId} tripContext={tripContext} />
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard icon={Calendar} label="Days"      value={summary?.daysCount}                                                    onClick={() => onNavigate?.('itinerary')} />
         <StatCard icon={Plane}    label="Flights"   value={summary?.flightsCount}                                                 onClick={() => onNavigate?.('flights')} />
@@ -363,3 +365,4 @@ function StatCard({ icon: Icon, label, value, onClick }: { icon: any; label: str
     </button>
   );
 }
+
