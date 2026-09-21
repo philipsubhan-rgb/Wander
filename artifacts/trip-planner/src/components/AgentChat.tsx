@@ -92,14 +92,17 @@ export default function AgentChat({ tripContext, tripId, agentId, initialMessage
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamingId, setStreamingId] = useState<number | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const resolvedAgentId = agentId ?? getSelectedAgentId(tripId);
   const agentName =
     AGENT_OPTIONS.find((o) => o.id === resolvedAgentId)?.name ?? resolvedAgentId;
 
+  // Keep the newest message visible by scrolling the chat's own message
+  // list — never the page. (scrollIntoView would yank the whole window.)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages, sending]);
 
   // Send a seeded message once (e.g. typed in the overview header bar).
@@ -146,7 +149,7 @@ export default function AgentChat({ tripContext, tripId, agentId, initialMessage
         </div>
       )}
 
-      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
         {messages.length === 0 && (
           <p className="text-sm text-muted-foreground">
             Ask about your trip — schedule changes, what's next, or help
@@ -174,7 +177,6 @@ export default function AgentChat({ tripContext, tripId, agentId, initialMessage
             {error}
           </div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       <div className="flex gap-2 border-t p-3">
