@@ -39,6 +39,8 @@ interface AgentChatProps {
    * parent that provides its own (e.g. MarcoBar's expanding panel).
    */
   bare?: boolean;
+  /** Called when the conversation transitions between empty and non-empty. */
+  onEmptyChange?: (isEmpty: boolean) => void;
 }
 
 async function postChat(
@@ -86,13 +88,19 @@ function AssistantBubble({ content, streaming }: { content: string; streaming: b
   return <div className="whitespace-pre-wrap text-sm">{shown}</div>;
 }
 
-export default function AgentChat({ tripContext, tripId, agentId, initialMessage, onInitialMessageConsumed, bare }: AgentChatProps) {
+export default function AgentChat({ tripContext, tripId, agentId, initialMessage, onInitialMessageConsumed, bare, onEmptyChange }: AgentChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamingId, setStreamingId] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Let the parent (e.g. MarcoBar) size the panel to the conversation:
+  // compact while empty, full height once messages exist.
+  useEffect(() => {
+    onEmptyChange?.(messages.length === 0);
+  }, [messages, onEmptyChange]);
 
   const resolvedAgentId = agentId ?? getSelectedAgentId(tripId);
   const agentName =

@@ -29,6 +29,8 @@ export default function MarcoBar({ tripId, tripContext }: MarcoBarProps) {
   const [hasOpened, setHasOpened] = useState(false);
   const [seed, setSeed] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  // Compact panel while the conversation is empty; full height once it isn't.
+  const [chatEmpty, setChatEmpty] = useState(true);
 
   const agentName =
     AGENT_OPTIONS.find((o) => o.id === getSelectedAgentId(tripId))?.name ??
@@ -110,13 +112,14 @@ export default function MarcoBar({ tripId, tripContext }: MarcoBarProps) {
               <ChevronUp className="h-4 w-4" />
             </Button>
           </div>
-          <div className="h-[420px]">
+          <div className={chatEmpty ? "" : "h-[420px]"}>
             <AgentChat
               bare
               tripId={tripId}
               tripContext={tripContext}
               initialMessage={seed}
               onInitialMessageConsumed={() => setSeed(null)}
+              onEmptyChange={setChatEmpty}
             />
           </div>
         </div>
