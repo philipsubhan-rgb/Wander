@@ -1,27 +1,42 @@
 /**
- * SPIKE — Muse Spark agent route for Wander.
+ * Marco — selectable AI agent route for Wander (Stage 1 backend).
  *
- * Demonstrates how Wander's Express api-server could expose a selectable
- * AI agent powered by Muse Spark MODELS via the Meta Model API
- * (https://dev.meta.ai — OpenAI-compatible chat completions endpoint).
+ * The agent runs on Muse Spark models via the Meta Model API
+ * (https://api.ai.meta.com/v1 — OpenAI-compatible chat completions).
+ * The API key never leaves the server: the frontend only talks to this route.
  *
- * This is NOT the user's personal Muse agent — it is a new agent that lives
- * inside Wander, built on the same model family. The API key never leaves
- * the server: the frontend only ever talks to this route.
+ * What this route does:
+ *   - GET  /agent/agents  — list selectable agents (auth required).
+ *   - POST /agent/chat    — chat with tools. Body: { agentId?, tripId, messages }.
+ *     Auth is required; the trip must exist; the caller must be a trip
+ *     participant (or super_admin). Trip data comes server-side: a lean
+ *     snapshot is injected as a system message, and the model calls read-only
+ *     trip tools + Google Places research tools through a bounded loop.
  *
- * To wire into the real server (spike only — do not commit as-is):
- *   1. Copy this file to artifacts/api-server/src/routes/agent.ts
- *   2. In artifacts/api-server/src/routes/index.ts add:
- *        import agentRouter from "./agent";
- *        router.use(agentRouter);
- *      (app.ts already mounts `router` at /api, so this becomes POST /api/agent/chat)
- *   3. Set MUSE_SPARK_API_KEY in the api-server environment (Replit Secrets).
+ * Mock fallback: when MUSE_SPARK_API_KEY is unset (or the mock-only "wander"
+ * agent is selected), returns a labeled mock reply. The mock path requires
+ * auth but performs no trip access check and no DB access.
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
+import { eq, and } from "drizzle-orm";
+import { db, tripsTable, tripParticipantsTable } from "@workspace/db";
+import {
+  requireAuth,
+  getAuthUserId,
+  getAuthRole,
+} from "../middlewares/auth";
+import { logger } from "../lib/logger";
+import { loadTripSnapshot, buildSnapshotSystemMessage } from "../lib/agentSnapshot";
+import {
+  AGENT_TOOLS,
+  getToolDefinition,
+  type ToolContext,
+} from "../lib/agentTools";
+import { AGENT_RESEARCH_TOOLS } from "../lib/agentResearch";
 
 // ---------------------------------------------------------------------------
-// Agent registry — the list a user picks from at login.
+// Agent registry
 // ---------------------------------------------------------------------------
 
 export interface AgentDefinition {
@@ -54,9 +69,19 @@ export const AGENTS: AgentDefinition[] = [
     systemPrompt:
       "You are Marco, an AI travel agent inside the Wander app. " +
       "You help travelers with trip updates, schedule changes, and planning. " +
-      "Use the trip context provided (itinerary, reservations, dates) to give " +
-      "specific, actionable answers. If a schedule conflict appears, flag it " +
-      "and suggest alternatives. Be warm, direct, and concise.",
+      "Be warm, direct, and concise.\n\n" +
+      "You have tools. USE them for any trip-specific question — reservations, " +
+      "times, flights, stays, activities, and schedule conflicts. A trip context " +
+      "summary is provided as a system message, but it is only an orientation: " +
+      "before answering anything specific, query the relevant tool to get the " +
+      "current data.\n\n" +
+      "Never invent bookings, times, confirmation codes, or prices. If the tools " +
+      "return nothing for an item, say plainly that the trip has no such item " +
+      "rather than guessing. When a tool reports it is unavailable (for example " +
+      "research tools without an API key), tell the user that directly instead " +
+      "of fabricating results.\n\n" +
+      "The tripId for every tool call is the trip you are discussing — pass it " +
+      "exactly as given; do not ask the user for it and do not use another trip's id.",
   },
 ];
 
@@ -66,26 +91,65 @@ function getAgent(agentId: unknown): AgentDefinition {
 }
 
 // ---------------------------------------------------------------------------
-// Types
+// Trip access guard (assertTripAccess idiom from src/mcp/tools.ts)
 // ---------------------------------------------------------------------------
 
+async function assertTripAccess(userId: number, role: string, tripId: number): Promise<void> {
+  if (role === "super_admin") return;
+
+  const [participant] = await db
+    .select()
+    .from(tripParticipantsTable)
+    .where(
+      and(
+        eq(tripParticipantsTable.tripId, tripId),
+        eq(tripParticipantsTable.userId, userId),
+      ),
+    );
+
+  if (!participant) {
+    const err = new Error(`Not a participant of trip ${tripId}.`);
+    err.name = "TripAccessDenied";
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Body validation (isValidBody style)
+// ---------------------------------------------------------------------------
+
+type Role = "user" | "assistant" | "system" | "tool";
+
 interface ChatMessage {
-  role: "user" | "assistant" | "system";
+  role: Role;
   content: string;
+  tool_call_id?: string;
+  tool_calls?: ToolCall[];
+}
+
+interface ToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
 }
 
 interface ChatRequestBody {
   agentId?: string;
+  /** The trip under discussion. Required: all trip data is loaded server-side. */
+  tripId?: number;
   messages?: ChatMessage[];
-  /** Optional trip snapshot (itinerary, reservations) injected as context. */
-  tripContext?: Record<string, unknown>;
 }
 
-function isValidBody(body: unknown): body is ChatRequestBody & { messages: ChatMessage[] } {
+const MAX_MESSAGES = 30;
+const MAX_CONTENT_CHARS = 8000;
+
+function isValidBody(body: unknown): body is ChatRequestBody & { messages: ChatMessage[]; tripId: number } {
   if (typeof body !== "object" || body === null) return false;
   const b = body as Record<string, unknown>;
+  if (typeof b.tripId !== "number" || !Number.isInteger(b.tripId) || b.tripId <= 0) return false;
   return (
     Array.isArray(b.messages) &&
+    b.messages.length > 0 &&
     b.messages.every(
       (m) =>
         typeof m === "object" &&
@@ -96,29 +160,25 @@ function isValidBody(body: unknown): body is ChatRequestBody & { messages: ChatM
   );
 }
 
-/** Render tripContext as a compact system message so the model can use it. */
-function buildTripContextMessage(tripContext: Record<string, unknown>): ChatMessage {
-  const summary = JSON.stringify(tripContext).slice(0, 4000); // keep prompt bounded
-  return {
-    role: "system",
-    content:
-      "Current trip context (itinerary, reservations, dates) as JSON. " +
-      "Ground your answers in it; do not invent bookings or times.\n" +
-      summary,
-  };
-}
-
 // ---------------------------------------------------------------------------
-// Meta Model API call (OpenAI-compatible chat completions)
+// Meta Model API call (OpenAI-compatible chat completions, with tools)
 // ---------------------------------------------------------------------------
 
 const MODEL_API_BASE_URL =
   process.env.MUSE_SPARK_BASE_URL ?? "https://api.ai.meta.com/v1";
 
+const MAX_TOOL_ITERATIONS = 6;
+
+interface ModelApiResult {
+  content: string | null;
+  toolCalls: ToolCall[];
+}
+
 async function callModelApi(
   model: string,
   messages: ChatMessage[],
-): Promise<string> {
+  tools: Array<{ type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }>,
+): Promise<ModelApiResult> {
   const apiKey = process.env.MUSE_SPARK_API_KEY;
   if (!apiKey) {
     throw new Error("MUSE_SPARK_API_KEY is not set");
@@ -133,6 +193,8 @@ async function callModelApi(
     body: JSON.stringify({
       model,
       messages,
+      tools,
+      tool_choice: "auto",
       max_tokens: 1024,
     }),
   });
@@ -143,25 +205,128 @@ async function callModelApi(
   }
 
   const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
+    choices?: Array<{
+      message?: { content?: string | null; tool_calls?: ToolCall[] };
+    }>;
   };
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) throw new Error("Model API returned an empty response");
-  return content;
+  const message = data.choices?.[0]?.message;
+  return {
+    content: message?.content?.trim() || null,
+    toolCalls: message?.tool_calls ?? [],
+  };
 }
 
 // ---------------------------------------------------------------------------
-// Mock fallback — lets the spike run locally with no credentials.
+// Tool-calling loop
 // ---------------------------------------------------------------------------
 
-function mockReply(agent: AgentDefinition, body: ChatRequestBody): string {
-  const lastUser = [...(body.messages ?? [])]
-    .reverse()
-    .find((m) => m.role === "user")?.content;
-  const hasTrip = body.tripContext ? " (trip context attached)" : "";
+const TOOL_DEFINITIONS = [...AGENT_TOOLS, ...AGENT_RESEARCH_TOOLS];
+
+async function runAgentLoop(
+  agent: AgentDefinition,
+  ctx: ToolContext,
+  tripId: number,
+  messages: ChatMessage[],
+): Promise<string> {
+  const tools = TOOL_DEFINITIONS.map((t) => ({
+    type: "function" as const,
+    function: { name: t.name, description: t.description, parameters: t.parameters },
+  }));
+
+  let lastText: string | null = null;
+
+  for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
+    let result: ModelApiResult;
+    try {
+      result = await callModelApi(agent.model, messages, tools);
+    } catch (err) {
+      // Model API failure: surface the best text we have, else throw for a 502.
+      if (lastText) return lastText;
+      throw err;
+    }
+
+    if (result.content) lastText = result.content;
+
+    if (result.toolCalls.length === 0) {
+      break; // final answer
+    }
+
+    messages.push({
+      role: "assistant",
+      content: result.content ?? "",
+      tool_calls: result.toolCalls,
+    });
+
+    for (const call of result.toolCalls) {
+      const name = call.function?.name ?? "";
+      logger.info(
+        { tool: name, userId: ctx.userId, tripId, iteration: i + 1 },
+        "[Agent] tool call",
+      );
+
+      let parsedArgs: unknown = {};
+      try {
+        parsedArgs = call.function?.arguments ? JSON.parse(call.function.arguments) : {};
+      } catch {
+        // fall through to the zod validation below, which will reject it
+      }
+
+      const def = getToolDefinition(name) ?? AGENT_RESEARCH_TOOLS.find((t) => t.name === name);
+
+      let toolResult: { ok: boolean; text: string; data?: unknown };
+      if (!def) {
+        toolResult = { ok: false, text: `Unknown tool "${name}".` };
+      } else {
+        const parsed = def.input.safeParse(parsedArgs);
+        if (!parsed.success) {
+          toolResult = { ok: false, text: `Invalid arguments for ${name}: ${parsed.error.issues[0]?.message ?? "validation failed"}` };
+        } else {
+          try {
+            // Defense in depth: re-assert access to the chat's trip on every
+            // tool call, even though each trip tool asserts its own tripId arg.
+            await assertTripAccess(ctx.userId, ctx.role, tripId);
+            toolResult = await def.run(ctx, parsed.data as never);
+          } catch (err) {
+            // Tool failures go back to the model as error results — never a 500.
+            logger.error({ tool: name, userId: ctx.userId, tripId, err }, "[Agent] tool error");
+            toolResult = {
+              ok: false,
+              text: err instanceof Error && err.name === "TripAccessDenied"
+                ? err.message
+                : `Tool ${name} failed: internal error.`,
+            };
+          }
+        }
+      }
+
+      logger.info(
+        { tool: name, userId: ctx.userId, tripId, outcome: toolResult.ok ? "ok" : "error" },
+        "[Agent] tool result",
+      );
+
+      messages.push({
+        role: "tool",
+        content: JSON.stringify(toolResult).slice(0, 8000),
+        tool_call_id: call.id,
+      });
+    }
+  }
+
+  return (
+    lastText ??
+    "I couldn't complete that request — the planning steps kept looping without a final answer. Please try rephrasing."
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mock fallback — runs with no credentials, auth still required.
+// ---------------------------------------------------------------------------
+
+function mockReply(agent: AgentDefinition, tripId: number, messages: ChatMessage[]): string {
+  const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content;
   return (
     `[mock ${agent.name} — no MUSE_SPARK_API_KEY set] ` +
-    `You said: "${(lastUser ?? "").slice(0, 120)}"${hasTrip}. ` +
+    `You said: "${(lastUser ?? "").slice(0, 120)}" (trip ${tripId}). ` +
     `Set MUSE_SPARK_API_KEY from dev.meta.ai to get live model responses.`
   );
 }
@@ -172,41 +337,79 @@ function mockReply(agent: AgentDefinition, body: ChatRequestBody): string {
 
 const router: IRouter = Router();
 
-/** List selectable agents (drives the login picker). */
-router.get("/agent/agents", (_req: Request, res: Response) => {
+/** List selectable agents (drives the login picker). Auth required. */
+router.get("/agent/agents", requireAuth, (_req: Request, res: Response) => {
   res.json({
     agents: AGENTS.map(({ id, name }) => ({ id, name })),
   });
 });
 
-/** Chat with the selected agent. */
-router.post("/agent/chat", async (req: Request, res: Response) => {
+/** Chat with the selected agent. Auth + trip membership required. */
+router.post("/agent/chat", requireAuth, async (req: Request, res: Response) => {
   if (!isValidBody(req.body)) {
     res.status(400).json({
-      error: "Invalid body: expected { agentId?, messages: [{role, content}], tripContext? }",
+      error:
+        "Invalid body: expected { agentId?, tripId: <positive int>, messages: [{role, content}] } with at least one message",
     });
     return;
   }
 
+  const { tripId } = req.body;
   const agent = getAgent(req.body.agentId);
 
-  // The "wander" agent has no external model in this spike — mock only.
-  // In production it would point at whatever Wander uses today.
+  // The "wander" agent has no external model — mock only.
+  // The mock path requires auth (requireAuth above) but performs no trip
+  // access check and no DB access.
   if (agent.id === "wander" || !process.env.MUSE_SPARK_API_KEY) {
-    res.json({ agentId: agent.id, reply: mockReply(agent, req.body), mock: true });
+    res.json({ agentId: agent.id, reply: mockReply(agent, tripId, req.body.messages), mock: true });
+    return;
+  }
+
+  const userId = getAuthUserId(req, res);
+  const role = getAuthRole(req, res) ?? "";
+  if (!userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  // 404 if the trip doesn't exist, 403 if the caller isn't a participant.
+  const [trip] = await db.select({ id: tripsTable.id }).from(tripsTable).where(eq(tripsTable.id, tripId));
+  if (!trip) {
+    res.status(404).json({ error: `Trip ${tripId} not found` });
+    return;
+  }
+  try {
+    await assertTripAccess(userId, role, tripId);
+  } catch {
+    res.status(403).json({ error: `Trip access required for trip ${tripId}` });
+    return;
+  }
+
+  // Keep only the tail of the conversation and cap message sizes to bound the
+  // prompt. Snapshot stays lean — full detail comes via tools.
+  const history = req.body.messages.slice(-MAX_MESSAGES).map((m) => ({
+    role: m.role,
+    content: m.content.slice(0, MAX_CONTENT_CHARS),
+  }));
+
+  let snapshotMessage: { role: "system"; content: string };
+  try {
+    const snapshot = await loadTripSnapshot(tripId);
+    snapshotMessage = buildSnapshotSystemMessage(snapshot);
+  } catch (err) {
+    logger.error({ tripId, userId, err }, "[Agent] snapshot load failed");
+    res.status(500).json({ error: "Failed to load trip context" });
     return;
   }
 
   const messages: ChatMessage[] = [
     { role: "system", content: agent.systemPrompt },
+    snapshotMessage,
+    ...history,
   ];
-  if (req.body.tripContext) {
-    messages.push(buildTripContextMessage(req.body.tripContext));
-  }
-  messages.push(...req.body.messages);
 
   try {
-    const reply = await callModelApi(agent.model, messages);
+    const reply = await runAgentLoop(agent, { userId, role }, tripId, messages);
     res.json({ agentId: agent.id, reply, mock: false });
   } catch (err) {
     // 502: our server is fine, the upstream model call failed.
