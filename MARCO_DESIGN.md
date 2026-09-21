@@ -103,10 +103,12 @@ reservation lookup, conflict detection, "what's next" sequencing, and
 adversarial ones (asking about bookings that don't exist — must not
 hallucinate). All must pass before the live-key test.
 
-## 7. Open decisions for Phil
+## 7. Decisions (approved by Phil, Sep 21)
 
-1. Research data providers (restaurants / events / activities) — pick before
-   Stage 1 build ends.
-2. `MUSE_SPARK_API_KEY` in Replit Secrets — needed for the Stage 1 live test.
-3. Confirm: client `tripContext` fully retired in favor of server-side loading
-   (recommended yes).
+1. Research providers: **Google** — Google Places for restaurants; Places
+   nearby/text search covers attractions and activities; events via text
+   search. Provider is pluggable behind the tool interface.
+   Needs `GOOGLE_PLACES_API_KEY` in server env (Replit Secrets).
+2. `MUSE_SPARK_API_KEY` → Replit Secrets before the Stage 1 live test. Yes.
+3. Client `tripContext` retired in favor of server-side loading. Yes —
+   frontend sends `tripId`, server loads everything.
