@@ -255,13 +255,43 @@ const placesCalls: Array<{ headers: Record<string, string>; body: unknown }> = [
 /** Fixture Places payload served to research tools. */
 let placesFixture: unknown = { places: [] };
 
-function toolCallPayload(name: string, args: Record<string, unknown>, id = "call_1"): unknown {
+function toolCallPayloadRaw(
+  name: string,
+  rawArgs: string,
+  id = "call_1",
+  content: string | null = null,
+): unknown {
   return {
     choices: [
       {
         message: {
-          content: null,
-          tool_calls: [{ id, type: "function", function: { name, arguments: JSON.stringify(args) } }],
+          content,
+          tool_calls: [{ id, type: "function", function: { name, arguments: rawArgs } }],
+        },
+      },
+    ],
+  };
+}
+
+function toolCallPayload(name: string, args: Record<string, unknown>, id = "call_1"): unknown {
+  return toolCallPayloadRaw(name, JSON.stringify(args), id);
+}
+
+/** One model response carrying several tool calls in a single batch. */
+function toolCallBatchPayload(
+  calls: Array<{ name: string; rawArgs: string; id: string }>,
+  content: string | null = null,
+): unknown {
+  return {
+    choices: [
+      {
+        message: {
+          content,
+          tool_calls: calls.map((c) => ({
+            id: c.id,
+            type: "function",
+            function: { name: c.name, arguments: c.rawArgs },
+          })),
         },
       },
     ],
@@ -279,6 +309,9 @@ async function scriptedFetch(input: string | { url: string }, init?: RequestInit
   if (url === "https://api.ai.meta.com/v1/chat/completions") {
     const payload = modelScript.length > 0 ? modelScript.shift() : finalModelPayload("model script exhausted");
     modelRequests.push(JSON.parse(String(init?.body ?? "{}")) as ModelRequestBody);
+    // A queued Error simulates a failed model API call (network error, 5xx,
+    // timeout) so safety-net retry paths can be tested.
+    if (payload instanceof Error) throw payload;
     return {
       ok: true,
       status: 200,
@@ -654,14 +687,16 @@ describe("11. invalid body", () => {
   });
 });
 
-describe("12. tool-loop exhaustion", () => {
-  it("stops after the max iterations with a graceful message instead of hanging", async () => {
+describe("12. repeated tool calls across iterations", () => {
+  it("detects the duplicate on the second call and answers via the safety net", async () => {
     enqueueTrip7RouteContext();
-    // The stubbed model returns tool_calls forever; the loop must cap itself.
-    for (let i = 0; i < 10; i++) {
-      modelScript.push(toolCallPayload("get_reservations", { tripId: 7 }, `call_${i}`));
-      enqueueLoopToolCall(reservations7);
-    }
+    enqueueLoopToolCall(reservations7);
+    modelScript.push(
+      toolCallPayload("get_reservations", { tripId: 7 }, "call_1"),
+      toolCallPayload("get_reservations", { tripId: 7 }, "call_2"),
+      // Safety-net answer: the loop broke before a final answer existed.
+      finalModelPayload("Safety-net answer: Schneider Bräuhaus, Sep 25, 7:30 PM."),
+    );
 
     const { status, body } = await postChat({
       agentId: "muse-spark",
@@ -670,8 +705,260 @@ describe("12. tool-loop exhaustion", () => {
     });
 
     expect(status).toBe(200);
-    expect(modelRequests).toHaveLength(6); // MAX_TOOL_ITERATIONS
+    // 2 loop calls + 1 safety-net call; the duplicate call is never executed.
+    expect(modelRequests).toHaveLength(3);
+    expect(String(body?.reply)).toContain("Safety-net answer");
+
+    // No orphaned assistant tool-call message: the safety request carries
+    // exactly one assistant message with tool_calls (the executed iteration).
+    const safetyMessages = modelRequests[2].messages;
+    const assistantToolCalls = safetyMessages.filter(
+      (m) => m.role === "assistant" && (m.tool_calls?.length ?? 0) > 0,
+    );
+    expect(assistantToolCalls).toHaveLength(1);
+    // Exactly one tool result — the duplicate call was never executed.
+    expect(safetyMessages.filter((m) => m.role === "tool")).toHaveLength(1);
+  });
+
+  it("detects semantically identical calls with reordered keys and whitespace", async () => {
+    enqueueTrip7RouteContext();
+    enqueueLoopToolCall(reservations7);
+    modelScript.push(
+      toolCallPayloadRaw("get_reservations", '{"tripId":7}', "call_1"),
+      toolCallPayloadRaw("get_reservations", '{ "tripId" : 7 }', "call_2"),
+      finalModelPayload("Safety-net answer."),
+    );
+
+    const { status, body } = await postChat({
+      agentId: "muse-spark",
+      tripId: 7,
+      messages: [{ role: "user", content: "what are my dinner reservations?" }],
+    });
+
+    expect(status).toBe(200);
+    expect(modelRequests).toHaveLength(3);
+    expect(String(body?.reply)).toContain("Safety-net answer");
+  });
+
+  it("does not return incidental narration as the final answer", async () => {
+    enqueueTrip7RouteContext();
+    enqueueLoopToolCall(reservations7);
+    modelScript.push(
+      // Narration accompanying a tool call is not a completed answer.
+      toolCallPayloadRaw("get_reservations", '{"tripId":7}', "call_1", "Let me check your reservations."),
+      toolCallPayload("get_reservations", { tripId: 7 }, "call_2"),
+      finalModelPayload("Safety-net answer: Schneider Bräuhaus at 7:30 PM."),
+    );
+
+    const { status, body } = await postChat({
+      agentId: "muse-spark",
+      tripId: 7,
+      messages: [{ role: "user", content: "what are my dinner reservations?" }],
+    });
+
+    expect(status).toBe(200);
+    expect(String(body?.reply)).toContain("Safety-net answer");
+    expect(String(body?.reply)).not.toContain("Let me check");
+  });
+});
+
+describe("13. duplicate tool calls within one batch", () => {
+  it("detects the in-batch duplicate and executes nothing", async () => {
+    enqueueTrip7RouteContext();
+    // No tool enqueues: neither call may execute.
+    modelScript.push(
+      toolCallBatchPayload([
+        { name: "get_reservations", rawArgs: '{"tripId":7}', id: "call_1" },
+        { name: "get_reservations", rawArgs: '{"tripId":7}', id: "call_2" },
+      ]),
+      finalModelPayload("Safety-net answer."),
+    );
+
+    const { status, body } = await postChat({
+      agentId: "muse-spark",
+      tripId: 7,
+      messages: [{ role: "user", content: "what are my dinner reservations?" }],
+    });
+
+    expect(status).toBe(200);
+    expect(modelRequests).toHaveLength(2);
+    expect(String(body?.reply)).toContain("Safety-net answer");
+    const safetyMessages = modelRequests[1].messages;
+    // No assistant tool_calls message and no tool results at all.
+    expect(
+      safetyMessages.filter((m) => m.role === "assistant" && (m.tool_calls?.length ?? 0) > 0),
+    ).toHaveLength(0);
+    expect(safetyMessages.filter((m) => m.role === "tool")).toHaveLength(0);
+  });
+});
+
+describe("14. tool-loop exhaustion with unique calls", () => {
+  it("runs all 10 iterations, then the safety net answers", async () => {
+    enqueueTrip7RouteContext();
+    for (let i = 0; i < 10; i++) {
+      // get_itinerary with a distinct date filter each time: 10 unique
+      // canonical signatures, so the duplicate detector never fires.
+      const date = `2026-09-${String(20 + i).padStart(2, "0")}`;
+      modelScript.push(toolCallPayload("get_itinerary", { tripId: 7, date }, `call_${i}`));
+      enqueue([{ tripId: 7, userId: 42 }]); // hoisted iteration access check
+      enqueue([{ tripId: 7, userId: 42 }]); // tool-internal access check
+      enqueueTimeline({
+        flights: flights7, accommodations: accommodations7, activities: activities7,
+        itinerary: itineraryDays7, carRentals: carRentals7, reservations: reservations7,
+      });
+    }
+    modelScript.push(finalModelPayload("Safety-net answer after exhaustion."));
+
+    const { status, body } = await postChat({
+      agentId: "muse-spark",
+      tripId: 7,
+      messages: [{ role: "user", content: "what is the plan each day?" }],
+    });
+
+    expect(status).toBe(200);
+    expect(modelRequests).toHaveLength(11); // 10 loop + 1 safety
+    expect(String(body?.reply)).toContain("Safety-net answer after exhaustion");
+  });
+});
+
+describe("15. safety-net retries", () => {
+  function enqueueStuckSetup() {
+    enqueueTrip7RouteContext();
+    enqueueLoopToolCall(reservations7);
+    modelScript.push(
+      toolCallPayload("get_reservations", { tripId: 7 }, "call_1"),
+      toolCallPayload("get_reservations", { tripId: 7 }, "call_2"),
+    );
+  }
+
+  const chatBody = {
+    agentId: "muse-spark",
+    tripId: 7,
+    messages: [{ role: "user", content: "what are my dinner reservations?" }],
+  };
+
+  it("retries after an empty first safety response", async () => {
+    enqueueStuckSetup();
+    modelScript.push(
+      finalModelPayload(""), // empty: unusable
+      finalModelPayload("Second attempt answer."),
+    );
+
+    const { status, body } = await postChat(chatBody);
+
+    expect(status).toBe(200);
+    expect(modelRequests).toHaveLength(4);
+    expect(String(body?.reply)).toContain("Second attempt answer");
+  });
+
+  it("retries after a thrown first safety call", async () => {
+    enqueueStuckSetup();
+    modelScript.push(
+      new Error("transient model failure"),
+      finalModelPayload("Recovered answer."),
+    );
+
+    const { status, body } = await postChat(chatBody);
+
+    expect(status).toBe(200);
+    expect(modelRequests).toHaveLength(4);
+    expect(String(body?.reply)).toContain("Recovered answer");
+  });
+
+  it("returns the looping fallback when both safety attempts fail", async () => {
+    enqueueStuckSetup();
+    modelScript.push(
+      finalModelPayload(""),
+      new Error("still failing"),
+    );
+
+    const { status, body } = await postChat(chatBody);
+
+    expect(status).toBe(200);
+    expect(modelRequests).toHaveLength(4);
     expect(String(body?.reply)).toMatch(/kept looping/i);
+  });
+});
+
+describe("16. vague follow-up 'check' after restaurant research", () => {
+  it("handles 'check' with conversation history through the loop", async () => {
+    process.env.GOOGLE_PLACES_API_KEY = "test-places-key-123";
+    placesFixture = {
+      places: [
+        {
+          id: "places/p1",
+          displayName: { text: "Wirtshaus in der Au" },
+          formattedAddress: "Lilienstraße 51, 81669 München",
+          rating: 4.6,
+          userRatingCount: 3210,
+          priceLevel: "PRICE_LEVEL_MODERATE",
+        },
+      ],
+    };
+
+    // Turn 1: restaurant research.
+    enqueueTrip7RouteContext();
+    enqueue([{ tripId: 7, userId: 42 }]); // hoisted iteration access check (research tools do no internal check)
+    modelScript.push(
+      toolCallPayload("search_restaurants", { location: "Munich, Germany", cuisine: "Bavarian" }),
+      finalModelPayload("Here are three options: Wirtshaus in der Au, Augustiner-Keller, Schneider Bräuhaus."),
+    );
+
+    const turn1 = await postChat({
+      agentId: "muse-spark",
+      tripId: 7,
+      messages: [{ role: "user", content: "Find me some good restaurant options for Saturday dinner in Munich" }],
+    });
+    expect(turn1.status).toBe(200);
+    expect(String(turn1.body?.reply)).toContain("Wirtshaus in der Au");
+
+    // Turn 2: the vague follow-up "check" with history.
+    enqueueTrip7RouteContext();
+    enqueueLoopToolCall(reservations7);
+    modelScript.push(
+      toolCallPayload("get_reservations", { tripId: 7 }),
+      finalModelPayload("Checked — nothing conflicts with Saturday dinner."),
+    );
+
+    const turn2 = await postChat({
+      agentId: "muse-spark",
+      tripId: 7,
+      messages: [
+        { role: "user", content: "Find me some good restaurant options for Saturday dinner in Munich" },
+        { role: "assistant", content: "Here are three options: Wirtshaus in der Au, Augustiner-Keller, Schneider Bräuhaus." },
+        { role: "user", content: "check" },
+      ],
+    });
+    expect(turn2.status).toBe(200);
+    expect(String(turn2.body?.reply)).toContain("Checked");
+  });
+});
+
+describe("17. activity research", () => {
+  it("search_activities returns names and ratings from the Places payload", async () => {
+    process.env.GOOGLE_PLACES_API_KEY = "test-places-key-123";
+    placesFixture = {
+      places: [
+        {
+          id: "places/a1",
+          displayName: { text: "Deutsches Museum" },
+          formattedAddress: "Museumsinsel 1, 80538 München",
+          rating: 4.7,
+          userRatingCount: 15230,
+          priceLevel: "PRICE_LEVEL_MODERATE",
+        },
+      ],
+    };
+
+    const result = await runTool("search_activities", {
+      location: "Munich, Germany",
+      query: "museums",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("Deutsches Museum");
+    expect(result.text).toContain("4.7");
+    expect(placesCalls).toHaveLength(1);
   });
 });
 

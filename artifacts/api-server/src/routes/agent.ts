@@ -189,7 +189,7 @@ async function callModelApi(
   // Bound each upstream call: a hung model API must not hang the chat forever.
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45000);
-  let res: Response;
+  let res: globalThis.Response;
   try {
     res = await fetch(`${MODEL_API_BASE_URL}/chat/completions`, {
       method: "POST",
@@ -244,68 +244,218 @@ async function callModelApi(
 
 const TOOL_DEFINITIONS = [...AGENT_TOOLS, ...AGENT_RESEARCH_TOOLS];
 
+/** Why the tool loop ended without a usable final answer. */
+export type StuckReason = "duplicate_tool_call" | "iteration_exhausted" | "no_final_text";
+
+export interface LoopTelemetry {
+  /** Total wall-clock time of the loop in ms. */
+  totalMs: number;
+  /** Model API calls made inside the tool loop (excludes safety-net attempts). */
+  iterations: number;
+  /** Per-iteration model API latency in ms. */
+  modelCallMs: number[];
+  /** Cumulative tool execution latency in ms, keyed by tool name only (no args). */
+  toolMs: Record<string, number>;
+  /** Total tool calls executed. */
+  toolCallsExecuted: number;
+  /** Whether the safety net ran. */
+  safetyNetUsed: boolean;
+  /** Safety-net model attempts made. */
+  safetyNetAttempts: number;
+  /** Why the loop stopped without a usable final answer, if applicable. */
+  stuckReason: StuckReason | null;
+}
+
+const FALLBACK_REPLY =
+  "I couldn't complete that request — the planning steps kept looping without a final answer. Please try rephrasing.";
+
+function sortKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = sortKeysDeep((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Canonical signature for a tool call: name + JSON args with recursively
+ * sorted object keys and normalized whitespace. Semantically identical calls
+ * (`{"tripId":7}` vs `{ "tripId" : 7 }`) produce the same signature, so
+ * reordered or whitespace-varied JSON can't evade the duplicate detector.
+ * Falls back to the raw argument string when it isn't valid JSON.
+ */
+export function canonicalToolSignature(name: string, rawArgs: string | undefined | null): string {
+  const raw = rawArgs ?? "";
+  let normalized: string;
+  try {
+    const parsed: unknown = raw === "" ? {} : JSON.parse(raw);
+    normalized = JSON.stringify(sortKeysDeep(parsed));
+  } catch {
+    normalized = `raw:${raw}`;
+  }
+  return `${name}(${normalized})`;
+}
+
+// Matches a message that is ONLY a deferral fragment — "Let me check.",
+// "I'll check", "Checking now…", "One moment." — and nothing else. Anchored,
+// so a real sentence that merely starts with one of these phrases
+// ("I'll check the reservations for Saturday.") still counts as usable.
+const DEFERRAL_FRAGMENT_RE =
+  /^(let me( check)?|i'll( check)?|i will( check)?|i'm gonna( check)?|i am going to( check)?|gonna( check)?|one (sec|second|moment)|hold on|checking( now| on that| this)?|looking (that|it) up( now)?|just a (sec|second|moment)|give me a (sec|second|moment))\b[\s.,!…]*$/i;
+
+/**
+ * Only treat model content as a final answer when it is real text: nonempty,
+ * and not a bare deferral fragment like "Let me check." Short genuine
+ * answers ("Yes.", "8:30 PM.") still pass.
+ */
+export function isUsableFinalText(content: string | null | undefined): content is string {
+  if (typeof content !== "string") return false;
+  const trimmed = content.trim();
+  if (trimmed.length === 0) return false;
+  return !DEFERRAL_FRAGMENT_RE.test(trimmed);
+}
+
 async function runAgentLoop(
   agent: AgentDefinition,
   ctx: ToolContext,
   tripId: number,
   messages: ChatMessage[],
-): Promise<string> {
+): Promise<{ reply: string; telemetry: LoopTelemetry }> {
   const tools = TOOL_DEFINITIONS.map((t) => ({
     type: "function" as const,
     function: { name: t.name, description: t.description, parameters: t.parameters },
   }));
 
-  let lastText: string | null = null;
+  const loopStart = Date.now();
+  const telemetry: LoopTelemetry = {
+    totalMs: 0,
+    iterations: 0,
+    modelCallMs: [],
+    toolMs: {},
+    toolCallsExecuted: 0,
+    safetyNetUsed: false,
+    safetyNetAttempts: 0,
+    stuckReason: null,
+  };
 
-  // Stuck-loop detector: if the model repeats an identical tool call it has
-  // already made, it is going in circles — stop burning iterations and force
-  // the final answer from whatever tool data was gathered.
+  // Explicit completion state: the loop ends with either a usable final
+  // answer, or a recorded stuck reason that forces the safety net.
+  let usableFinalText: string | null = null;
+  let hadToolCalls = false;
   const seenToolCalls = new Set<string>();
 
+  const finalize = (): { reply: string; telemetry: LoopTelemetry } => {
+    telemetry.totalMs = Date.now() - loopStart;
+    // Privacy-safe: durations, counts, tool names, and the stuck reason only.
+    // No user content, no tool arguments, no trip text.
+    logger.info(
+      {
+        userId: ctx.userId,
+        tripId,
+        totalMs: telemetry.totalMs,
+        iterations: telemetry.iterations,
+        modelCallMs: telemetry.modelCallMs,
+        toolMs: telemetry.toolMs,
+        toolCallsExecuted: telemetry.toolCallsExecuted,
+        safetyNetUsed: telemetry.safetyNetUsed,
+        safetyNetAttempts: telemetry.safetyNetAttempts,
+        stuckReason: telemetry.stuckReason,
+      },
+      "[Agent] loop telemetry",
+    );
+    return { reply: usableFinalText ?? FALLBACK_REPLY, telemetry };
+  };
+
+  let iterationsRan = 0;
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
+    iterationsRan += 1;
+    telemetry.iterations = iterationsRan;
+
     let result: ModelApiResult;
+    const modelStart = Date.now();
     try {
       result = await callModelApi(agent.model, messages, tools);
     } catch (err) {
       // Model API failure: surface the best text we have, else throw for a 502.
-      if (lastText) return lastText;
+      if (usableFinalText) return finalize();
       throw err;
+    } finally {
+      telemetry.modelCallMs.push(Date.now() - modelStart);
     }
-
-    if (result.content) lastText = result.content;
 
     if (result.toolCalls.length === 0) {
-      break; // final answer
+      if (isUsableFinalText(result.content)) {
+        usableFinalText = result.content;
+      } else {
+        // No tool calls and no usable text: the model stalled without
+        // producing anything. Record why so the safety net fires below.
+        telemetry.stuckReason = "no_final_text";
+      }
+      break;
     }
+
+    hadToolCalls = true;
+
+    // Duplicate detection BEFORE appending the assistant tool-call message:
+    // canonical signatures are compared against earlier iterations and
+    // against other calls within this same batch. A repeat means the model
+    // is going in circles — stop without appending an orphaned assistant
+    // message (a tool_calls message with no matching tool results would
+    // corrupt the transcript for the safety-net call).
+    const signatures = result.toolCalls.map((call) =>
+      canonicalToolSignature(call.function?.name ?? "", call.function?.arguments),
+    );
+    let repeatedSig: string | null = null;
+    const batchSigs = new Set<string>();
+    for (const sig of signatures) {
+      if (seenToolCalls.has(sig) || batchSigs.has(sig)) {
+        repeatedSig = sig;
+        break;
+      }
+      batchSigs.add(sig);
+    }
+    if (repeatedSig) {
+      logger.warn(
+        { signature: repeatedSig, userId: ctx.userId, tripId, iteration: i + 1 },
+        "[Agent] stuck loop detected: repeated tool call — forcing final answer",
+      );
+      telemetry.stuckReason = "duplicate_tool_call";
+      break;
+    }
+    for (const sig of batchSigs) seenToolCalls.add(sig);
 
     messages.push({
       role: "assistant",
       content: result.content ?? "",
       tool_calls: result.toolCalls,
     });
+    // Narration accompanying tool calls is deliberately NOT harvested into
+    // usableFinalText — it is not a completed answer.
 
-    // Stuck-loop check: if the model repeats an identical tool call it has
-    // already made, it is going in circles — stop burning iterations and
-    // force the final answer from the tool data gathered so far.
-    const signatures = result.toolCalls.map((call) => {
-      const name = call.function?.name ?? "";
-      return `${name}(${call.function?.arguments ?? ""})`;
-    });
-    const repeatedSig = signatures.find((s) => seenToolCalls.has(s));
-    if (repeatedSig) {
-      logger.warn(
-        { tool: repeatedSig, userId: ctx.userId, tripId, iteration: i + 1 },
-        "[Agent] stuck loop detected: identical tool call repeated — forcing final answer",
-      );
-      break;
+    // One access check per iteration covers the whole batch (same user, same
+    // trip); re-asserting the identical check inside every concurrent tool
+    // call was N redundant DB queries for an N-tool batch. Each trip tool
+    // still asserts its own tripId arg as defense in depth.
+    let accessOk = true;
+    let accessErrorText = "Trip access check failed: internal error.";
+    try {
+      await assertTripAccess(ctx.userId, ctx.role, tripId);
+    } catch (err) {
+      accessOk = false;
+      if (err instanceof Error && err.name === "TripAccessDenied") accessErrorText = err.message;
+      logger.error({ userId: ctx.userId, tripId, err }, "[Agent] iteration access check failed");
     }
-    signatures.forEach((s) => seenToolCalls.add(s));
 
     // Performance: execute this iteration's tool calls concurrently, then
     // append their results in call order so the transcript stays stable.
     const outcomes = await Promise.all(
       result.toolCalls.map(async (call) => {
         const name = call.function?.name ?? "";
+        const toolStart = Date.now();
         logger.info(
           { tool: name, userId: ctx.userId, tripId, iteration: i + 1 },
           "[Agent] tool call",
@@ -321,7 +471,9 @@ async function runAgentLoop(
         const def = getToolDefinition(name) ?? AGENT_RESEARCH_TOOLS.find((t) => t.name === name);
 
         let toolResult: { ok: boolean; text: string; data?: unknown };
-        if (!def) {
+        if (!accessOk) {
+          toolResult = { ok: false, text: accessErrorText };
+        } else if (!def) {
           toolResult = { ok: false, text: `Unknown tool "${name}".` };
         } else {
           const parsed = def.input.safeParse(parsedArgs);
@@ -329,9 +481,6 @@ async function runAgentLoop(
             toolResult = { ok: false, text: `Invalid arguments for ${name}: ${parsed.error.issues[0]?.message ?? "validation failed"}` };
           } else {
             try {
-              // Defense in depth: re-assert access to the chat's trip on every
-              // tool call, even though each trip tool asserts its own tripId arg.
-              await assertTripAccess(ctx.userId, ctx.role, tripId);
               toolResult = await def.run(ctx, parsed.data as never);
             } catch (err) {
               // Tool failures go back to the model as error results — never a 500.
@@ -346,8 +495,11 @@ async function runAgentLoop(
           }
         }
 
+        const toolElapsedMs = Date.now() - toolStart;
+        telemetry.toolMs[name] = (telemetry.toolMs[name] ?? 0) + toolElapsedMs;
+        telemetry.toolCallsExecuted += 1;
         logger.info(
-          { tool: name, userId: ctx.userId, tripId, outcome: toolResult.ok ? "ok" : "error" },
+          { tool: name, userId: ctx.userId, tripId, outcome: toolResult.ok ? "ok" : "error", toolMs: toolElapsedMs },
           "[Agent] tool result",
         );
         return { call, toolResult };
@@ -363,41 +515,61 @@ async function runAgentLoop(
     }
   }
 
-  if (!lastText) {
-    // Safety net: the model gathered tool data but never wrote an answer.
-    // Force one final text-only response from the accumulated tool results.
-    // Retry once — a single transient model failure shouldn't surface as a
-    // "looping" message when we actually have tool data to answer from.
+  if (iterationsRan >= MAX_TOOL_ITERATIONS && !usableFinalText && !telemetry.stuckReason) {
+    // The model spent every iteration on tool calls and never produced a
+    // final answer.
+    telemetry.stuckReason = "iteration_exhausted";
+    logger.warn(
+      { userId: ctx.userId, tripId, iterations: iterationsRan },
+      "[Agent] tool loop exhausted max iterations without a final answer",
+    );
+  }
+
+  // Safety net: force a text-only final answer whenever the loop ended
+  // without a usable one — duplicate tool call, exhausted iterations, or no
+  // usable final text. Retry once, on both thrown errors AND empty/unusable
+  // responses. Every failed attempt is logged, as is final exhaustion.
+  if (!usableFinalText && (hadToolCalls || telemetry.stuckReason)) {
+    telemetry.safetyNetUsed = true;
     const safetyPrompt =
       "Answer the user's original question now, using only the information " +
       "from the tool results above. Write the answer directly — do not call any tools.";
-    for (let attempt = 1; attempt <= 2 && !lastText; attempt++) {
+    for (let attempt = 1; attempt <= 2 && !usableFinalText; attempt++) {
+      telemetry.safetyNetAttempts += 1;
       try {
         const final = await callModelApi(
           agent.model,
           [...messages, { role: "user", content: safetyPrompt }],
           [],
         );
-        if (final.content) lastText = final.content;
+        if (isUsableFinalText(final.content)) {
+          usableFinalText = final.content;
+          logger.info(
+            { userId: ctx.userId, tripId, attempt, stuckReason: telemetry.stuckReason },
+            "[Agent] safety net produced a final answer",
+          );
+        } else {
+          logger.warn(
+            { userId: ctx.userId, tripId, attempt, stuckReason: telemetry.stuckReason },
+            "[Agent] safety-net attempt returned empty/unusable content — retrying",
+          );
+        }
       } catch (err) {
         logger.error(
-          { userId: ctx.userId, tripId, attempt, err },
-          "[Agent] safety-net final answer failed",
+          { userId: ctx.userId, tripId, attempt, stuckReason: telemetry.stuckReason, err },
+          "[Agent] safety-net attempt failed",
         );
       }
     }
-    if (!lastText) {
+    if (!usableFinalText) {
       logger.error(
-        { userId: ctx.userId, tripId },
+        { userId: ctx.userId, tripId, stuckReason: telemetry.stuckReason },
         "[Agent] safety net exhausted — returning looping fallback",
       );
     }
   }
 
-  return (
-    lastText ??
-    "I couldn't complete that request — the planning steps kept looping without a final answer. Please try rephrasing."
-  );
+  return finalize();
 }
 
 // ---------------------------------------------------------------------------
@@ -491,7 +663,7 @@ router.post("/agent/chat", requireAuth, async (req: Request, res: Response) => {
   ];
 
   try {
-    const reply = await runAgentLoop(agent, { userId, role }, tripId, messages);
+    const { reply } = await runAgentLoop(agent, { userId, role }, tripId, messages);
     res.json({ agentId: agent.id, reply, mock: false });
   } catch (err) {
     // 502: our server is fine, the upstream model call failed.
