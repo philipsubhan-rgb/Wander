@@ -81,7 +81,9 @@ export const AGENTS: AgentDefinition[] = [
       "research tools without an API key), tell the user that directly instead " +
       "of fabricating results.\n\n" +
       "The tripId for every tool call is the trip you are discussing — pass it " +
-      "exactly as given; do not ask the user for it and do not use another trip's id.",
+      "exactly as given; do not ask the user for it and do not use another trip's id.\n\n" +
+      "Once the tools have given you what you need, answer the user right away — " +
+      "do not keep calling more tools.",
   },
 ];
 
@@ -309,6 +311,29 @@ async function runAgentLoop(
         content: JSON.stringify(toolResult).slice(0, 8000),
         tool_call_id: call.id,
       });
+    }
+  }
+
+  if (!lastText) {
+    // Safety net: the model gathered tool data but never wrote an answer.
+    // Force one final text-only response from the accumulated tool results.
+    try {
+      const final = await callModelApi(
+        agent.model,
+        [
+          ...messages,
+          {
+            role: "user",
+            content:
+              "Answer the user's original question now, using only the information " +
+              "from the tool results above. Write the answer directly — do not call any tools.",
+          },
+        ],
+        [],
+      );
+      if (final.content) lastText = final.content;
+    } catch {
+      // fall through to the honest fallback below
     }
   }
 

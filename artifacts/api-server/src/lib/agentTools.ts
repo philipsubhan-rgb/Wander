@@ -174,7 +174,7 @@ const GetItineraryInput = z.object({
   tripId: z.number().int().positive().describe("The trip ID"),
   date: z
     .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD, e.g. 2026-09-26")
     .optional()
     .describe("Filter to a specific date (YYYY-MM-DD)"),
 });
@@ -393,7 +393,7 @@ const GetActivitiesInput = z.object({
   tripId: z.number().int().positive().describe("The trip ID"),
   date: z
     .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD, e.g. 2026-09-26")
     .optional()
     .describe("Filter to a specific date (YYYY-MM-DD)"),
 });
@@ -450,7 +450,7 @@ const CheckScheduleConflictInput = z.object({
   tripId: z.number().int().positive().describe("The trip ID"),
   date: z
     .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD, e.g. 2026-09-26")
     .describe("The proposed date (YYYY-MM-DD)"),
   startTime: z
     .string()
@@ -588,7 +588,7 @@ const positiveIntTripIdParam = {
 } as const;
 
 const optionalDateParam = {
-  date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Filter to a specific date (YYYY-MM-DD)" },
+  date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Filter to a specific date as YYYY-MM-DD (e.g. 2026-09-26)" },
 } as const;
 
 /**
@@ -716,7 +716,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
       type: "object",
       properties: {
         tripId: positiveIntTripIdParam.properties.tripId,
-        date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "The proposed date (YYYY-MM-DD)" },
+        date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "The proposed date as YYYY-MM-DD (e.g. 2026-09-26)" },
         startTime: { type: "string", pattern: "^\\d{1,2}:\\d{2}$", description: 'Proposed start time, 24h "HH:MM"' },
         endTime: { type: "string", pattern: "^\\d{1,2}:\\d{2}$", description: 'Proposed end time, 24h "HH:MM"' },
         title: { type: "string", description: "Short label for the proposed item" },

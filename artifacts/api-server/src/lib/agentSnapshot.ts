@@ -100,12 +100,24 @@ export async function loadTripSnapshot(tripId: number): Promise<TripSnapshot> {
 }
 
 /** Render the snapshot as a system ChatMessage for the model API. */
+
+/** "2026-09-26" -> "Sat" / "Saturday". Noon UTC avoids any TZ day-shift. */
+function weekday(isoDate: string, style: "short" | "long"): string {
+  return new Date(`${isoDate}T12:00:00Z`).toLocaleDateString("en-US", {
+    weekday: style,
+    timeZone: "UTC",
+  });
+}
+
 export function buildSnapshotSystemMessage(snapshot: TripSnapshot): { role: "system"; content: string } {
   const c = snapshot.counts;
+  const todayIso = new Date().toISOString().slice(0, 10);
   const body = [
+    `Today is ${weekday(todayIso, "long")} (${todayIso}).`,
     `Trip: ${snapshot.title}`,
     `Destination: ${snapshot.destination}`,
-    `Dates: ${snapshot.startDate} – ${snapshot.endDate} (status: ${snapshot.status})`,
+    `Dates: ${weekday(snapshot.startDate, "short")} ${snapshot.startDate} – ` +
+      `${weekday(snapshot.endDate, "short")} ${snapshot.endDate} (status: ${snapshot.status})`,
     `On file: ${c.itineraryDays} itinerary day(s), ${c.reservations} reservation(s), ` +
       `${c.flights} flight(s), ${c.accommodations} stay(s), ${c.activities} activit${c.activities === 1 ? "y" : "ies"}, ` +
       `${c.carRentals} car rental(s).`,
