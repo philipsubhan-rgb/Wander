@@ -363,3 +363,4 @@ function StatCard({ icon: Icon, label, value, onClick }: { icon: any; label: str
     </button>
   );
 }
+

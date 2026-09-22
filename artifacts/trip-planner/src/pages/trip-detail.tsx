@@ -25,6 +25,7 @@ import { TripNotes, TripDocuments } from '@/components/trip/TripPrivate';
 import { TripSettings } from '@/components/trip/TripSettings';
 import { TripTravelers } from '@/components/trip/TripTravelers';
 import { TripExpenses } from '@/components/trip/TripExpenses';
+import MarcoBar from '@/components/MarcoBar';
 
 function getGradientForDestination(destination: string) {
   const hash = destination.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -199,6 +200,9 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
       </div>
 
       <div className="max-w-7xl mx-auto px-4 md:px-10 py-8">
+        <div className="mb-6">
+          <MarcoBar tripId={tripId} />
+        </div>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="overflow-x-auto pb-2 scrollbar-hide">
             <TabsList className="inline-flex w-max min-w-full justify-start md:justify-center border-b rounded-none h-auto p-0 bg-transparent gap-8">
