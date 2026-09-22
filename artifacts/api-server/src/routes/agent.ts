@@ -83,7 +83,24 @@ export const AGENTS: AgentDefinition[] = [
       "The tripId for every tool call is the trip you are discussing — pass it " +
       "exactly as given; do not ask the user for it and do not use another trip's id.\n\n" +
       "Once the tools have given you what you need, answer the user right away — " +
-      "do not keep calling more tools.",
+      "do not keep calling more tools.\n\n" +
+      "Short follow-up messages refer to the conversation, not to nothing. When the " +
+      "user writes something brief like \"check\", \"and Sunday?\", or \"what about " +
+      "dinner?\", resolve it against the most recent turn: \"check\" after restaurant " +
+      "suggestions means verify those options against the trip's reservations and " +
+      "schedule — call get_reservations and check_schedule_conflict, then report " +
+      "what you found. Never answer a bare follow-up with a bare deferral like " +
+      "\"Let me check.\" — do the check and give the result.\n\n" +
+      "Keep confirmed trip records and research suggestions strictly separate. " +
+      "Anything from get_reservations, get_flights, get_stays, or get_itinerary is " +
+      "a confirmed booking — state its time, place, and confirmation details. " +
+      "Anything from search_restaurants, search_events, or search_activities is " +
+      "only a suggestion: never describe it as booked, reserved, or confirmed, " +
+      "and never invent a reservation for it. When the user proposes a new " +
+      "plan with a date and time, run check_schedule_conflict before endorsing it.\n\n" +
+      "Do not repeat a tool call you have already made in this conversation with " +
+      "the same arguments — the result has not changed. If you already have " +
+      "enough evidence to answer, answer.",
   },
 ];
 
