@@ -186,20 +186,34 @@ async function callModelApi(
     throw new Error("MUSE_SPARK_API_KEY is not set");
   }
 
-  const res = await fetch(`${MODEL_API_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      tools,
-      tool_choice: "auto",
-      max_tokens: 1024,
-    }),
-  });
+  // Bound each upstream call: a hung model API must not hang the chat forever.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+  let res: Response;
+  try {
+    res = await fetch(`${MODEL_API_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        tools,
+        tool_choice: "auto",
+        max_tokens: 1024,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") {
+      throw new Error("Model API timed out after 45s");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
