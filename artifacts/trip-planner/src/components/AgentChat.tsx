@@ -1,13 +1,15 @@
 /**
- * SPIKE — AgentChat for Wander.
+ * AgentChat for Wander.
  *
- * Chat panel wired to POST /api/agent/chat. Sends the selected agentId
+ * Chat panel wired to the Marco agent endpoints. Sends the selected agentId
  * (from AgentPicker / localStorage) plus the tripId — the server loads the
  * trip context itself (Stage 1: client no longer sends trip data).
  *
- * Streaming-like UX: the spike endpoint is non-streaming, so we reveal the
- * assistant reply with a lightweight typewriter effect instead of true
- * token streaming. Swap for SSE/fetch-streaming when the backend supports it.
+ * True token streaming via POST /api/agent/chat/stream (SSE), with a
+ * one-shot fallback to POST /api/agent/chat. Conversation memory: on load,
+ * the panel seeds its message list from GET /api/agent/history so Marco
+ * remembers earlier sessions; the server merges that with the live session
+ * and persists every turn.
  *
  * Production placement: artifacts/trip-planner/src/components/AgentChat.tsx
  * (mount inside a trip detail page or a global chat drawer).
@@ -199,6 +201,31 @@ export default function AgentChat({ tripId, agentId, initialMessage, onInitialMe
   const resolvedAgentId = agentId ?? getSelectedAgentId(tripId);
   const agentName =
     AGENT_OPTIONS.find((o) => o.id === resolvedAgentId)?.name ?? resolvedAgentId;
+
+  // Conversation memory: seed the message list from the persisted log so
+  // Marco remembers earlier sessions. Only fills an empty list — never
+  // clobbers a live conversation (e.g. a seeded initialMessage in flight).
+  const historySeededRef = useRef(false);
+  useEffect(() => {
+    if (tripId == null || historySeededRef.current) return;
+    historySeededRef.current = true;
+    fetch(`/api/agent/history?tripId=${encodeURIComponent(String(tripId))}`, {
+      credentials: "include",
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const seeded: Message[] = ((data?.messages ?? []) as Message[]).filter(
+          (m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string",
+        );
+        if (seeded.length > 0) {
+          setMessages((prev) => (prev.length === 0 ? seeded : prev));
+        }
+      })
+      .catch(() => {
+        // History is a nice-to-have: an empty chat still works.
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripId]);
 
   // Keep the newest message visible by scrolling the chat's own message
   // list — never the page. (scrollIntoView would yank the whole window.)

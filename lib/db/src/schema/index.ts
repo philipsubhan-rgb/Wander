@@ -11,3 +11,4 @@ export * from "./carRentals";
 export * from "./reservations";
 export * from "./expenses";
 export * from "./passwordResetTokens";
+export * from "./marcoMessages";

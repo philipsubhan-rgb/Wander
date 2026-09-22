@@ -29,6 +29,14 @@ import {
 import { logger } from "../lib/logger";
 import { loadTripSnapshot, buildSnapshotSystemMessage } from "../lib/agentSnapshot";
 import {
+  loadMarcoHistory,
+  mergeHistories,
+  persistMarcoTurn,
+  MEMORY_CONTEXT_LIMIT,
+  MEMORY_HISTORY_LIMIT,
+  type MemoryMessage,
+} from "../lib/marcoMemory";
+import {
   AGENT_TOOLS,
   getToolDefinition,
   type ToolContext,
@@ -888,6 +896,44 @@ router.get("/agent/agents", requireAuth, (_req: Request, res: Response) => {
   });
 });
 
+/**
+ * GET /agent/history?tripId=N — recent persisted conversation turns for the
+ * caller on this trip, oldest first. Powers cross-session memory in the UI:
+ * the chat seeds its message list from here on load. Auth + trip membership
+ * required, same as the chat endpoints.
+ */
+router.get("/agent/history", requireAuth, async (req: Request, res: Response) => {
+  const tripId = Number(req.query.tripId);
+  if (!Number.isInteger(tripId) || tripId <= 0) {
+    res.status(400).json({ error: "Invalid tripId: expected a positive integer query param" });
+    return;
+  }
+  const userId = getAuthUserId(req, res);
+  const role = getAuthRole(req, res) ?? "";
+  if (!userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  const [trip] = await db.select({ id: tripsTable.id }).from(tripsTable).where(eq(tripsTable.id, tripId));
+  if (!trip) {
+    res.status(404).json({ error: `Trip ${tripId} not found` });
+    return;
+  }
+  try {
+    await assertTripAccess(userId, role, tripId);
+  } catch {
+    res.status(403).json({ error: `Trip access required for trip ${tripId}` });
+    return;
+  }
+  try {
+    const messages = await loadMarcoHistory(tripId, userId, MEMORY_HISTORY_LIMIT);
+    res.json({ tripId, messages });
+  } catch (err) {
+    logger.error({ tripId, userId, err }, "[Agent] history fetch failed");
+    res.status(500).json({ error: "Failed to load conversation history" });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Shared chat preamble (used by /agent/chat and /agent/chat/stream)
 // ---------------------------------------------------------------------------
@@ -921,6 +967,11 @@ interface ChatContext extends ParsedChatBody {
   userId: number;
   role: string;
   messages: ChatMessage[];
+  /**
+   * Client-sent turns not yet in the persisted log (usually just the new
+   * user message). Persisted by the endpoint after a successful reply.
+   */
+  freshMessages: MemoryMessage[];
 }
 
 /**
@@ -955,10 +1006,28 @@ async function loadChatContext(
 
   // Keep only the tail of the conversation and cap message sizes to bound the
   // prompt. Snapshot stays lean — full detail comes via tools.
-  const history = parsed.rawMessages.slice(-MAX_MESSAGES).map((m) => ({
-    role: m.role,
-    content: m.content.slice(0, MAX_CONTENT_CHARS),
-  }));
+  //
+  // Conversation memory: the persisted log (earlier sessions) is merged with
+  // the client-sent session history via overlap detection, so a page reload
+  // doesn't wipe Marco's memory and no turn is ever stored twice.
+  const clientHistory: MemoryMessage[] = parsed.rawMessages
+    // isValidBody already rejects "tool" roles from the client, but narrow
+    // the type explicitly — ChatMessage also covers internal loop messages.
+    .filter((m): m is ChatMessage & { role: "user" | "assistant" | "system" } =>
+      m.role === "user" || m.role === "assistant" || m.role === "system",
+    )
+    .map((m) => ({
+      role: m.role,
+      content: m.content.slice(0, MAX_CONTENT_CHARS),
+    }));
+  let persisted: MemoryMessage[] = [];
+  try {
+    persisted = await loadMarcoHistory(parsed.tripId, userId, MEMORY_CONTEXT_LIMIT);
+  } catch (err) {
+    // Memory is best-effort: a history read failure must not break the chat.
+    logger.warn({ tripId: parsed.tripId, userId, err }, "[Agent] history load failed — continuing without memory");
+  }
+  const { history, fresh } = mergeHistories(persisted, clientHistory, MAX_MESSAGES);
 
   let snapshotMessage: { role: "system"; content: string };
   try {
@@ -975,7 +1044,24 @@ async function loadChatContext(
     snapshotMessage,
     ...history,
   ];
-  return { ...parsed, userId, role, messages };
+  return { ...parsed, userId, role, messages, freshMessages: fresh };
+}
+
+/**
+ * Persist a completed turn (fresh user message + assistant reply) without
+ * ever failing the chat: memory is best-effort.
+ */
+async function rememberTurn(
+  tripId: number,
+  userId: number,
+  freshMessages: MemoryMessage[],
+  reply: string,
+): Promise<void> {
+  try {
+    await persistMarcoTurn(tripId, userId, [...freshMessages, { role: "assistant", content: reply }]);
+  } catch (err) {
+    logger.warn({ tripId, userId, err }, "[Agent] turn persist failed — chat unaffected");
+  }
 }
 
 /** Chat with the selected agent. Auth + trip membership required. */
@@ -1005,6 +1091,7 @@ router.post("/agent/chat", requireAuth, async (req: Request, res: Response) => {
       ctx.tripId,
       ctx.messages,
     );
+    await rememberTurn(ctx.tripId, ctx.userId, ctx.freshMessages, reply);
     res.json({ agentId: ctx.agent.id, reply, mock: false });
   } catch (err) {
     // 502: our server is fine, the upstream model call failed.
@@ -1081,6 +1168,7 @@ router.post("/agent/chat/stream", requireAuth, async (req: Request, res: Respons
       ctx.messages,
       { events, signal: disconnect.signal },
     );
+    await rememberTurn(ctx.tripId, ctx.userId, ctx.freshMessages, reply);
     // Authoritative final text — the client replaces the streamed
     // accumulation with this, covering any delta lost in transit.
     send("done", { agentId: ctx.agent.id, reply, mock: false });
