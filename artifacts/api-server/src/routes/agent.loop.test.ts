@@ -8,7 +8,13 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { canonicalToolSignature, isUsableFinalText } from "./agent.js";
+import {
+  canonicalToolSignature,
+  isUsableFinalText,
+  applyChatDelta,
+  createChatDeltaAccumulator,
+  readSseDataLines,
+} from "./agent.js";
 
 const dbMock = vi.hoisted(() => {
   const resultQueue: unknown[] = [];
@@ -128,5 +134,100 @@ describe("isUsableFinalText", () => {
     expect(isUsableFinalText("Yes.")).toBe(true);
     expect(isUsableFinalText("8:30 PM.")).toBe(true);
     expect(isUsableFinalText("Dinner is at 7:30 PM at Schneider Bräuhaus.")).toBe(true);
+  });
+});
+
+describe("applyChatDelta", () => {
+  it("accumulates content deltas", () => {
+    const acc = createChatDeltaAccumulator();
+    applyChatDelta(acc, { content: "Hello, " });
+    applyChatDelta(acc, { content: "world." });
+    expect(acc.content).toBe("Hello, world.");
+    expect(acc.sawToolCalls).toBe(false);
+    expect(acc.toolCalls).toHaveLength(0);
+  });
+
+  it("merges tool-call fragments by index", () => {
+    const acc = createChatDeltaAccumulator();
+    applyChatDelta(acc, {
+      tool_calls: [{ index: 0, id: "call_1", function: { name: "get_reser", arguments: '{"trip' } }],
+    });
+    applyChatDelta(acc, {
+      tool_calls: [{ index: 0, function: { name: "vations", arguments: 'Id":7}' } }],
+    });
+    expect(acc.sawToolCalls).toBe(true);
+    expect(acc.toolCalls).toHaveLength(1);
+    expect(acc.toolCalls[0]).toEqual({
+      id: "call_1",
+      name: "get_reservations",
+      arguments: '{"tripId":7}',
+    });
+  });
+
+  it("handles multiple tool calls in one batch", () => {
+    const acc = createChatDeltaAccumulator();
+    applyChatDelta(acc, {
+      tool_calls: [
+        { index: 0, id: "call_1", function: { name: "get_flights", arguments: "{}" } },
+        { index: 1, id: "call_2", function: { name: "get_stays", arguments: "{}" } },
+      ],
+    });
+    expect(acc.toolCalls.map((t) => t.name)).toEqual(["get_flights", "get_stays"]);
+  });
+
+  it("ignores null/undefined deltas", () => {
+    const acc = createChatDeltaAccumulator();
+    applyChatDelta(acc, null);
+    applyChatDelta(acc, undefined);
+    expect(acc.content).toBe("");
+    expect(acc.sawToolCalls).toBe(false);
+  });
+});
+
+describe("readSseDataLines", () => {
+  function fakeStream(chunks: string[]): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder();
+    let i = 0;
+    return new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (i < chunks.length) controller.enqueue(encoder.encode(chunks[i++]));
+        else controller.close();
+      },
+    });
+  }
+
+  async function collect(chunks: string[]): Promise<string[]> {
+    const out: string[] = [];
+    for await (const line of readSseDataLines(fakeStream(chunks))) out.push(line);
+    return out;
+  }
+
+  it("yields data payloads and skips comments and [DONE]", async () => {
+    const lines = await collect([
+      ': ping\n\n',
+      'data: {"a":1}\n\n',
+      'data: [DONE]\n\n',
+      'data: {"b":2}\n\n',
+    ]);
+    expect(lines).toEqual(['{"a":1}', '{"b":2}']);
+  });
+
+  it("reassembles frames split across TCP chunks", async () => {
+    const lines = await collect([
+      'data: {"choices":[{"delta":{"cont',
+      'ent":"Hel',
+      'lo"}}]}\n\n',
+    ]);
+    expect(lines).toEqual(['{"choices":[{"delta":{"content":"Hello"}}]}']);
+  });
+
+  it("handles a chunk boundary inside the frame separator", async () => {
+    const lines = await collect(['data: {"a":1}\n', '\ndata: {"b":2}\n\n']);
+    expect(lines).toEqual(['{"a":1}', '{"b":2}']);
+  });
+
+  it("yields multiple data lines within one frame", async () => {
+    const lines = await collect(['data: {"a":1}\ndata: {"b":2}\n\n']);
+    expect(lines).toEqual(['{"a":1}', '{"b":2}']);
   });
 });

@@ -256,6 +256,192 @@ async function callModelApi(
 }
 
 // ---------------------------------------------------------------------------
+// Streaming model call (OpenAI-compatible SSE, with tool-call delta merging)
+// ---------------------------------------------------------------------------
+
+/** One streamed tool call, assembled from indexed fragments. */
+export interface StreamedToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+/** Mutable accumulator for one streamed chat-completion response. */
+export interface ChatDeltaAccumulator {
+  content: string;
+  toolCalls: StreamedToolCall[];
+  sawToolCalls: boolean;
+}
+
+export function createChatDeltaAccumulator(): ChatDeltaAccumulator {
+  return { content: "", toolCalls: [], sawToolCalls: false };
+}
+
+interface StreamDelta {
+  content?: string | null;
+  tool_calls?: Array<{
+    index?: number;
+    id?: string;
+    function?: { name?: string; arguments?: string };
+  }>;
+}
+
+/**
+ * Merge one streamed delta into the accumulator. Pure — unit-testable.
+ * OpenAI-compatible APIs stream tool calls as indexed fragments
+ * (`{index, id, function: {name, arguments}}`); fragments for the same index
+ * are concatenated, so a call split across many chunks reassembles exactly.
+ */
+export function applyChatDelta(acc: ChatDeltaAccumulator, delta: StreamDelta | null | undefined): void {
+  if (!delta) return;
+  if (typeof delta.content === "string" && delta.content.length > 0) {
+    acc.content += delta.content;
+  }
+  for (const tc of delta.tool_calls ?? []) {
+    acc.sawToolCalls = true;
+    const index = typeof tc.index === "number" && tc.index >= 0 ? tc.index : acc.toolCalls.length;
+    while (acc.toolCalls.length <= index) acc.toolCalls.push({ id: "", name: "", arguments: "" });
+    const slot = acc.toolCalls[index];
+    if (tc.id) slot.id = tc.id;
+    if (tc.function?.name) slot.name += tc.function.name;
+    if (typeof tc.function?.arguments === "string") slot.arguments += tc.function.arguments;
+  }
+}
+
+export interface StreamCallbacks {
+  onToken: (delta: string) => void;
+}
+
+/**
+ * Yield raw `data:` payloads from an SSE byte stream, reassembling frames
+ * that arrive split across TCP chunks. Skips `: comment` lines and the
+ * `[DONE]` terminator. Pure stream logic — unit-testable with a fake
+ * ReadableStream.
+ */
+export async function* readSseDataLines(
+  body: ReadableStream<Uint8Array>,
+): AsyncGenerator<string, void, void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let sep: number;
+      // SSE frames are separated by a blank line.
+      while ((sep = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        for (const line of frame.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const payload = trimmed.slice(5).trim();
+          if (payload === "[DONE]") continue;
+          yield payload;
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
+ * Streaming variant of callModelApi. Forwards content deltas to onToken as
+ * they arrive (true token streaming) and returns the fully merged result —
+ * content plus reassembled tool calls — so the tool loop sees exactly what
+ * the non-streaming call would have returned.
+ *
+ * The 45s bound from callModelApi applies per call; `signal` additionally
+ * aborts when the SSE client disconnects.
+ */
+async function callModelApiStream(
+  model: string,
+  messages: ChatMessage[],
+  tools: Array<{ type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }>,
+  callbacks: StreamCallbacks,
+  signal?: AbortSignal,
+): Promise<ModelApiResult & { streamedText: string; sawToolCalls: boolean }> {
+  const apiKey = process.env.MUSE_SPARK_API_KEY;
+  if (!apiKey) {
+    throw new Error("MUSE_SPARK_API_KEY is not set");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
+  let res: globalThis.Response;
+  try {
+    res = await fetch(`${MODEL_API_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        tools,
+        tool_choice: "auto",
+        max_tokens: 4096,
+        reasoning_effort: "minimal",
+        stream: true,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") {
+      throw new Error(signal?.aborted ? "Client disconnected" : "Model API timed out after 45s");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Model API error ${res.status}: ${text.slice(0, 300)}`);
+  }
+
+  const acc = createChatDeltaAccumulator();
+  for await (const payload of readSseDataLines(res.body)) {
+    try {
+      const json = JSON.parse(payload) as {
+        choices?: Array<{ delta?: StreamDelta }>;
+      };
+      const delta = json.choices?.[0]?.delta;
+      if (typeof delta?.content === "string" && delta.content.length > 0) {
+        callbacks.onToken(delta.content);
+      }
+      applyChatDelta(acc, delta);
+    } catch {
+      // A malformed SSE data line must not kill the stream.
+    }
+  }
+
+  const toolCalls: ToolCall[] = acc.toolCalls
+    .filter((tc) => tc.name.length > 0)
+    .map((tc, i) => ({
+      id: tc.id || `streamed-call-${i}`,
+      type: "function" as const,
+      function: { name: tc.name, arguments: tc.arguments },
+    }));
+
+  return {
+    content: acc.content.trim() || null,
+    toolCalls,
+    streamedText: acc.content,
+    sawToolCalls: acc.sawToolCalls,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Tool-calling loop
 // ---------------------------------------------------------------------------
 
@@ -336,11 +522,55 @@ export function isUsableFinalText(content: string | null | undefined): content i
   return !DEFERRAL_FRAGMENT_RE.test(trimmed);
 }
 
+/**
+ * Live-update hooks for the SSE chat endpoint. All optional: the
+ * non-streaming endpoint runs the loop without them.
+ */
+export interface AgentStreamEvents {
+  /** Human-readable progress, e.g. "Checking your reservations…". */
+  onStatus: (text: string) => void;
+  /** One text delta of the in-progress answer, forwarded as it arrives. */
+  onToken: (delta: string) => void;
+  /**
+   * Text streamed so far turned out to be pre-answer narration (or an
+   * unusable fragment) rather than the final answer — the client should
+   * clear the in-progress bubble so only the real answer is ever shown.
+   */
+  onSuperseded: () => void;
+}
+
+export interface RunAgentLoopOpts {
+  events?: AgentStreamEvents;
+  /** Aborts the in-flight upstream model call (client disconnect). */
+  signal?: AbortSignal;
+}
+
+/** Friendly progress line per tool, shown while its batch runs. */
+const TOOL_STATUS_TEXT: Record<string, string> = {
+  get_trip_summary: "Reviewing your trip…",
+  get_itinerary: "Checking your itinerary…",
+  get_reservations: "Checking your reservations…",
+  get_flights: "Checking your flights…",
+  get_stays: "Checking your hotel…",
+  get_activities: "Checking your activities…",
+  check_schedule_conflict: "Checking for schedule conflicts…",
+  search_restaurants: "Searching restaurants…",
+  search_events: "Searching events…",
+  search_activities: "Searching activities…",
+};
+
+function statusForTools(toolCalls: ToolCall[]): string {
+  const names = toolCalls.map((c) => c.function?.name ?? "");
+  if (names.length === 1) return TOOL_STATUS_TEXT[names[0]] ?? "Working on it…";
+  return "Checking a few things…";
+}
+
 async function runAgentLoop(
   agent: AgentDefinition,
   ctx: ToolContext,
   tripId: number,
   messages: ChatMessage[],
+  opts?: RunAgentLoopOpts,
 ): Promise<{ reply: string; telemetry: LoopTelemetry }> {
   const tools = TOOL_DEFINITIONS.map((t) => ({
     type: "function" as const,
@@ -393,9 +623,30 @@ async function runAgentLoop(
     telemetry.iterations = iterationsRan;
 
     let result: ModelApiResult;
+    // Text streamed live during this call (streaming mode only). If the call
+    // ends with tool calls — or with unusable text — that text was narration,
+    // not the answer, and the client is told to drop it (onSuperseded).
+    let streamedText = "";
     const modelStart = Date.now();
     try {
-      result = await callModelApi(agent.model, messages, tools);
+      if (opts?.events) {
+        const streamed = await callModelApiStream(
+          agent.model,
+          messages,
+          tools,
+          {
+            onToken: (delta) => {
+              streamedText += delta;
+              opts.events!.onToken(delta);
+            },
+          },
+          opts.signal,
+        );
+        result = streamed;
+        streamedText = streamed.streamedText;
+      } else {
+        result = await callModelApi(agent.model, messages, tools);
+      }
     } catch (err) {
       // Model API failure: surface the best text we have, else throw for a 502.
       if (usableFinalText) return finalize();
@@ -410,10 +661,16 @@ async function runAgentLoop(
       } else {
         // No tool calls and no usable text: the model stalled without
         // producing anything. Record why so the safety net fires below.
+        if (streamedText.trim().length > 0) opts?.events?.onSuperseded();
         telemetry.stuckReason = "no_final_text";
       }
       break;
     }
+
+    // Tool calls incoming: any text streamed with them was narration —
+    // clear it so the bubble only ever shows the real answer.
+    if (streamedText.trim().length > 0) opts?.events?.onSuperseded();
+    opts?.events?.onStatus(statusForTools(result.toolCalls));
 
     hadToolCalls = true;
 
@@ -553,12 +810,28 @@ async function runAgentLoop(
       "from the tool results above. Write the answer directly — do not call any tools.";
     for (let attempt = 1; attempt <= 2 && !usableFinalText; attempt++) {
       telemetry.safetyNetAttempts += 1;
+      // A previous attempt's streamed text was unusable — clear it before
+      // streaming the retry so the bubble only shows the final answer.
+      if (attempt > 1) opts?.events?.onSuperseded();
+      opts?.events?.onStatus("Putting together your answer…");
       try {
-        const final = await callModelApi(
-          agent.model,
-          [...messages, { role: "user", content: safetyPrompt }],
-          [],
-        );
+        let final: ModelApiResult;
+        if (opts?.events) {
+          const streamed = await callModelApiStream(
+            agent.model,
+            [...messages, { role: "user", content: safetyPrompt }],
+            [],
+            { onToken: (delta) => opts.events!.onToken(delta) },
+            opts.signal,
+          );
+          final = streamed;
+        } else {
+          final = await callModelApi(
+            agent.model,
+            [...messages, { role: "user", content: safetyPrompt }],
+            [],
+          );
+        }
         if (isUsableFinalText(final.content)) {
           usableFinalText = final.content;
           logger.info(
@@ -615,80 +888,213 @@ router.get("/agent/agents", requireAuth, (_req: Request, res: Response) => {
   });
 });
 
-/** Chat with the selected agent. Auth + trip membership required. */
-router.post("/agent/chat", requireAuth, async (req: Request, res: Response) => {
+// ---------------------------------------------------------------------------
+// Shared chat preamble (used by /agent/chat and /agent/chat/stream)
+// ---------------------------------------------------------------------------
+
+interface ParsedChatBody {
+  agent: AgentDefinition;
+  tripId: number;
+  rawMessages: ChatMessage[];
+}
+
+/**
+ * Body validation + agent resolution shared by both chat endpoints.
+ * Sends the 400 and returns null on invalid bodies.
+ */
+function parseChatBody(req: Request, res: Response): ParsedChatBody | null {
   if (!isValidBody(req.body)) {
     res.status(400).json({
       error:
         "Invalid body: expected { agentId?, tripId: <positive int>, messages: [{role, content}] } with at least one message",
     });
-    return;
+    return null;
   }
+  return {
+    agent: getAgent(req.body.agentId),
+    tripId: req.body.tripId,
+    rawMessages: req.body.messages,
+  };
+}
 
-  const { tripId } = req.body;
-  const agent = getAgent(req.body.agentId);
+interface ChatContext extends ParsedChatBody {
+  userId: number;
+  role: string;
+  messages: ChatMessage[];
+}
 
-  // The "wander" agent has no external model — mock only.
-  // The mock path requires auth (requireAuth above) but performs no trip
-  // access check and no DB access.
-  if (agent.id === "wander" || !process.env.MUSE_SPARK_API_KEY) {
-    res.json({ agentId: agent.id, reply: mockReply(agent, tripId, req.body.messages), mock: true });
-    return;
-  }
-
+/**
+ * Auth + trip existence + membership + snapshot load, shared by both chat
+ * endpoints. Sends the HTTP error and returns null on failure. Must run
+ * BEFORE any SSE headers are committed on the streaming endpoint.
+ */
+async function loadChatContext(
+  req: Request,
+  res: Response,
+  parsed: ParsedChatBody,
+): Promise<ChatContext | null> {
   const userId = getAuthUserId(req, res);
   const role = getAuthRole(req, res) ?? "";
   if (!userId) {
     res.status(401).json({ error: "Not authenticated" });
-    return;
+    return null;
   }
 
   // 404 if the trip doesn't exist, 403 if the caller isn't a participant.
-  const [trip] = await db.select({ id: tripsTable.id }).from(tripsTable).where(eq(tripsTable.id, tripId));
+  const [trip] = await db.select({ id: tripsTable.id }).from(tripsTable).where(eq(tripsTable.id, parsed.tripId));
   if (!trip) {
-    res.status(404).json({ error: `Trip ${tripId} not found` });
-    return;
+    res.status(404).json({ error: `Trip ${parsed.tripId} not found` });
+    return null;
   }
   try {
-    await assertTripAccess(userId, role, tripId);
+    await assertTripAccess(userId, role, parsed.tripId);
   } catch {
-    res.status(403).json({ error: `Trip access required for trip ${tripId}` });
-    return;
+    res.status(403).json({ error: `Trip access required for trip ${parsed.tripId}` });
+    return null;
   }
 
   // Keep only the tail of the conversation and cap message sizes to bound the
   // prompt. Snapshot stays lean — full detail comes via tools.
-  const history = req.body.messages.slice(-MAX_MESSAGES).map((m) => ({
+  const history = parsed.rawMessages.slice(-MAX_MESSAGES).map((m) => ({
     role: m.role,
     content: m.content.slice(0, MAX_CONTENT_CHARS),
   }));
 
   let snapshotMessage: { role: "system"; content: string };
   try {
-    const snapshot = await loadTripSnapshot(tripId);
+    const snapshot = await loadTripSnapshot(parsed.tripId);
     snapshotMessage = buildSnapshotSystemMessage(snapshot);
   } catch (err) {
-    logger.error({ tripId, userId, err }, "[Agent] snapshot load failed");
+    logger.error({ tripId: parsed.tripId, userId, err }, "[Agent] snapshot load failed");
     res.status(500).json({ error: "Failed to load trip context" });
-    return;
+    return null;
   }
 
   const messages: ChatMessage[] = [
-    { role: "system", content: agent.systemPrompt },
+    { role: "system", content: parsed.agent.systemPrompt },
     snapshotMessage,
     ...history,
   ];
+  return { ...parsed, userId, role, messages };
+}
+
+/** Chat with the selected agent. Auth + trip membership required. */
+router.post("/agent/chat", requireAuth, async (req: Request, res: Response) => {
+  const parsed = parseChatBody(req, res);
+  if (!parsed) return;
+
+  // The "wander" agent has no external model — mock only.
+  // The mock path requires auth (requireAuth above) but performs no trip
+  // access check and no DB access.
+  if (parsed.agent.id === "wander" || !process.env.MUSE_SPARK_API_KEY) {
+    res.json({
+      agentId: parsed.agent.id,
+      reply: mockReply(parsed.agent, parsed.tripId, parsed.rawMessages),
+      mock: true,
+    });
+    return;
+  }
+
+  const ctx = await loadChatContext(req, res, parsed);
+  if (!ctx) return;
 
   try {
-    const { reply } = await runAgentLoop(agent, { userId, role }, tripId, messages);
-    res.json({ agentId: agent.id, reply, mock: false });
+    const { reply } = await runAgentLoop(
+      ctx.agent,
+      { userId: ctx.userId, role: ctx.role },
+      ctx.tripId,
+      ctx.messages,
+    );
+    res.json({ agentId: ctx.agent.id, reply, mock: false });
   } catch (err) {
     // 502: our server is fine, the upstream model call failed.
-    logger.error({ err, userId, tripId }, "[Agent] chat failed");
+    logger.error({ err, userId: ctx.userId, tripId: ctx.tripId }, "[Agent] chat failed");
     res.status(502).json({
       error: "Agent request failed",
       detail: err instanceof Error ? err.message : String(err),
     });
+  }
+});
+
+/**
+ * SSE variant of /agent/chat — true token streaming for Marco replies.
+ * Same auth, validation, and trip checks. Event stream:
+ *   status    { text }    — progress while tools run ("Checking your reservations…")
+ *   token     { delta }   — one text delta of the in-progress answer
+ *   supersede {}          — streamed text was narration, not the answer: clear it
+ *   done      { agentId, reply, mock } — authoritative final reply
+ *   error     { error, detail }        — terminal failure
+ */
+router.post("/agent/chat/stream", requireAuth, async (req: Request, res: Response) => {
+  const parsed = parseChatBody(req, res);
+  if (!parsed) return;
+
+  const sseHeaders = {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    // Reversed proxies (nginx) must not buffer the stream.
+    "X-Accel-Buffering": "no",
+  };
+  const send = (event: string, data: unknown) => {
+    // Guard against writes after the client went away mid-loop.
+    if (res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // The "wander" agent has no external model — mock only, same rule as
+  // /agent/chat: auth required, no trip access check, no DB access.
+  if (parsed.agent.id === "wander" || !process.env.MUSE_SPARK_API_KEY) {
+    res.writeHead(200, sseHeaders);
+    const reply = mockReply(parsed.agent, parsed.tripId, parsed.rawMessages);
+    send("token", { delta: reply });
+    send("done", { agentId: parsed.agent.id, reply, mock: true });
+    res.end();
+    return;
+  }
+
+  // All fallible checks run BEFORE the SSE headers are committed, so 401 /
+  // 403 / 404 / 500 still go out as JSON.
+  const ctx = await loadChatContext(req, res, parsed);
+  if (!ctx) return;
+
+  res.writeHead(200, sseHeaders);
+
+  // If the browser navigates away mid-answer, abort the in-flight upstream
+  // model call instead of streaming into the void.
+  const disconnect = new AbortController();
+  req.on("close", () => {
+    if (!res.writableEnded) disconnect.abort();
+  });
+
+  const events: AgentStreamEvents = {
+    onStatus: (text) => send("status", { text }),
+    onToken: (delta) => send("token", { delta }),
+    onSuperseded: () => send("supersede", {}),
+  };
+
+  try {
+    const { reply } = await runAgentLoop(
+      ctx.agent,
+      { userId: ctx.userId, role: ctx.role },
+      ctx.tripId,
+      ctx.messages,
+      { events, signal: disconnect.signal },
+    );
+    // Authoritative final text — the client replaces the streamed
+    // accumulation with this, covering any delta lost in transit.
+    send("done", { agentId: ctx.agent.id, reply, mock: false });
+  } catch (err) {
+    logger.error({ err, userId: ctx.userId, tripId: ctx.tripId }, "[Agent] chat stream failed");
+    if (!disconnect.signal.aborted) {
+      // 502 equivalent: our server is fine, the upstream model call failed.
+      send("error", {
+        error: "Agent request failed",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  } finally {
+    res.end();
   }
 });
 
