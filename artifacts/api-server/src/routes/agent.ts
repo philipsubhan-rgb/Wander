@@ -169,7 +169,7 @@ function isValidBody(body: unknown): body is ChatRequestBody & { messages: ChatM
 const MODEL_API_BASE_URL =
   process.env.MUSE_SPARK_BASE_URL ?? "https://api.ai.meta.com/v1";
 
-const MAX_TOOL_ITERATIONS = 6;
+const MAX_TOOL_ITERATIONS = 10;
 
 interface ModelApiResult {
   content: string | null;
@@ -257,6 +257,11 @@ async function runAgentLoop(
 
   let lastText: string | null = null;
 
+  // Stuck-loop detector: if the model repeats an identical tool call it has
+  // already made, it is going in circles — stop burning iterations and force
+  // the final answer from whatever tool data was gathered.
+  const seenToolCalls = new Set<string>();
+
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     let result: ModelApiResult;
     try {
@@ -279,53 +284,77 @@ async function runAgentLoop(
       tool_calls: result.toolCalls,
     });
 
-    for (const call of result.toolCalls) {
+    // Stuck-loop check: if the model repeats an identical tool call it has
+    // already made, it is going in circles — stop burning iterations and
+    // force the final answer from the tool data gathered so far.
+    const signatures = result.toolCalls.map((call) => {
       const name = call.function?.name ?? "";
-      logger.info(
-        { tool: name, userId: ctx.userId, tripId, iteration: i + 1 },
-        "[Agent] tool call",
+      return `${name}(${call.function?.arguments ?? ""})`;
+    });
+    const repeatedSig = signatures.find((s) => seenToolCalls.has(s));
+    if (repeatedSig) {
+      logger.warn(
+        { tool: repeatedSig, userId: ctx.userId, tripId, iteration: i + 1 },
+        "[Agent] stuck loop detected: identical tool call repeated — forcing final answer",
       );
+      break;
+    }
+    signatures.forEach((s) => seenToolCalls.add(s));
 
-      let parsedArgs: unknown = {};
-      try {
-        parsedArgs = call.function?.arguments ? JSON.parse(call.function.arguments) : {};
-      } catch {
-        // fall through to the zod validation below, which will reject it
-      }
+    // Performance: execute this iteration's tool calls concurrently, then
+    // append their results in call order so the transcript stays stable.
+    const outcomes = await Promise.all(
+      result.toolCalls.map(async (call) => {
+        const name = call.function?.name ?? "";
+        logger.info(
+          { tool: name, userId: ctx.userId, tripId, iteration: i + 1 },
+          "[Agent] tool call",
+        );
 
-      const def = getToolDefinition(name) ?? AGENT_RESEARCH_TOOLS.find((t) => t.name === name);
+        let parsedArgs: unknown = {};
+        try {
+          parsedArgs = call.function?.arguments ? JSON.parse(call.function.arguments) : {};
+        } catch {
+          // fall through to the zod validation below, which will reject it
+        }
 
-      let toolResult: { ok: boolean; text: string; data?: unknown };
-      if (!def) {
-        toolResult = { ok: false, text: `Unknown tool "${name}".` };
-      } else {
-        const parsed = def.input.safeParse(parsedArgs);
-        if (!parsed.success) {
-          toolResult = { ok: false, text: `Invalid arguments for ${name}: ${parsed.error.issues[0]?.message ?? "validation failed"}` };
+        const def = getToolDefinition(name) ?? AGENT_RESEARCH_TOOLS.find((t) => t.name === name);
+
+        let toolResult: { ok: boolean; text: string; data?: unknown };
+        if (!def) {
+          toolResult = { ok: false, text: `Unknown tool "${name}".` };
         } else {
-          try {
-            // Defense in depth: re-assert access to the chat's trip on every
-            // tool call, even though each trip tool asserts its own tripId arg.
-            await assertTripAccess(ctx.userId, ctx.role, tripId);
-            toolResult = await def.run(ctx, parsed.data as never);
-          } catch (err) {
-            // Tool failures go back to the model as error results — never a 500.
-            logger.error({ tool: name, userId: ctx.userId, tripId, err }, "[Agent] tool error");
-            toolResult = {
-              ok: false,
-              text: err instanceof Error && err.name === "TripAccessDenied"
-                ? err.message
-                : `Tool ${name} failed: internal error.`,
-            };
+          const parsed = def.input.safeParse(parsedArgs);
+          if (!parsed.success) {
+            toolResult = { ok: false, text: `Invalid arguments for ${name}: ${parsed.error.issues[0]?.message ?? "validation failed"}` };
+          } else {
+            try {
+              // Defense in depth: re-assert access to the chat's trip on every
+              // tool call, even though each trip tool asserts its own tripId arg.
+              await assertTripAccess(ctx.userId, ctx.role, tripId);
+              toolResult = await def.run(ctx, parsed.data as never);
+            } catch (err) {
+              // Tool failures go back to the model as error results — never a 500.
+              logger.error({ tool: name, userId: ctx.userId, tripId, err }, "[Agent] tool error");
+              toolResult = {
+                ok: false,
+                text: err instanceof Error && err.name === "TripAccessDenied"
+                  ? err.message
+                  : `Tool ${name} failed: internal error.`,
+              };
+            }
           }
         }
-      }
 
-      logger.info(
-        { tool: name, userId: ctx.userId, tripId, outcome: toolResult.ok ? "ok" : "error" },
-        "[Agent] tool result",
-      );
+        logger.info(
+          { tool: name, userId: ctx.userId, tripId, outcome: toolResult.ok ? "ok" : "error" },
+          "[Agent] tool result",
+        );
+        return { call, toolResult };
+      }),
+    );
 
+    for (const { call, toolResult } of outcomes) {
       messages.push({
         role: "tool",
         content: JSON.stringify(toolResult).slice(0, 8000),
@@ -337,23 +366,31 @@ async function runAgentLoop(
   if (!lastText) {
     // Safety net: the model gathered tool data but never wrote an answer.
     // Force one final text-only response from the accumulated tool results.
-    try {
-      const final = await callModelApi(
-        agent.model,
-        [
-          ...messages,
-          {
-            role: "user",
-            content:
-              "Answer the user's original question now, using only the information " +
-              "from the tool results above. Write the answer directly — do not call any tools.",
-          },
-        ],
-        [],
+    // Retry once — a single transient model failure shouldn't surface as a
+    // "looping" message when we actually have tool data to answer from.
+    const safetyPrompt =
+      "Answer the user's original question now, using only the information " +
+      "from the tool results above. Write the answer directly — do not call any tools.";
+    for (let attempt = 1; attempt <= 2 && !lastText; attempt++) {
+      try {
+        const final = await callModelApi(
+          agent.model,
+          [...messages, { role: "user", content: safetyPrompt }],
+          [],
+        );
+        if (final.content) lastText = final.content;
+      } catch (err) {
+        logger.error(
+          { userId: ctx.userId, tripId, attempt, err },
+          "[Agent] safety-net final answer failed",
+        );
+      }
+    }
+    if (!lastText) {
+      logger.error(
+        { userId: ctx.userId, tripId },
+        "[Agent] safety net exhausted — returning looping fallback",
       );
-      if (final.content) lastText = final.content;
-    } catch {
-      // fall through to the honest fallback below
     }
   }
 
