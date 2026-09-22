@@ -114,7 +114,7 @@ export function buildSnapshotSystemMessage(snapshot: TripSnapshot): { role: "sys
   const todayIso = new Date().toISOString().slice(0, 10);
   const body = [
     `Today is ${weekday(todayIso, "long")} (${todayIso}).`,
-    `Trip: ${snapshot.title}`,
+    `Trip: ${snapshot.title} (ID ${snapshot.tripId} — pass this as tripId in every tool call)`,
     `Destination: ${snapshot.destination}`,
     `Dates: ${weekday(snapshot.startDate, "short")} ${snapshot.startDate} – ` +
       `${weekday(snapshot.endDate, "short")} ${snapshot.endDate} (status: ${snapshot.status})`,

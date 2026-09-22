@@ -202,7 +202,13 @@ async function callModelApi(
         messages,
         tools,
         tool_choice: "auto",
-        max_tokens: 1024,
+        // Muse Spark spends a large share of the token budget on hidden
+        // reasoning (~600-1000 tokens/call). A 1024 cap starves the actual
+        // response: finish_reason=length, truncated text, no tool calls.
+        max_tokens: 4096,
+        // "minimal" is the lowest valid effort ("none" 400s). Proven in
+        // harness testing: same answer quality, ~4x faster per call.
+        reasoning_effort: "minimal",
       }),
       signal: controller.signal,
     });
