@@ -14,7 +14,7 @@ import { Send, ChevronDown, ChevronUp } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import AgentChat from "@/components/AgentChat";
-import { AGENT_OPTIONS, getSelectedAgentId } from "@/components/AgentPicker";
+import { AGENT_OPTIONS } from "@/components/AgentPicker";
 
 const MARCO_ICON = "/marco-icon.webp";
 
@@ -30,9 +30,11 @@ export default function MarcoBar({ tripId }: MarcoBarProps) {
   // Compact panel while the conversation is empty; full height once it isn't.
   const [chatEmpty, setChatEmpty] = useState(true);
 
+  // MarcoBar is Marco's dedicated surface: always the muse-spark agent,
+  // never the legacy mock-only "wander" assistant.
+  const agentId = "muse-spark";
   const agentName =
-    AGENT_OPTIONS.find((o) => o.id === getSelectedAgentId(tripId))?.name ??
-    "Marco";
+    AGENT_OPTIONS.find((o) => o.id === agentId)?.name ?? "Marco";
 
   const startChat = (e: FormEvent) => {
     e.preventDefault();
@@ -114,6 +116,7 @@ export default function MarcoBar({ tripId }: MarcoBarProps) {
             <AgentChat
               bare
               tripId={tripId}
+              agentId={agentId}
               initialMessage={seed}
               onInitialMessageConsumed={() => setSeed(null)}
               onEmptyChange={setChatEmpty}
