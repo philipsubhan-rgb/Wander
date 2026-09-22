@@ -14,6 +14,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { AGENT_OPTIONS, getSelectedAgentId } from "./AgentPicker";
 
 interface Message {
@@ -86,7 +88,21 @@ function useTypewriter(fullText: string, active: boolean) {
 
 function AssistantBubble({ content, streaming }: { content: string; streaming: boolean }) {
   const shown = useTypewriter(content, streaming);
-  return <div className="whitespace-pre-wrap text-sm">{shown}</div>;
+  return (
+    <div className="prose prose-sm max-w-none break-words text-sm dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-headings:mb-1 prose-headings:mt-3 prose-a:text-primary prose-a:underline prose-code:rounded prose-code:bg-background/60 prose-code:px-1 prose-code:py-0.5 prose-code:before:content-none prose-code:after:content-none">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          // Open links in a new tab — model output can include source URLs.
+          a: ({ node: _node, ...props }) => (
+            <a {...props} target="_blank" rel="noreferrer" />
+          ),
+        }}
+      >
+        {shown}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 export default function AgentChat({ tripId, agentId, initialMessage, onInitialMessageConsumed, bare, onEmptyChange }: AgentChatProps) {
