@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'wouter';
 import { useAuth } from '@/hooks/use-auth';
-import { Compass, Users, LogOut, Loader2, PlaneTakeoff, KeyRound } from 'lucide-react';
+import { Compass, Users, LogOut, Loader2, PlaneTakeoff, KeyRound, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -131,6 +131,7 @@ export function AppShell({ children }: AppShellProps) {
 
   const navItems = [
     { name: 'Trips', href: '/trips', icon: Compass },
+    { name: 'Settings', href: '/settings', icon: Settings },
     ...(isAdmin ? [{ name: 'Travelers', href: '/admin/users', icon: Users }] : []),
   ];
 

@@ -16,6 +16,7 @@ import searchRouter from "./search";
 import expensesRouter from "./expenses";
 import briefingsRouter from "./briefings";
 import agentRouter from "./agent";
+import integrationsRouter from "./integrations";
 
 const router: IRouter = Router();
 
@@ -36,5 +37,6 @@ router.use(searchRouter);
 router.use(expensesRouter);
 router.use(briefingsRouter);
 router.use(agentRouter);
+router.use(integrationsRouter);
 
 export default router;

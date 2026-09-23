@@ -12,3 +12,4 @@ export * from "./reservations";
 export * from "./expenses";
 export * from "./passwordResetTokens";
 export * from "./marcoMessages";
+export * from "./connectedAccounts";

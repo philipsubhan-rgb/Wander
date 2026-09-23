@@ -8,6 +8,7 @@ import TripsDashboard from '@/pages/trips';
 import AdminUsers from '@/pages/admin-users';
 import TripDetail from '@/pages/trip-detail';
 import TripGuide from '@/pages/trip-guide';
+import SettingsPage from '@/pages/settings';
 
 export default function Routes() {
   return (
@@ -55,6 +56,12 @@ export default function Routes() {
           <AppShell>
             <AdminUsers />
           </AppShell>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/settings">
+        <ProtectedRoute>
+          <SettingsPage />
         </ProtectedRoute>
       </Route>
 
