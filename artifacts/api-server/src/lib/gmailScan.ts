@@ -75,7 +75,8 @@ async function gmailFetch(client: OAuth2Client, path: string): Promise<any> {
 const BOOKING_QUERY = [
   "newer_than:30d",
   "(",
-  "subject:(confirmation OR booking OR reservation OR itinerary OR e-ticket)",
+  // Note: "e-ticket" must stay quoted — a bare hyphen reads as NOT in Gmail syntax.
+  'subject:(confirmation OR booking OR reservation OR itinerary OR "e-ticket")',
   "OR from:(getyourguide.com OR opentable.com OR resy.com OR united.com OR aa.com",
   "OR delta.com OR marriott.com OR hyatt.com OR airbnb.com OR vrbo.com OR sixt.com",
   "OR ticketmaster.com OR eventbrite.com)",
@@ -125,6 +126,7 @@ export async function scanGmail(
 ): Promise<ScanResult> {
   let messageIds: string[] = [];
   let historyId: string | undefined;
+  let historyUsable = false;
 
   if (lastHistoryId) {
     try {
@@ -138,19 +140,21 @@ export async function scanGmail(
           if (m.message?.id) messageIds.push(m.message.id);
         }
       }
+      // A valid history response with zero new messages is a real answer —
+      // do NOT fall through to a full 30-day search in that case.
+      historyUsable = true;
     } catch (err) {
       // History expired (Google keeps ~7 days) — fall back to a fresh search.
       logger.info({ err }, "[Gmail] historyId expired, falling back to search");
     }
   }
 
-  if (!lastHistoryId || messageIds.length === 0) {
+  if (!historyUsable) {
     const list = await gmailFetch(
       client,
       `/messages?q=${encodeURIComponent(BOOKING_QUERY)}&maxResults=25`,
     );
     messageIds = (list.messages ?? []).map((m: any) => m.id);
-    historyId = list.resultSizeEstimate !== undefined ? undefined : historyId;
   }
 
   // Always refresh the history watermark from the profile.

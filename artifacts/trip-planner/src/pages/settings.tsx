@@ -114,10 +114,16 @@ function AccountsSection() {
     setScanning(id);
     try {
       const data = await api(`/api/integrations/accounts/${id}/scan`, { method: "POST" });
+      const dupNote =
+        data.duplicatesSkipped > 0
+          ? ` (${data.duplicatesSkipped} duplicate${data.duplicatesSkipped === 1 ? "" : "s"} skipped)`
+          : "";
       toast.success(
         data.proposed > 0
-          ? `Found ${data.proposed} booking${data.proposed === 1 ? "" : "s"} — review them below`
-          : "Scan complete — no new bookings found",
+          ? `Found ${data.proposed} booking${data.proposed === 1 ? "" : "s"} — review them below${dupNote}`
+          : data.duplicatesSkipped > 0
+            ? "Scan complete — only duplicates found"
+            : "Scan complete — no new bookings found",
       );
       load();
       window.dispatchEvent(new CustomEvent("proposals:refresh"));

@@ -11,9 +11,8 @@
  * Nothing is auto-imported: every proposal needs an explicit accept.
  */
 
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import {
   db,
   tripsTable,
@@ -36,45 +35,16 @@ import {
   googleOAuthConfigured,
 } from "../lib/gmailScan";
 import { parseReservation } from "../lib/reservationParser";
+import {
+  newOAuthState,
+  verifyState,
+  matchTrip,
+  normalizeConfirmationCode,
+  isDuplicateConfirmationCode,
+  type MatchableTrip,
+} from "../lib/scanLogic";
 
 const router: IRouter = Router();
-
-// ---------------------------------------------------------------------------
-// OAuth state: HMAC-signed, stateless CSRF protection for the connect flow.
-// ---------------------------------------------------------------------------
-
-function stateSecret(): string {
-  const s = process.env.SESSION_SECRET;
-  if (!s) throw new Error("SESSION_SECRET is required for the Google OAuth flow");
-  return s;
-}
-
-interface OAuthState {
-  userId: number;
-  returnTo: string;
-  nonce: string;
-  exp: number;
-}
-
-function signState(state: OAuthState): string {
-  const payload = Buffer.from(JSON.stringify(state)).toString("base64url");
-  const sig = createHmac("sha256", stateSecret()).update(payload).digest("base64url");
-  return `${payload}.${sig}`;
-}
-
-function verifyState(raw: string): OAuthState | null {
-  try {
-    const [payload, sig] = raw.split(".");
-    if (!payload || !sig) return null;
-    const expected = createHmac("sha256", stateSecret()).update(payload).digest("base64url");
-    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
-    const state = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as OAuthState;
-    if (state.exp < Date.now()) return null;
-    return state;
-  } catch {
-    return null;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Google OAuth connect / callback
@@ -102,12 +72,10 @@ router.get("/integrations/google/connect", requireAuth, (req: Request, res: Resp
   const returnTo = typeof req.query.returnTo === "string" && req.query.returnTo.startsWith("/")
     ? req.query.returnTo
     : "/settings";
-  const state = signState({
+  const state = newOAuthState(
     userId,
     returnTo,
-    nonce: randomBytes(16).toString("hex"),
-    exp: Date.now() + 10 * 60 * 1000,
-  });
+  );
   res.redirect(getGoogleAuthUrl(state));
 });
 
@@ -223,13 +191,7 @@ router.delete("/integrations/accounts/:id", requireAuth, async (req: Request, re
 // Scan: find booking confirmations, parse them, store proposals.
 // ---------------------------------------------------------------------------
 
-interface UserTrip {
-  id: number;
-  startDate: string;
-  endDate: string;
-}
-
-async function loadUserTrips(userId: number): Promise<UserTrip[]> {
+async function loadUserTrips(userId: number): Promise<MatchableTrip[]> {
   const rows = await db
     .select({
       id: tripsTable.id,
@@ -242,11 +204,23 @@ async function loadUserTrips(userId: number): Promise<UserTrip[]> {
   return rows;
 }
 
-/** Match a parsed date against the user's trips; null when ambiguous. */
-function matchTrip(trips: UserTrip[], date?: string): number | null {
-  if (!date) return null;
-  const hits = trips.filter((t) => date >= t.startDate && date <= t.endDate);
-  return hits.length === 1 ? hits[0].id : null;
+/** Load confirmation codes already proposed for this account (dedup across scans). */
+async function loadSeenConfirmationCodes(userId: number, accountId: number): Promise<Set<string>> {
+  const rows = await db
+    .select({ code: sql<string | null>`${reservationProposalsTable.parsed}->>'confirmationCode'` })
+    .from(reservationProposalsTable)
+    .where(
+      and(
+        eq(reservationProposalsTable.userId, userId),
+        eq(reservationProposalsTable.accountId, accountId),
+      ),
+    );
+  return new Set(
+    rows
+      .map((r) => r.code)
+      .filter((c): c is string => Boolean(c))
+      .map(normalizeConfirmationCode),
+  );
 }
 
 router.post("/integrations/accounts/:id/scan", requireAuth, async (req: Request, res: Response) => {
@@ -269,13 +243,21 @@ router.post("/integrations/accounts/:id/scan", requireAuth, async (req: Request,
     const client = await getAccountClient(decryptToken(account.encryptedRefreshToken));
     const { emails, historyId } = await scanGmail(client, account.lastHistoryId);
     const trips = await loadUserTrips(userId);
+    const seenCodes = await loadSeenConfirmationCodes(userId, account.id);
 
     let proposed = 0;
+    let duplicatesSkipped = 0;
     for (const email of emails) {
       const parsed = parseReservation(email);
       if (!parsed) continue;
+      // Skip itinerary notifications / forwards that reference a booking we
+      // already proposed (e.g. TripIt duplicating a GetYourGuide email).
+      if (isDuplicateConfirmationCode(seenCodes, parsed.confirmationCode)) {
+        duplicatesSkipped++;
+        continue;
+      }
       const tripId = matchTrip(trips, parsed.date);
-      await db
+      const inserted = await db
         .insert(reservationProposalsTable)
         .values({
           userId,
@@ -290,8 +272,15 @@ router.post("/integrations/accounts/:id/scan", requireAuth, async (req: Request,
         })
         .onConflictDoNothing({
           target: [reservationProposalsTable.accountId, reservationProposalsTable.messageId],
-        });
-      proposed++;
+        })
+        .returning({ id: reservationProposalsTable.id });
+      if (inserted.length > 0) {
+        proposed++;
+        if (parsed.confirmationCode) seenCodes.add(normalizeConfirmationCode(parsed.confirmationCode));
+      } else {
+        // Same Gmail message scanned before (messageId dedup).
+        duplicatesSkipped++;
+      }
     }
 
     await db
@@ -299,8 +288,11 @@ router.post("/integrations/accounts/:id/scan", requireAuth, async (req: Request,
       .set({ lastHistoryId: historyId ?? account.lastHistoryId, lastScanAt: new Date() })
       .where(eq(connectedAccountsTable.id, account.id));
 
-    logger.info({ userId, accountId, scanned: emails.length, proposed }, "[Integrations] Gmail scan complete");
-    res.json({ scanned: emails.length, proposed });
+    logger.info(
+      { userId, accountId, scanned: emails.length, proposed, duplicatesSkipped },
+      "[Integrations] Gmail scan complete",
+    );
+    res.json({ scanned: emails.length, proposed, duplicatesSkipped });
   } catch (err) {
     logger.error({ userId, accountId, err }, "[Integrations] Gmail scan failed");
     const message = err instanceof Error ? err.message : "Scan failed";
