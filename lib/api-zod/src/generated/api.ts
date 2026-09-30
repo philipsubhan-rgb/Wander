@@ -744,16 +744,16 @@ export const CreateActivityParams = zod.object({
 
 export const CreateActivityBody = zod.object({
   "title": zod.string(),
-  "description": zod.string().optional(),
+  "description": zod.string().nullish(),
   "date": zod.string(),
-  "time": zod.string().optional(),
-  "location": zod.string().optional(),
-  "locationUrl": zod.string().optional(),
-  "lat": zod.number().optional(),
-  "lon": zod.number().optional(),
-  "imageUrl": zod.string().optional(),
+  "time": zod.string().nullish(),
+  "location": zod.string().nullish(),
+  "locationUrl": zod.string().nullish(),
+  "lat": zod.number().nullish(),
+  "lon": zod.number().nullish(),
+  "imageUrl": zod.string().nullish(),
   "type": zod.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().nullish()
 })
 
 export const CreateActivityResponse = zod.object({
@@ -780,16 +780,16 @@ export const UpdateActivityParams = zod.object({
 
 export const UpdateActivityBody = zod.object({
   "title": zod.string().optional(),
-  "description": zod.string().optional(),
+  "description": zod.string().nullish(),
   "date": zod.string().optional(),
-  "time": zod.string().optional(),
-  "location": zod.string().optional(),
-  "locationUrl": zod.string().optional(),
-  "lat": zod.number().optional(),
-  "lon": zod.number().optional(),
-  "imageUrl": zod.string().optional(),
+  "time": zod.string().nullish(),
+  "location": zod.string().nullish(),
+  "locationUrl": zod.string().nullish(),
+  "lat": zod.number().nullish(),
+  "lon": zod.number().nullish(),
+  "imageUrl": zod.string().nullish(),
   "type": zod.enum(['sightseeing', 'dining', 'adventure', 'culture', 'relaxation', 'transport', 'other']).optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().nullish()
 })
 
 export const UpdateActivityResponse = zod.object({
@@ -1283,19 +1283,19 @@ export const CreateReservationParams = zod.object({
 export const CreateReservationBody = zod.object({
   "type": zod.enum(['restaurant', 'attraction', 'tour', 'transport', 'event', 'spa', 'other']),
   "title": zod.string(),
-  "venue": zod.string().optional(),
-  "address": zod.string().optional(),
+  "venue": zod.string().nullish(),
+  "address": zod.string().nullish(),
   "date": zod.string(),
-  "time": zod.string().optional(),
-  "endTime": zod.string().optional(),
-  "confirmationCode": zod.string().optional(),
+  "time": zod.string().nullish(),
+  "endTime": zod.string().nullish(),
+  "confirmationCode": zod.string().nullish(),
   "numberOfPeople": zod.number().optional(),
-  "phone": zod.string().optional(),
-  "notes": zod.string().optional(),
-  "url": zod.string().optional(),
-  "imageUrl": zod.string().optional(),
-  "lat": zod.number().optional(),
-  "lon": zod.number().optional()
+  "phone": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "url": zod.string().nullish(),
+  "imageUrl": zod.string().nullish(),
+  "lat": zod.number().nullish(),
+  "lon": zod.number().nullish()
 })
 
 export const CreateReservationResponse = zod.object({
@@ -1327,19 +1327,19 @@ export const UpdateReservationParams = zod.object({
 export const UpdateReservationBody = zod.object({
   "type": zod.enum(['restaurant', 'attraction', 'tour', 'transport', 'event', 'spa', 'other']).optional(),
   "title": zod.string().optional(),
-  "venue": zod.string().optional(),
-  "address": zod.string().optional(),
+  "venue": zod.string().nullish(),
+  "address": zod.string().nullish(),
   "date": zod.string().optional(),
-  "time": zod.string().optional(),
-  "endTime": zod.string().optional(),
-  "confirmationCode": zod.string().optional(),
+  "time": zod.string().nullish(),
+  "endTime": zod.string().nullish(),
+  "confirmationCode": zod.string().nullish(),
   "numberOfPeople": zod.number().optional(),
-  "phone": zod.string().optional(),
-  "notes": zod.string().optional(),
-  "url": zod.string().optional(),
-  "imageUrl": zod.string().optional(),
-  "lat": zod.number().optional(),
-  "lon": zod.number().optional()
+  "phone": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "url": zod.string().nullish(),
+  "imageUrl": zod.string().nullish(),
+  "lat": zod.number().nullish(),
+  "lon": zod.number().nullish()
 })
 
 export const UpdateReservationResponse = zod.object({

@@ -10,17 +10,17 @@ import type { ReservationInputType } from './reservationInputType';
 export interface ReservationInput {
   type: ReservationInputType;
   title: string;
-  venue?: string;
-  address?: string;
+  venue?: string | null;
+  address?: string | null;
   date: string;
-  time?: string;
-  endTime?: string;
-  confirmationCode?: string;
+  time?: string | null;
+  endTime?: string | null;
+  confirmationCode?: string | null;
   numberOfPeople?: number;
-  phone?: string;
-  notes?: string;
-  url?: string;
-  imageUrl?: string;
-  lat?: number;
-  lon?: number;
+  phone?: string | null;
+  notes?: string | null;
+  url?: string | null;
+  imageUrl?: string | null;
+  lat?: number | null;
+  lon?: number | null;
 }

@@ -9,14 +9,14 @@ import type { ActivityUpdateType } from './activityUpdateType';
 
 export interface ActivityUpdate {
   title?: string;
-  description?: string;
+  description?: string | null;
   date?: string;
-  time?: string;
-  location?: string;
-  locationUrl?: string;
-  lat?: number;
-  lon?: number;
-  imageUrl?: string;
+  time?: string | null;
+  location?: string | null;
+  locationUrl?: string | null;
+  lat?: number | null;
+  lon?: number | null;
+  imageUrl?: string | null;
   type?: ActivityUpdateType;
-  notes?: string;
+  notes?: string | null;
 }

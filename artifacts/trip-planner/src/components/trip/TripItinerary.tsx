@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { format, parseISO, addDays } from 'date-fns';
+import { formatStoredTime } from '@/lib/activity-datetime';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -85,12 +86,6 @@ function isDraggable(e: TimelineEvent) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function to12h(time: string | null): string | null {
-  if (!time) return null;
-  const [h, m] = time.split(':').map(Number);
-  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
-}
-
 // ── Event row ─────────────────────────────────────────────────────────────────
 
 function EventRow({
@@ -112,7 +107,7 @@ function EventRow({
     });
   }, [event.id]);
 
-  const timeFmt = to12h(event.time);
+  const timeFmt = formatStoredTime(event.time);
 
   return (
     <div className="flex gap-3">

@@ -1,7 +1,7 @@
 import { useGetTripSummary, useGetTripTimeline, getGetTripTimelineQueryKey } from '@workspace/api-client-react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Calendar, Plane, Home, Compass, Users, CheckSquare, Car, UtensilsCrossed, GripVertical } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { formatStoredDate, formatStoredTime } from '@/lib/activity-datetime';
 import { fetchWikiImage } from '@/lib/wiki-image';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -236,6 +236,7 @@ function EventCard({
   dragStyle?: unknown;
   isDragging: boolean;
 }) {
+  const timeStr = formatStoredTime(event.time);
   return (
     <div className={`flex gap-4 w-full bg-card p-0 rounded-xl border shadow-sm overflow-hidden ${isDragging ? 'shadow-lg ring-2 ring-primary/30' : ''}`}>
       <EventThumbnail event={event} />
@@ -255,13 +256,13 @@ function EventCard({
               </button>
             )}
             <span className="text-xs font-medium text-muted-foreground whitespace-nowrap bg-muted px-2 py-1 rounded-md">
-              {format(parseISO(event.date), 'MMM d, yyyy')}
+              {formatStoredDate(event.date) ?? 'Date to be confirmed'}
             </span>
           </div>
         </div>
         {(event.time || event.location) && (
           <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-            {event.time && <span>{event.time}</span>}
+            {timeStr && <span>{timeStr}</span>}
             {event.location && <span className="truncate">{event.location}</span>}
           </div>
         )}

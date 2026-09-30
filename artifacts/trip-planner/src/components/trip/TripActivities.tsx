@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Compass, MapPin, Clock, Plus, Trash2, Pencil, Camera, CalendarDays, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { formatStoredDate, formatStoredTime } from '@/lib/activity-datetime';
 import { MiniMap } from './MiniMap';
 import { fetchWikiImage } from '@/lib/wiki-image';
 import { useAuth } from '@/hooks/use-auth';
@@ -249,10 +249,8 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
     (mapLat != null && mapLon != null ? `https://maps.google.com/?q=${mapLat},${mapLon}` : null) ||
     (activity.location ? `https://maps.google.com/?q=${encodeURIComponent(activity.location)}` : null);
 
-  const timeFmt = (t: string) => {
-    const [h, m] = t.split(':').map(Number);
-    return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
-  };
+  const dateStr = formatStoredDate(activity.date);
+  const timeStr = formatStoredTime(activity.time);
 
   return (
     <div className="bg-card border rounded-xl shadow-sm overflow-hidden relative group hover:border-primary/50 transition-colors">
@@ -312,12 +310,12 @@ function ActivityCard({ tripId, activity, editMode, tripStartDate, tripEndDate, 
         <div className="space-y-1.5 text-sm text-muted-foreground">
           <div className="flex items-center gap-2 text-foreground font-medium">
             <CalendarDays className="h-4 w-4 text-primary shrink-0" />
-            <span>{format(parseISO(activity.date), 'MMM d, yyyy')}</span>
-            {activity.time && (
+            <span>{dateStr ?? 'Date to be confirmed'}</span>
+            {timeStr && (
               <>
                 <span className="text-muted-foreground">·</span>
                 <Clock className="h-4 w-4 text-primary shrink-0" />
-                <span>{timeFmt(activity.time)}</span>
+                <span>{timeStr}</span>
               </>
             )}
           </div>
@@ -404,15 +402,19 @@ function ActivityForm({ tripId, activity, tripStartDate, tripEndDate, tripDestin
   });
 
   const onSubmit = (values: z.infer<typeof activitySchema>) => {
-    // Normalize optional fields: convert empty strings → undefined so the server
-    // doesn't overwrite nullable columns with empty text.
+    // Normalize optional fields: empty strings → explicit `null` so clears
+    // persist. (`undefined` keys are dropped from the JSON body and the API
+    // treats a missing key as "leave unchanged", so clearing a field would
+    // silently keep the old value.)
     const data = {
       ...values,
-      time:        values.time        || undefined,
-      description: values.description || undefined,
-      location:    values.location    || undefined,
-      locationUrl: values.locationUrl || undefined,
-      imageUrl:    values.imageUrl    || undefined,
+      time:        values.time        || null,
+      description: values.description || null,
+      location:    values.location    || null,
+      locationUrl: values.locationUrl || null,
+      imageUrl:    values.imageUrl    || null,
+      lat:         values.lat         ?? null,
+      lon:         values.lon         ?? null,
     };
     if (activity) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

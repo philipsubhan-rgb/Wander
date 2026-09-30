@@ -499,16 +499,16 @@ export const ActivityInputType = {
 
 export interface ActivityInput {
   title: string;
-  description?: string;
+  description?: string | null;
   date: string;
-  time?: string;
-  location?: string;
-  locationUrl?: string;
-  lat?: number;
-  lon?: number;
-  imageUrl?: string;
+  time?: string | null;
+  location?: string | null;
+  locationUrl?: string | null;
+  lat?: number | null;
+  lon?: number | null;
+  imageUrl?: string | null;
   type?: ActivityInputType;
-  notes?: string;
+  notes?: string | null;
 }
 
 export type ActivityUpdateType = typeof ActivityUpdateType[keyof typeof ActivityUpdateType];
@@ -526,16 +526,16 @@ export const ActivityUpdateType = {
 
 export interface ActivityUpdate {
   title?: string;
-  description?: string;
+  description?: string | null;
   date?: string;
-  time?: string;
-  location?: string;
-  locationUrl?: string;
-  lat?: number;
-  lon?: number;
-  imageUrl?: string;
+  time?: string | null;
+  location?: string | null;
+  locationUrl?: string | null;
+  lat?: number | null;
+  lon?: number | null;
+  imageUrl?: string | null;
   type?: ActivityUpdateType;
-  notes?: string;
+  notes?: string | null;
 }
 
 export interface ItineraryDay {
@@ -861,19 +861,19 @@ export const ReservationInputType = {
 export interface ReservationInput {
   type: ReservationInputType;
   title: string;
-  venue?: string;
-  address?: string;
+  venue?: string | null;
+  address?: string | null;
   date: string;
-  time?: string;
-  endTime?: string;
-  confirmationCode?: string;
+  time?: string | null;
+  endTime?: string | null;
+  confirmationCode?: string | null;
   numberOfPeople?: number;
-  phone?: string;
-  notes?: string;
-  url?: string;
-  imageUrl?: string;
-  lat?: number;
-  lon?: number;
+  phone?: string | null;
+  notes?: string | null;
+  url?: string | null;
+  imageUrl?: string | null;
+  lat?: number | null;
+  lon?: number | null;
 }
 
 export type ReservationUpdateType = typeof ReservationUpdateType[keyof typeof ReservationUpdateType];
@@ -892,19 +892,19 @@ export const ReservationUpdateType = {
 export interface ReservationUpdate {
   type?: ReservationUpdateType;
   title?: string;
-  venue?: string;
-  address?: string;
+  venue?: string | null;
+  address?: string | null;
   date?: string;
-  time?: string;
-  endTime?: string;
-  confirmationCode?: string;
+  time?: string | null;
+  endTime?: string | null;
+  confirmationCode?: string | null;
   numberOfPeople?: number;
-  phone?: string;
-  notes?: string;
-  url?: string;
-  imageUrl?: string;
-  lat?: number;
-  lon?: number;
+  phone?: string | null;
+  notes?: string | null;
+  url?: string | null;
+  imageUrl?: string | null;
+  lat?: number | null;
+  lon?: number | null;
 }
 
 export interface ExpenseSplit {

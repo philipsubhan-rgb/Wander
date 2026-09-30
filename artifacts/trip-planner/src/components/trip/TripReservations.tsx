@@ -4,7 +4,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { format, parseISO } from 'date-fns';
+import { formatStoredDate, formatStoredTime } from '@/lib/activity-datetime';
+import { buildReservationPayload } from '@/lib/reservation-payload';
 import {
   UtensilsCrossed, Landmark, Map, Train, Ticket, Sparkles, ClipboardList,
   MapPin, Phone, Clock, ExternalLink, Plus, Pencil, Camera, Trash2, Users, BookMarked,
@@ -174,16 +175,10 @@ function ReservationCard({ tripId, res, editMode }: { tripId: number; res: any; 
   const meta = TYPE_META[res.type as ResType] ?? TYPE_META.other;
   const Icon = meta.icon;
 
-  const timeFmt = (t: string | null) => {
-    if (!t) return null;
-    const [h, m] = t.split(':').map(Number);
-    return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
-  };
-
   const timeStr = res.time
     ? res.endTime
-      ? `${timeFmt(res.time)} – ${timeFmt(res.endTime)}`
-      : timeFmt(res.time)
+      ? `${formatStoredTime(res.time)} – ${formatStoredTime(res.endTime)}`
+      : formatStoredTime(res.time)
     : null;
 
   const mapsUrl = res.lat && res.lon
@@ -271,7 +266,7 @@ function ReservationCard({ tripId, res, editMode }: { tripId: number; res: any; 
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
           <span className="font-medium text-foreground">
-            {format(parseISO(res.date), 'EEE, MMM d, yyyy')}
+            {formatStoredDate(res.date, 'EEE, MMM d, yyyy') ?? 'Date to be confirmed'}
           </span>
           {timeStr && (
             <>
@@ -400,18 +395,7 @@ function ReservationForm({
   );
 
   const onSubmit = (values: z.infer<typeof schema>) => {
-    const payload = {
-      ...values,
-      time:             values.time             || undefined,
-      endTime:          values.endTime          || undefined,
-      confirmationCode: values.confirmationCode || undefined,
-      phone:            values.phone            || undefined,
-      notes:            values.notes            || undefined,
-      url:              values.url              || undefined,
-      imageUrl:         values.imageUrl         || undefined,
-      venue:            values.venue            || undefined,
-      address:          values.address          || undefined,
-    };
+    const payload = buildReservationPayload(values);
     const opts = {
       onSuccess: () => {
         toast.success(reservation ? 'Updated' : 'Reservation added');
@@ -699,7 +683,7 @@ export function TripReservations({
             <div className="h-px flex-1 bg-border" />
             <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground px-2">
               <CalendarDays className="h-4 w-4" />
-              {format(parseISO(date), 'EEEE, MMMM d, yyyy')}
+              {formatStoredDate(date, 'EEEE, MMMM d, yyyy') ?? date}
             </div>
             <div className="h-px flex-1 bg-border" />
           </div>

@@ -107,4 +107,36 @@ describe('TripActivities cards', () => {
     expect(() => rerender(<TripActivities tripId={7} />)).not.toThrow();
     expect(screen.getAllByText('Coco Bistro, Grace Bay').length).toBeGreaterThan(0);
   });
+
+  it('renders date, time and location for legacy non-ISO stored shapes', () => {
+    // Legacy TEXT-column rows can hold "05/12/2027" dates and "2:45 PM"
+    // times. The card must show every stored field: previously
+    // `format(parseISO(...))` threw on the date (tearing down the tab) and
+    // the naive time formatter rendered "2:NaN AM" for 12-hour times.
+    activityData.current = [
+      {
+        id: 3,
+        tripId: 7,
+        title: 'Project Chocolat',
+        description: null,
+        date: '05/12/2027',
+        time: '2:45 PM',
+        location: 'Grace Bay Road',
+        lat: null,
+        lon: null,
+        imageUrl: null,
+        locationUrl: null,
+        type: 'sightseeing',
+        notes: null,
+        sortOrder: null,
+      },
+    ];
+    expect(() => render(<TripActivities tripId={7} />)).not.toThrow();
+    expect(screen.getByText('Project Chocolat')).toBeTruthy();
+    expect(screen.getByText('May 12, 2027')).toBeTruthy();
+    expect(screen.getByText('2:45 PM')).toBeTruthy();
+    expect(screen.getByText('Grace Bay Road')).toBeTruthy();
+    // No NaN garbage anywhere on the card.
+    expect(screen.queryByText(/NaN/)).toBeNull();
+  });
 });

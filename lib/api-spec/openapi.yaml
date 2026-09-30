@@ -2172,25 +2172,33 @@ components:
           type: string
         description:
           type: string
+          nullable: true
         date:
           type: string
         time:
           type: string
+          nullable: true
         location:
           type: string
+          nullable: true
         locationUrl:
           type: string
+          nullable: true
         lat:
           type: number
+          nullable: true
         lon:
           type: number
+          nullable: true
         imageUrl:
           type: string
+          nullable: true
         type:
           type: string
           enum: [sightseeing, dining, adventure, culture, relaxation, transport, other]
         notes:
           type: string
+          nullable: true
 
     ActivityUpdate:
       type: object
@@ -2199,25 +2207,33 @@ components:
           type: string
         description:
           type: string
+          nullable: true
         date:
           type: string
         time:
           type: string
+          nullable: true
         location:
           type: string
+          nullable: true
         locationUrl:
           type: string
+          nullable: true
         lat:
           type: number
+          nullable: true
         lon:
           type: number
+          nullable: true
         imageUrl:
           type: string
+          nullable: true
         type:
           type: string
           enum: [sightseeing, dining, adventure, culture, relaxation, transport, other]
         notes:
           type: string
+          nullable: true
 
     ItineraryDay:
       type: object
@@ -2574,30 +2590,41 @@ components:
           type: string
         venue:
           type: string
+          nullable: true
         address:
           type: string
+          nullable: true
         date:
           type: string
         time:
           type: string
+          nullable: true
         endTime:
           type: string
+          nullable: true
         confirmationCode:
           type: string
+          nullable: true
         numberOfPeople:
           type: integer
         phone:
           type: string
+          nullable: true
         notes:
           type: string
+          nullable: true
         url:
           type: string
+          nullable: true
         imageUrl:
           type: string
+          nullable: true
         lat:
           type: number
+          nullable: true
         lon:
           type: number
+          nullable: true
 
     ReservationUpdate:
       type: object
@@ -2609,30 +2636,41 @@ components:
           type: string
         venue:
           type: string
+          nullable: true
         address:
           type: string
+          nullable: true
         date:
           type: string
         time:
           type: string
+          nullable: true
         endTime:
           type: string
+          nullable: true
         confirmationCode:
           type: string
+          nullable: true
         numberOfPeople:
           type: integer
         phone:
           type: string
+          nullable: true
         notes:
           type: string
+          nullable: true
         url:
           type: string
+          nullable: true
         imageUrl:
           type: string
+          nullable: true
         lat:
           type: number
+          nullable: true
         lon:
           type: number
+          nullable: true
 
     ExpenseSplit:
       type: object
