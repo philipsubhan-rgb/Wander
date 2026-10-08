@@ -545,7 +545,7 @@ export function TripTravelers({ tripId }: { tripId: number }) {
                     variant="ghost"
                     size="icon"
                     onClick={() => setEditTarget({ id: user.id, name: user.name, email: (user as any).email ?? null, role: user.role })}
-                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                    className="h-11 w-11 md:h-8 md:w-8 text-muted-foreground hover:text-foreground"
                     title="Edit traveler"
                   >
                     <Pencil className="h-4 w-4" />
@@ -555,7 +555,7 @@ export function TripTravelers({ tripId }: { tripId: number }) {
                     size="icon"
                     onClick={() => handleToggleTripAdmin(user.id, isTripAdmin)}
                     disabled={togglingAdminId === user.id}
-                    className={`h-8 w-8 ${isTripAdmin ? 'text-amber-500 hover:text-amber-600' : 'text-muted-foreground hover:text-amber-500'}`}
+                    className={`h-11 w-11 md:h-8 md:w-8 ${isTripAdmin ? 'text-amber-500 hover:text-amber-600' : 'text-muted-foreground hover:text-amber-500'}`}
                     title={isTripAdmin ? 'Remove trip admin role' : 'Make trip admin'}
                   >
                     {togglingAdminId === user.id
@@ -566,7 +566,7 @@ export function TripTravelers({ tripId }: { tripId: number }) {
                     variant="ghost"
                     size="icon"
                     onClick={() => setRemoveWarning({ userId: user.id, name: user.name })}
-                    className="h-8 w-8 text-destructive/60 hover:text-destructive"
+                    className="h-11 w-11 md:h-8 md:w-8 text-destructive/60 hover:text-destructive"
                     title="Remove from trip"
                   >
                     <Trash2 className="h-4 w-4" />

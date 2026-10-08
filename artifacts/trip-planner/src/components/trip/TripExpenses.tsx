@@ -307,7 +307,7 @@ function ExpenseCard({
           </div>
           <span className={`text-xs font-semibold uppercase tracking-wide ${meta.color}`}>{meta.label}</span>
         </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
           <Dialog open={editOpen} onOpenChange={setEditOpen}>
             <DialogTrigger asChild>
               <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/60">

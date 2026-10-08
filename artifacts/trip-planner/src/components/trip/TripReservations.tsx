@@ -242,7 +242,7 @@ function ReservationCard({ tripId, res, editMode }: { tripId: number; res: any; 
                 )}
               </DialogContent>
             </Dialog>
-            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="absolute top-2 right-2 flex gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
               <Button variant="secondary" size="icon" onClick={() => setCardDialog('edit')} className="h-7 w-7 bg-white/90 hover:bg-white text-foreground shadow">
                 <Pencil className="h-3 w-3" />
               </Button>

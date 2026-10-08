@@ -61,7 +61,7 @@ export default function TripsDashboard() {
     <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-10">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-serif font-bold text-foreground">Your Journeys</h1>
+          <h1 className="text-3xl md:text-4xl font-serif font-bold text-foreground">Your Journeys</h1>
           <p className="text-muted-foreground mt-2 text-lg">Where to next?</p>
         </div>
 

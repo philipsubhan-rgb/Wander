@@ -1024,14 +1024,14 @@ export function TripSettings({ trip }: { trip: any }) {
                       size="icon"
                       onClick={() => handleToggleTripAdmin(user.id, isTripAdmin)}
                       disabled={togglingAdminId === user.id}
-                      className={`h-8 w-8 ${isTripAdmin ? 'text-amber-500 hover:text-amber-600' : 'text-muted-foreground hover:text-amber-500'}`}
+                      className={`h-11 w-11 md:h-8 md:w-8 ${isTripAdmin ? 'text-amber-500 hover:text-amber-600' : 'text-muted-foreground hover:text-amber-500'}`}
                       title={isTripAdmin ? 'Remove trip admin role' : 'Make trip admin'}
                     >
                       {togglingAdminId === user.id
                         ? <span className="h-3 w-3 animate-spin inline-block border-2 border-current border-t-transparent rounded-full" />
                         : <Crown className="h-4 w-4" />}
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleRemoveParticipant(user.id, user.name)} className="h-8 w-8 text-destructive hover:text-destructive">
+                    <Button variant="ghost" size="icon" onClick={() => handleRemoveParticipant(user.id, user.name)} className="h-11 w-11 md:h-8 md:w-8 text-destructive hover:text-destructive">
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
