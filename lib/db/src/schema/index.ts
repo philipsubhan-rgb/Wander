@@ -20,3 +20,4 @@ export * from "./profileAccessLog";
 export * from "./travelerContext";
 export * from "./connectedAccounts";
 export * from "./fxRateSnapshots";
+export * from "./flightWatches";
