@@ -272,6 +272,12 @@ export class OptionCache {
     this.entries.set(key, { options, pricedAt, storedAtMs: this.now() });
   }
 
+  /** Every cached entry — the Booking Gate resolves a presented option
+   * by its adapter-scoped id from what searches actually produced. */
+  values(): CacheEntry[] {
+    return [...this.entries.values()];
+  }
+
   clear(): void {
     this.entries.clear();
   }

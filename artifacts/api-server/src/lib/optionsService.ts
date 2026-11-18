@@ -203,6 +203,23 @@ export class OptionsService {
     });
   }
 
+  /**
+   * Resolve a previously presented option by its adapter-scoped id,
+   * from the shared cache (the Booking Gate's present step, §5.2).
+   * Returns null when the option is no longer in any cached set — the
+   * caller then asks for a fresh search rather than booking from
+   * memory. Stale entries still resolve: the gate re-verifies live
+   * before anything is confirmed, which is the freshness guarantee
+   * that matters (§8).
+   */
+  findCachedOption(optionId: string): WanderOption | null {
+    for (const entry of this.deps.cache.values()) {
+      const found = entry.options.find((o) => o.id === optionId);
+      if (found) return found;
+    }
+    return null;
+  }
+
   async searchStays(
     userId: number,
     ctx: StaySearchContext,
