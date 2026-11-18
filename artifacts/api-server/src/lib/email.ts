@@ -83,6 +83,46 @@ export async function sendPasswordResetEmail(opts: {
   }
 }
 
+/**
+ * Generic single-recipient email. Same contract as the specialized
+ * senders: returns `{ sent: false }` (never throws) when SMTP is not
+ * configured or the send fails, so callers that must react to a failed
+ * send (outreach marks the roster entry needs_attention) can check the
+ * result. Callers are responsible for never putting secrets in the body.
+ */
+export async function sendEmail(opts: {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+}): Promise<SendResult> {
+  const { to, subject, text, html } = opts;
+
+  const transport = buildTransport();
+
+  if (!transport) {
+    logger.info(
+      { to },
+      "SMTP not configured — email not sent; configure SMTP vars to enable sending"
+    );
+    return { sent: false };
+  }
+
+  try {
+    await transport.sendMail({
+      from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+      to,
+      subject,
+      text,
+      html,
+    });
+    return { sent: true };
+  } catch (err) {
+    logger.error({ err, to }, "Failed to send email");
+    return { sent: false };
+  }
+}
+
 export async function sendWelcomeEmail(opts: {
   to: string;
   name: string;
