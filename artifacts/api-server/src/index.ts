@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { startBriefingScheduler } from "./lib/briefingScheduler";
 import { startOutreachScheduler } from "./lib/outreachScheduler";
+import { startWatchingScheduler } from "./lib/watchingScheduler";
 import { pool } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
@@ -47,6 +48,11 @@ app.listen(port, (err) => {
   // Start the hourly outreach chase scheduler (no immediate tick on boot).
   startOutreachScheduler();
   logger.info("Outreach chase scheduler started");
+
+  // Start the daily watching tick: registration sweep, the single T-24h
+  // lookup per leg, and alert deregistration for finished trips.
+  startWatchingScheduler();
+  logger.info("Watching scheduler started");
 
   // Do not block the HTTP startup probe on a database connection. Production
   // databases can take time to become reachable while an autoscale instance is

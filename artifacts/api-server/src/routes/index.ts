@@ -19,6 +19,7 @@ import agentRouter from "./agent";
 import integrationsRouter from "./integrations";
 import outreachRouter from "./outreach";
 import profilesRouter from "./profiles";
+import watchingRouter from "./watching";
 
 const router: IRouter = Router();
 
@@ -42,5 +43,6 @@ router.use(agentRouter);
 router.use(integrationsRouter);
 router.use(outreachRouter);
 router.use(profilesRouter);
+router.use(watchingRouter);
 
 export default router;
