@@ -59,6 +59,7 @@ import { CONTEXT_TOOLS, getContextToolDefinition } from "../lib/agentContextTool
 import { OPTIONS_TOOLS, getOptionsToolDefinition } from "../lib/agentOptionsTools";
 import { EXTRAS_TOOLS, getExtrasToolDefinition } from "../lib/agentExtrasTools";
 import { BOOKING_TOOLS, getBookingToolDefinition } from "../lib/agentBookingTools";
+import { CALL_TOOLS, getCallToolDefinition } from "../lib/agentCallTools";
 import {
   assertIntakeAccess,
   createIntakeSession,
@@ -504,7 +505,7 @@ async function callModelApiStream(
 // Options tools ride along too (§5.1): pricing a leg the traveler is
 // talking about is not trip-shaped either — intake prices the trip it
 // is forming; a trip conversation prices its changes.
-const TOOL_DEFINITIONS = [...AGENT_TOOLS, ...AGENT_RESEARCH_TOOLS, ...CONTEXT_TOOLS, ...OPTIONS_TOOLS, ...EXTRAS_TOOLS, ...BOOKING_TOOLS];
+const TOOL_DEFINITIONS = [...AGENT_TOOLS, ...AGENT_RESEARCH_TOOLS, ...CONTEXT_TOOLS, ...OPTIONS_TOOLS, ...EXTRAS_TOOLS, ...BOOKING_TOOLS, ...CALL_TOOLS];
 
 /** Why the tool loop ended without a usable final answer. */
 export type StuckReason = "duplicate_tool_call" | "iteration_exhausted" | "no_final_text";
@@ -625,6 +626,11 @@ const TOOL_STATUS_TEXT: Record<string, string> = {
   intake_get_review: "Putting together your summary…",
   intake_confirm: "Creating your trip…",
   options_search_flights: "Searching live flight prices…",
+  call_prepare_brief: "Preparing the call brief…",
+  call_present_brief: "Reviewing the call brief…",
+  call_confirm_brief: "Confirming the call brief…",
+  call_place: "Placing the call…",
+  call_status: "Checking the call outcome…",
 };
 
 function statusForTools(toolCalls: ToolCall[]): string {
@@ -842,7 +848,8 @@ async function runAgentLoop(
               getContextToolDefinition(name) ??
               getOptionsToolDefinition(name) ??
               getExtrasToolDefinition(name) ??
-              getBookingToolDefinition(name));
+              getBookingToolDefinition(name) ??
+              getCallToolDefinition(name));
 
         let toolResult: { ok: boolean; text: string; data?: unknown };
         if (!accessOk) {
