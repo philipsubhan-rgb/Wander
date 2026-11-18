@@ -626,25 +626,28 @@ function submissionToProfileInput(sub: TravelerProfileSubmission): TravelerProfi
   return input;
 }
 
-/**
- * Resolve the traveler's user record: an existing account with this
- * email is claimed (linked), otherwise one is created silently behind
- * the profile (§3.4). A created account's password hash is of a random
- * secret that is hashed and discarded — the account cannot be logged
- * into until the traveler claims it via the password-reset flow (the
- * Story 4.3 "offer afterward"). No login flow is built here.
- */
-async function findOrCreateTravelerUser(
-  email: string,
-  displayName: string,
-): Promise<UserRow> {
+/** Look up an account by email (normalized). Never creates anything. */
+async function findTravelerUserByEmail(email: string): Promise<UserRow | null> {
   const normalizedEmail = email.trim().toLowerCase();
   const [existing] = await db
     .select()
     .from(usersTable)
     .where(eq(usersTable.email, normalizedEmail));
-  if (existing) return existing;
+  return existing ?? null;
+}
 
+/**
+ * Create the traveler's user record silently behind the profile (§3.4).
+ * The password hash is of a random secret that is hashed and discarded —
+ * the account cannot be logged into until the traveler claims it via
+ * the password-reset flow (the Story 4.3 "offer afterward"). No login
+ * flow is built here.
+ */
+async function createTravelerUser(
+  email: string,
+  displayName: string,
+): Promise<UserRow> {
+  const normalizedEmail = email.trim().toLowerCase();
   const passwordHash = await bcrypt.hash(randomBytes(32).toString("hex"), 10);
   await db.insert(usersTable).values({
     username: `traveler-${randomBytes(6).toString("hex")}`,
@@ -660,6 +663,22 @@ async function findOrCreateTravelerUser(
   if (!created) throw new Error("Failed to create the traveler's user record.");
   logger.info({ userId: created.id }, "[Outreach] silent user record created for traveler profile");
   return created;
+}
+
+/**
+ * Resolve the traveler's user record for an EMAILED invite: the
+ * organizer supplied the invited email, so it binds the account — an
+ * existing account with this email is claimed (linked), otherwise one
+ * is created (§3.4). The share-link path must NOT use this (see
+ * submitTravelerProfile): there the email comes from the unauthenticated
+ * submit body, so resolving to an existing account would let a token
+ * holder write into a stranger's vault (QA finding F-2).
+ */
+async function findOrCreateTravelerUser(
+  email: string,
+  displayName: string,
+): Promise<UserRow> {
+  return (await findTravelerUserByEmail(email)) ?? (await createTravelerUser(email, displayName));
 }
 
 export interface SubmitProfileResult {
@@ -739,21 +758,40 @@ export async function submitTravelerProfile(
   // (upsertProfile validates again at the vault boundary.)
   validateProfileInput(submissionToProfileInput(submission), now);
 
-  // Resolve whose profile this is. A linked entry already knows; an
-  // emailed entry resolves by its invited email; a hand-delivered share
-  // link relies on the email the traveler provides in the submission.
+  // Resolve whose profile this is. A linked entry already knows. An
+  // emailed entry resolves by its invited email — the organizer supplied
+  // it, so it binds the account (an existing account is claimed, §3.4).
+  // A hand-delivered SHARE LINK is different: the entry has no invited
+  // email, so the address comes from the unauthenticated submit body.
+  // That path is CREATE-ONLY (QA finding F-2): resolving to an existing
+  // account there would let anyone holding the link overwrite that
+  // account's vault profile and link this entry to it. If the address
+  // already belongs to an account, reject and write nothing — the
+  // traveler asks the organizer to send the invite to that address,
+  // which binds the account properly.
   let userId = entry.userId;
   let entryEmail = entry.invitedEmail;
   if (userId === null) {
-    const email = entry.invitedEmail ?? submission.email?.trim();
-    if (!email) {
-      throw new ProfileValidationError([
-        "an email address is required to save your details",
-      ]);
+    if (entry.invitedEmail !== null) {
+      const user = await findOrCreateTravelerUser(entry.invitedEmail, entry.invitedName);
+      userId = user.id;
+      entryEmail = entry.invitedEmail.trim().toLowerCase();
+    } else {
+      const email = submission.email?.trim();
+      if (!email) {
+        throw new ProfileValidationError([
+          "an email address is required to save your details",
+        ]);
+      }
+      if (await findTravelerUserByEmail(email)) {
+        throw new ProfileValidationError([
+          "we can't save details under this email address from a shared link — ask the organizer to send the invitation to this email address instead, then use that link",
+        ]);
+      }
+      const user = await createTravelerUser(email, entry.invitedName);
+      userId = user.id;
+      entryEmail = email.trim().toLowerCase();
     }
-    const user = await findOrCreateTravelerUser(email, entry.invitedName);
-    userId = user.id;
-    entryEmail = email.trim().toLowerCase();
   }
 
   const { profileVersion, warnings } = await upsertProfile(

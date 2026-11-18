@@ -559,6 +559,55 @@ describe("traveler setup seam", () => {
     expect(store.ops.filter((o) => o.op !== "select")).toHaveLength(0);
   });
 
+  // ── F-2 (QA vault attack pass): the share-link path is create-only ────
+  // A share-link entry has no invited email, so the submit body supplies
+  // the address. It must NEVER resolve to an existing account: before
+  // the fix, naming a victim's email made the unauthenticated submit
+  // overwrite the victim's vault profile and link the entry to them.
+
+  it("F-2 attack: a share-link submit naming an EXISTING user's email is rejected and writes nothing", async () => {
+    queue("traveler_invite_tokens", [tokenRow]);
+    queue("trip_roster_entries", [
+      entryRow({ invitedEmail: null, invitedName: "Share Link Guest", status: "setting_up" }),
+    ]);
+    // The address belongs to an existing account (the victim, id 77).
+    queue("users", [{ id: 77, name: "Victim", email: "victim@example.com" }]);
+
+    await expect(
+      submitTravelerProfile(
+        "raw-token",
+        { email: "victim@example.com", passportNumber: "ATTACKER-PASS-1" },
+        NOW,
+      ),
+    ).rejects.toBeInstanceOf(ProfileValidationError);
+
+    // Nothing was written anywhere: no vault insert/update against the
+    // victim's profile, no user created, no roster link, token unconsumed.
+    expect(store.ops.filter((o) => o.op !== "select")).toHaveLength(0);
+    expect(inserts("users")).toHaveLength(0);
+    expect(inserts("traveler_profiles")).toHaveLength(0);
+  });
+
+  it("F-2: the legitimate share-link flow still works — a NEW email creates the traveler and lands ready", async () => {
+    queueNewUserSubmit(
+      entryRow({ invitedEmail: null, invitedName: "Share Link Guest", status: "setting_up" }),
+    );
+    queue("trip_participants", []); // ensure: not a participant yet
+    const result = await submitTravelerProfile(
+      "raw-token",
+      { email: "guest@example.com", passportNumber: "XUK1234567" },
+      NOW,
+    );
+    expect(result.userId).toBe(77);
+    expect(result.status).toBe("ready");
+    // The silent account was created under the traveler-supplied address…
+    expect(inserts("users")).toHaveLength(1);
+    // …and the entry records that address as its invited email on link.
+    const link = entryUpdates()[0];
+    expect(link.userId).toBe(77);
+    expect(link.invitedEmail).toBe("guest@example.com");
+  });
+
   it("decline: consumes the token, marks declined, stops the chase clock", async () => {
     queue("traveler_invite_tokens", [tokenRow]);
     queue("trip_roster_entries", [
