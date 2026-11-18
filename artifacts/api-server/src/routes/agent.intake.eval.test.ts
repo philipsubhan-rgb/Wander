@@ -344,7 +344,7 @@ describe("intake rung 1 — conversational planner intake", () => {
     expect(toolNames.length).toBeGreaterThan(0);
     expect(
       toolNames.every(
-        (n) => n.startsWith("intake_") || n.startsWith("context_") || n.startsWith("options_"),
+        (n) => n.startsWith("intake_") || n.startsWith("context_") || n.startsWith("options_") || n.startsWith("extras_"),
       ),
     ).toBe(true);
   });
