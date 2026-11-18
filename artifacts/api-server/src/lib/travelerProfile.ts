@@ -23,7 +23,10 @@
  *
  * Every decrypt writes a `profile_access_log` row in the same
  * transaction (field NAMES only — never values). Derived checks log too,
- * naming the fields whose presence/plaintext was consulted.
+ * naming every field whose presence/plaintext was consulted, and the
+ * authorized-use read path (readProfileFields) logs every field it
+ * returns a stored value for, plaintext fields included — so the
+ * owner's log shows every touch (QA findings F-3/F-4).
  */
 
 import { and, desc, eq, inArray } from "drizzle-orm";
@@ -352,28 +355,45 @@ export async function getOwnAccessLog(
 function decryptRowFields(
   row: TravelerProfile,
   fields: readonly ProfileFieldName[],
-): { values: Partial<Record<ProfileFieldName, string | EmergencyContact | null>>; decrypted: ProfileFieldName[] } {
+): {
+  values: Partial<Record<ProfileFieldName, string | EmergencyContact | null>>;
+  /** Fields that were actually decrypted. */
+  decrypted: ProfileFieldName[];
+  /**
+   * Every field whose stored value was read — decrypted fields plus
+   * plaintext fields holding a value. This is the access log's "touch"
+   * set for the authorized-use door (QA finding F-4).
+   */
+  accessed: ProfileFieldName[];
+} {
   const values: Partial<Record<ProfileFieldName, string | EmergencyContact | null>> = {};
   const decrypted: ProfileFieldName[] = [];
+  const accessed: ProfileFieldName[] = [];
+  const readPlaintext = (field: ProfileFieldName, v: string | null): void => {
+    values[field] = v;
+    if (v !== null && v.trim() !== "") accessed.push(field);
+  };
   for (const field of fields) {
     switch (field) {
-      case "legal_first_name": values[field] = row.legalFirstName; break;
-      case "legal_middle_name": values[field] = row.legalMiddleName; break;
-      case "legal_last_name": values[field] = row.legalLastName; break;
-      case "passport_issuing_country": values[field] = row.passportIssuingCountry; break;
-      case "passport_expiry": values[field] = row.passportExpiry; break;
-      case "nationality": values[field] = row.nationality; break;
-      case "phone": values[field] = row.phone; break;
+      case "legal_first_name": readPlaintext(field, row.legalFirstName); break;
+      case "legal_middle_name": readPlaintext(field, row.legalMiddleName); break;
+      case "legal_last_name": readPlaintext(field, row.legalLastName); break;
+      case "passport_issuing_country": readPlaintext(field, row.passportIssuingCountry); break;
+      case "passport_expiry": readPlaintext(field, row.passportExpiry); break;
+      case "nationality": readPlaintext(field, row.nationality); break;
+      case "phone": readPlaintext(field, row.phone); break;
       case "date_of_birth":
         if (row.dateOfBirthEnc !== null) {
           values[field] = decryptProfileField(row.userId, "date_of_birth", row.dateOfBirthEnc);
           decrypted.push(field);
+          accessed.push(field);
         } else values[field] = null;
         break;
       case "passport_number":
         if (row.passportNumberEnc !== null) {
           values[field] = decryptProfileField(row.userId, "passport_number", row.passportNumberEnc);
           decrypted.push(field);
+          accessed.push(field);
         } else values[field] = null;
         break;
       case "emergency_contact":
@@ -381,21 +401,24 @@ function decryptRowFields(
           const raw = decryptProfileField(row.userId, "emergency_contact", row.emergencyContactEnc);
           values[field] = JSON.parse(raw) as EmergencyContact;
           decrypted.push(field);
+          accessed.push(field);
         } else values[field] = null;
         break;
     }
   }
-  return { values, decrypted };
+  return { values, decrypted, accessed };
 }
 
 /**
- * The authorized-use decrypt path — the ONLY way any non-owner flow can
+ * The authorized-use read path — the ONLY way any non-owner flow can
  * obtain plaintext profile values (e.g. the booking gate supplying a
  * passport number to a booking the traveler is part of, Story 5.2).
- * Decrypts exactly the requested fields, and writes the access-log row
- * in the same transaction: a decrypt that isn't logged doesn't happen.
- * No route exposes this directly; callers are server-side services
- * acting on the traveler's authorization.
+ * Reads exactly the requested fields, and writes the access-log row in
+ * the same transaction naming EVERY field it returned a stored value
+ * for — encrypted or plaintext (QA finding F-4: a plaintext-field read
+ * is a touch the owner's log must show, not just decrypts). A read that
+ * isn't logged doesn't happen. No route exposes this directly; callers
+ * are server-side services acting on the traveler's authorization.
  */
 export async function readProfileFields(
   userId: number,
@@ -410,13 +433,13 @@ export async function readProfileFields(
       .from(travelerProfilesTable)
       .where(eq(travelerProfilesTable.userId, userId));
     if (!row) return {};
-    const { values, decrypted } = decryptRowFields(row, fields);
-    if (decrypted.length > 0) {
+    const { values, accessed } = decryptRowFields(row, fields);
+    if (accessed.length > 0) {
       await insertAccessLog(tx, {
         profileUserId: userId,
         accessor,
         purpose,
-        fieldsAccessed: decrypted,
+        fieldsAccessed: accessed,
         bookingId: bookingId ?? null,
       });
     }
@@ -664,11 +687,15 @@ export async function passportValidThrough(
     profileHasField(row, "passport_number") &&
     row.passportExpiry !== null &&
     row.passportExpiry >= throughDate;
+  // Log every field actually consulted (QA finding F-3): the check
+  // reads passport_number's PRESENCE as well as the expiry value — the
+  // log contract names "the field names whose presence or plaintext
+  // value was consulted", so both belong in the row.
   await insertAccessLog(db, {
     profileUserId: userId,
     accessor,
     purpose: "derived_check",
-    fieldsAccessed: ["passport_expiry"],
+    fieldsAccessed: ["passport_number", "passport_expiry"],
   });
   return valid;
 }

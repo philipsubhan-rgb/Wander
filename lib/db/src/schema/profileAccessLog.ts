@@ -8,7 +8,9 @@ import { usersTable } from "./users";
  * read: who/what accessed the profile, for what purpose, and which field
  * NAMES were accessed — never values. Derived checks (completeness,
  * passport validity) also log, with the field names whose presence or
- * plaintext value was consulted, so the owner's log shows every touch.
+ * plaintext value was consulted, and the authorized-use read path logs
+ * every field it returns a stored value for — plaintext fields included
+ * — so the owner's log shows every touch.
  *
  * The owner can read their own full log. Nobody else can read it at all
  * — the log itself would leak trip patterns (§3.1). There is no admin

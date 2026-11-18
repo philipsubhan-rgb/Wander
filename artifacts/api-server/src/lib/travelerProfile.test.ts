@@ -322,12 +322,30 @@ describe("readProfileFields", () => {
     expect(logInserts()[0].fieldsAccessed).toEqual(["date_of_birth", "emergency_contact"]);
   });
 
-  it("reading only a plaintext field performs no decrypt and writes no log row", async () => {
+  it("F-4: reading only plaintext fields writes an access-log row naming them — a touch is a touch", async () => {
+    // Mirrors QA's F-4 observation as a passing test: the read performs
+    // no decrypt, but the owner's log must still show it.
     queue("traveler_profiles", [profileRow()]);
     const values = await readProfileFields(
-      77, ["passport_expiry"], { kind: "agent" }, "booking_execution",
+      77, ["passport_expiry", "phone"], { kind: "agent" }, "agent_task",
     );
     expect(values.passport_expiry).toBe("2031-05-01");
+    expect(values.phone).toBe("+1-555-0100");
+    const logs = logInserts();
+    expect(logs).toHaveLength(1);
+    expect(logs[0].accessorKind).toBe("agent");
+    expect(logs[0].purpose).toBe("agent_task");
+    expect(logs[0].fieldsAccessed).toEqual(["passport_expiry", "phone"]);
+    expect(JSON.stringify(logs[0])).not.toContain("2031-05-01");
+    expect(JSON.stringify(logs[0])).not.toContain("555-0100");
+  });
+
+  it("F-4: a plaintext field holding no value is not a touch — nothing is logged for it", async () => {
+    queue("traveler_profiles", [profileRow({ phone: null })]);
+    const values = await readProfileFields(
+      77, ["phone"], { kind: "agent" }, "booking_execution",
+    );
+    expect(values.phone).toBeNull();
     expect(logInserts()).toHaveLength(0);
   });
 
@@ -349,7 +367,9 @@ describe("derived checks", () => {
     const logs = logInserts();
     expect(logs).toHaveLength(1);
     expect(logs[0].purpose).toBe("derived_check");
-    expect(logs[0].fieldsAccessed).toEqual(["passport_expiry"]);
+    // F-3: the check consults passport_number's presence AND the expiry
+    // value — the log names both (mirrors QA's it.fails F-3 as passing).
+    expect(logs[0].fieldsAccessed).toEqual(["passport_number", "passport_expiry"]);
     expect(JSON.stringify(logs[0])).not.toContain("2031-05-01");
     expect(JSON.stringify(logs[0])).not.toContain(PASSPORT);
   });
