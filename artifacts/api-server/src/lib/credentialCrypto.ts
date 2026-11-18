@@ -30,6 +30,15 @@ function loadKek(): Buffer {
   return key;
 }
 
+/**
+ * The parsed KEK, exported for profileCrypto (the traveler-profile
+ * vault), which shares this exact key and envelope discipline. This is
+ * the ONLY place CREDENTIALS_KEK is parsed — do not re-implement it.
+ */
+export function loadCredentialsKek(): Buffer {
+  return loadKek();
+}
+
 /** Encrypt a plaintext token. Returns "iv:ciphertext:authTag" (base64 parts). */
 export function encryptToken(plaintext: string): string {
   const key = loadKek();
