@@ -15,5 +15,7 @@ export * from "./marcoMessages";
 export * from "./intakeSessions";
 export * from "./tripRosterEntries";
 export * from "./travelerInviteTokens";
+export * from "./travelerProfiles";
+export * from "./profileAccessLog";
 export * from "./connectedAccounts";
 export * from "./fxRateSnapshots";
