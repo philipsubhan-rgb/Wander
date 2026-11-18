@@ -178,6 +178,7 @@ beforeEach(() => { resultQueue.length = 0; });
 
 describe("flight fare API", () => {
   it("GET normalises absent fare columns to explicit nulls", async () => {
+    enqueue([{ id: 1 }]); // requireTripParticipant lookup (role "admin" does not short-circuit)
     enqueue([{
       id: 1, tripId: 7, flightNumber: "UA1465", airline: "United",
       departureAirport: "EWR", arrivalAirport: "PLS",
@@ -244,6 +245,7 @@ describe("flight fare API", () => {
 
 describe("accommodation pricing API", () => {
   it("GET normalises absent pricing columns to explicit nulls", async () => {
+    enqueue([{ id: 1 }]); // requireTripParticipant lookup (role "admin" does not short-circuit)
     enqueue([{
       id: 1, tripId: 7, name: "Sugar Beach", address: "Soufriere",
       checkIn: "2027-05-08T15:00", checkOut: "2027-05-13T11:00",
