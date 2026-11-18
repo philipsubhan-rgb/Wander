@@ -77,6 +77,7 @@ vi.mock("drizzle-orm", () => ({
   and: (...args: unknown[]) => args,
   isNull: (...args: unknown[]) => args,
   inArray: (...args: unknown[]) => args,
+  desc: (...args: unknown[]) => args,
 }));
 
 vi.mock("@workspace/db", () => ({
@@ -86,6 +87,8 @@ vi.mock("@workspace/db", () => ({
   tripRosterEntriesTable: store.table("trip_roster_entries"),
   tripsTable: store.table("trips"),
   usersTable: store.table("users"),
+  travelerProfilesTable: store.table("traveler_profiles"),
+  profileAccessLogTable: store.table("profile_access_log"),
 }));
 
 vi.mock("./email.js", () => ({ sendEmail: mailer.sendEmail }));
@@ -93,7 +96,6 @@ vi.mock("./email.js", () => ({ sendEmail: mailer.sendEmail }));
 import {
   InviteTokenError,
   OutreachAccessDenied,
-  ProfileSetupUnavailable,
   applyChaseReminder,
   beginTravelerSetup,
   declineInvite,
@@ -107,6 +109,8 @@ import {
   validateInviteToken,
 } from "./outreach.js";
 import { hashInviteToken } from "./outreachLogic.js";
+import { decryptProfileField } from "./profileCrypto.js";
+import { ProfileValidationError } from "./travelerProfile.js";
 
 const NOW = new Date("2026-11-18T12:00:00Z");
 const DAY = 24 * 60 * 60 * 1000;
@@ -173,8 +177,11 @@ function rawTokenFromEmail(text: string): string {
 }
 
 const savedBase = process.env.APP_BASE_URL;
+const savedKek = process.env.CREDENTIALS_KEK;
 
 beforeEach(() => {
+  // The vault write path encrypts for real in these tests.
+  process.env.CREDENTIALS_KEK = crypto.randomBytes(32).toString("hex");
   store.ops.length = 0;
   mailer.calls.length = 0;
   mailer.sendEmail.mockClear();
@@ -193,6 +200,8 @@ beforeEach(() => {
 afterEach(() => {
   if (savedBase === undefined) delete process.env.APP_BASE_URL;
   else process.env.APP_BASE_URL = savedBase;
+  if (savedKek === undefined) delete process.env.CREDENTIALS_KEK;
+  else process.env.CREDENTIALS_KEK = savedKek;
 });
 
 // ─── Send gating (Story 4.1) ─────────────────────────────────────────────────
@@ -376,7 +385,7 @@ describe("traveler setup seam", () => {
     expect(ctx.requiredFields).toEqual([
       { name: "passport_number", label: "your passport details" },
     ]);
-    expect(ctx.profileSetupAvailable).toBe(false);
+    expect(ctx.profileSetupAvailable).toBe(true);
 
     const updates = entryUpdates();
     expect(updates).toHaveLength(1);
@@ -387,13 +396,165 @@ describe("traveler setup seam", () => {
     ).toHaveLength(0);
   });
 
-  it("submit: rejects as unavailable, consumes nothing, stores nothing", async () => {
+  // ── Submit (Story 4.3/5.1 — the vault-backed flow) ──────────────────────
+  // Queue order per table follows the service's call order:
+  // validate (tokens, roster) → find/create user (users) → vault upsert
+  // (traveler_profiles) → link (roster update) → change propagation
+  // (roster, trips, traveler_profiles) → recompute (traveler_profiles)
+  // → final roster update → token consume.
+
+  const storedProfileRow = {
+    userId: 77,
+    legalFirstName: "Kurt",
+    legalMiddleName: null,
+    legalLastName: "Rao",
+    dateOfBirthEnc: "ciphertext-dob",
+    passportNumberEnc: "ciphertext-passport",
+    passportIssuingCountry: "US",
+    passportExpiry: "2031-05-01",
+    nationality: "US",
+    phone: null,
+    emergencyContactEnc: null,
+    profileVersion: 1,
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+
+  function inserts(table: string): Array<Record<string, unknown>> {
+    return store.ops
+      .filter((o) => o.op === "insert" && o.table === table)
+      .map((o) => o.values as Record<string, unknown>);
+  }
+
+  function queueNewUserSubmit(
+    entry: Record<string, unknown> = entryRow(),
+    profileRow: Record<string, unknown> = storedProfileRow,
+  ): void {
+    queue("traveler_invite_tokens", [tokenRow]);
+    queue("trip_roster_entries", [entry]); // validate → loadEntry
+    queue("users", []); // find: no account yet
+    queue("users", [{ id: 77, name: "Kurt", email: "kurt@example.com" }]); // created
+    queue("traveler_profiles", []); // upsert: no profile yet
+    queue("trip_roster_entries", [entryRow({ userId: 77 })]); // change propagation scan
+    queue("trips", [tripRow]); // propagation trip lookup (trip is past → entry skipped)
+    queue("traveler_profiles", [profileRow]); // propagation profile load
+    queue("traveler_profiles", [profileRow]); // submit recompute load
+  }
+
+  it("submit (new traveler): creates a silent user, writes ENCRYPTED fields to the vault, links the entry, lands ready, consumes the token", async () => {
+    queueNewUserSubmit();
+    const result = await submitTravelerProfile(
+      "raw-token",
+      { passportNumber: "XUK1234567", dateOfBirth: "1990-04-12" },
+      NOW,
+    );
+
+    expect(result.status).toBe("ready");
+    expect(result.missingFields).toEqual([]);
+    expect(result.userId).toBe(77);
+
+    // Silent user: created once, with an unusable password hash (a random
+    // secret hashed and discarded — never a submitted value).
+    const userRows = inserts("users");
+    expect(userRows).toHaveLength(1);
+    expect(userRows[0].email).toBe("kurt@example.com");
+    expect(String(userRows[0].username)).toMatch(/^traveler-/);
+    expect(String(userRows[0].passwordHash)).not.toContain("XUK1234567");
+
+    // Vault write: ciphertext at rest, decryptable only via the vault key.
+    const profileRows = inserts("traveler_profiles");
+    expect(profileRows).toHaveLength(1);
+    expect(profileRows[0].userId).toBe(77);
+    expect(JSON.stringify(profileRows[0])).not.toContain("XUK1234567");
+    expect(JSON.stringify(profileRows[0])).not.toContain("1990-04-12");
+    expect(
+      decryptProfileField("passport_number", profileRows[0].passportNumberEnc as string),
+    ).toBe("XUK1234567");
+    expect(
+      decryptProfileField("date_of_birth", profileRows[0].dateOfBirthEnc as string),
+    ).toBe("1990-04-12");
+
+    // Roster: linked to the user, then finalized ready with nothing missing.
+    const updates = entryUpdates();
+    expect(updates[0].userId).toBe(77);
+    const final = updates[updates.length - 1];
+    expect(final.status).toBe("ready");
+    expect(final.missingFields).toEqual([]);
+
+    // Token consumed exactly once, at the end.
+    const tokenUpdates = store.ops.filter(
+      (o) => o.op === "update" && o.table === "traveler_invite_tokens",
+    );
+    expect(tokenUpdates).toHaveLength(1);
+    expect((tokenUpdates[0].set as Record<string, unknown>).usedAt).toEqual(NOW);
+  });
+
+  it("submit (partial): stays setting_up with the TRUE remaining missing fields", async () => {
+    queueNewUserSubmit(
+      entryRow({ requiredFieldsProfile: ["passport_number", "date_of_birth"] }),
+      { ...storedProfileRow, dateOfBirthEnc: null }, // DOB genuinely absent in the vault
+    );
+    const result = await submitTravelerProfile(
+      "raw-token",
+      { passportNumber: "XUK1234567" },
+      NOW,
+    );
+    expect(result.status).toBe("setting_up");
+    expect(result.missingFields).toEqual(["date_of_birth"]);
+    const updates = entryUpdates();
+    const final = updates[updates.length - 1];
+    expect(final.status).toBe("setting_up");
+    expect(final.missingFields).toEqual(["date_of_birth"]);
+  });
+
+  it("submit (existing account): links the traveler's existing user — no silent account created", async () => {
     queue("traveler_invite_tokens", [tokenRow]);
     queue("trip_roster_entries", [entryRow()]);
-    await expect(submitTravelerProfile("raw-token", NOW)).rejects.toBeInstanceOf(
-      ProfileSetupUnavailable,
+    queue("users", [{ id: 55, name: "Kurt", email: "kurt@example.com" }]); // find: exists
+    queue("traveler_profiles", []); // upsert: no profile yet
+    queue("trip_roster_entries", []); // propagation: nothing in-flight
+    queue("traveler_profiles", [{ ...storedProfileRow, userId: 55 }]); // recompute load
+
+    const result = await submitTravelerProfile(
+      "raw-token",
+      { passportNumber: "XUK1234567" },
+      NOW,
     );
-    // No writes of any kind beyond the validation reads.
+    expect(result.userId).toBe(55);
+    expect(result.status).toBe("ready");
+    expect(inserts("users")).toHaveLength(0);
+    expect(inserts("traveler_profiles")[0].userId).toBe(55);
+  });
+
+  it("submit: a second submit with the same token is rejected as used", async () => {
+    queue("traveler_invite_tokens", [{ ...tokenRow, usedAt: NOW }]);
+    await expect(
+      submitTravelerProfile("raw-token", { passportNumber: "XUK1234567" }, NOW),
+    ).rejects.toMatchObject({ name: "InviteTokenError", reason: "used" });
+    expect(inserts("traveler_profiles")).toHaveLength(0);
+    expect(inserts("users")).toHaveLength(0);
+  });
+
+  it("submit: an expired passport is stored but flagged to the traveler immediately", async () => {
+    queueNewUserSubmit(
+      entryRow({ requiredFieldsProfile: ["passport_number", "passport_expiry"] }),
+    );
+    const result = await submitTravelerProfile(
+      "raw-token",
+      { passportNumber: "XUK1234567", passportExpiry: "2020-01-01" },
+      NOW,
+    );
+    expect(result.warnings).toContain("passport_expired");
+    expect(result.status).toBe("ready"); // present ≠ valid — validity is a derived check
+    expect(inserts("traveler_profiles")[0].passportExpiry).toBe("2020-01-01");
+  });
+
+  it("submit: invalid data is rejected BEFORE any write — no user, no profile, token unconsumed", async () => {
+    queue("traveler_invite_tokens", [tokenRow]);
+    queue("trip_roster_entries", [entryRow()]);
+    await expect(
+      submitTravelerProfile("raw-token", { dateOfBirth: "2999-01-01" }, NOW),
+    ).rejects.toBeInstanceOf(ProfileValidationError);
     expect(store.ops.filter((o) => o.op !== "select")).toHaveLength(0);
   });
 

@@ -38,6 +38,7 @@ import {
   flagProfileChangeForTrips,
   loadProfileRow,
   upsertProfile,
+  validateProfileInput,
   type TravelerProfileInput,
 } from "./travelerProfile.js";
 import {
@@ -691,6 +692,11 @@ export async function submitTravelerProfile(
       "This invitation was declined. Ask the organizer to send you a fresh one if that was a mistake.",
     );
   }
+
+  // Validate BEFORE any write: a malformed submission creates no user
+  // record, no profile, and leaves the token unconsumed for a retry.
+  // (upsertProfile validates again at the vault boundary.)
+  validateProfileInput(submissionToProfileInput(submission), now);
 
   // Resolve whose profile this is. A linked entry already knows; an
   // emailed entry resolves by its invited email; a hand-delivered share
