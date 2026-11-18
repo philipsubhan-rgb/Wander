@@ -102,6 +102,7 @@ vi.mock("./email.js", () => ({ sendEmail: mailer.sendEmail }));
 
 import {
   completeWatchesForFinishedTrips,
+  deregisterWatchForFlight,
   handleAlertPayload,
   ingestFlightStatus,
   registerWatchForFlight,
@@ -575,6 +576,46 @@ describe("completeWatchesForFinishedTrips", () => {
     queueSelects("trips", [[tripRow({ status: "active", endDate: "2026-09-28" })]]);
     const result = await completeWatchesForFinishedTrips({ client: null, now: new Date("2026-09-25T00:00:00Z") });
     expect(result.completed).toBe(0);
+  });
+});
+
+// ─── Single-flight deregistration (E-3.4: cancel/change re-keying) ───────────
+
+describe("deregisterWatchForFlight", () => {
+  it("deletes the provider alert and closes the watch", async () => {
+    queueSelects("flight_watches", [[watchRow({ alertId: "555" })]]);
+    const deleteAlert = vi.fn(async () => undefined);
+    const client = { deleteAlert } as unknown as FlightAwareClient;
+
+    const result = await deregisterWatchForFlight(7, { client, now: new Date("2026-11-18T10:00:00Z") });
+    expect(result).toEqual({ deregistered: true });
+    expect(deleteAlert).toHaveBeenCalledWith("555");
+    const close = store.ops.find((o) => o.op === "update" && o.table === "flight_watches");
+    expect((close?.set as Record<string, unknown>).state).toBe("completed");
+  });
+
+  it("is a plain no-op when the flight has no active watch", async () => {
+    queueSelects("flight_watches", [[]]);
+    const deleteAlert = vi.fn(async () => undefined);
+    const client = { deleteAlert } as unknown as FlightAwareClient;
+
+    const result = await deregisterWatchForFlight(7, { client, now: new Date("2026-11-18T10:00:00Z") });
+    expect(result).toEqual({ deregistered: false, reason: "no_active_watch" });
+    expect(deleteAlert).not.toHaveBeenCalled();
+    expect(store.ops.filter((o) => o.table === "flight_watches")).toHaveLength(0);
+  });
+
+  it("closes the watch locally even when the provider delete fails", async () => {
+    queueSelects("flight_watches", [[watchRow({ alertId: "555" })]]);
+    const deleteAlert = vi.fn(async () => {
+      throw new Error("FlightAware down");
+    });
+    const client = { deleteAlert } as unknown as FlightAwareClient;
+
+    const result = await deregisterWatchForFlight(7, { client, now: new Date("2026-11-18T10:00:00Z") });
+    expect(result.deregistered).toBe(true);
+    const close = store.ops.find((o) => o.op === "update" && o.table === "flight_watches");
+    expect((close?.set as Record<string, unknown>).state).toBe("completed");
   });
 });
 
