@@ -122,13 +122,13 @@ function profileRow(overrides: Record<string, unknown> = {}): Record<string, unk
     legalFirstName: "Kurt",
     legalMiddleName: null,
     legalLastName: "Rao",
-    dateOfBirthEnc: encryptProfileField("date_of_birth", DOB),
-    passportNumberEnc: encryptProfileField("passport_number", PASSPORT),
+    dateOfBirthEnc: encryptProfileField(77, "date_of_birth", DOB),
+    passportNumberEnc: encryptProfileField(77, "passport_number", PASSPORT),
     passportIssuingCountry: "US",
     passportExpiry: "2031-05-01",
     nationality: "US",
     phone: "+1-555-0100",
-    emergencyContactEnc: encryptProfileField("emergency_contact", JSON.stringify(EC)),
+    emergencyContactEnc: encryptProfileField(77, "emergency_contact", JSON.stringify(EC)),
     profileVersion: 1,
     createdAt: NOW,
     updatedAt: NOW,
@@ -174,10 +174,10 @@ describe("upsertProfile", () => {
     expect(stored).not.toContain(PASSPORT);
     expect(stored).not.toContain(DOB);
     expect(stored).not.toContain(EC_PHONE);
-    expect(decryptProfileField("passport_number", rows[0].passportNumberEnc as string)).toBe(PASSPORT);
-    expect(decryptProfileField("date_of_birth", rows[0].dateOfBirthEnc as string)).toBe(DOB);
+    expect(decryptProfileField(77, "passport_number", rows[0].passportNumberEnc as string)).toBe(PASSPORT);
+    expect(decryptProfileField(77, "date_of_birth", rows[0].dateOfBirthEnc as string)).toBe(DOB);
     expect(
-      JSON.parse(decryptProfileField("emergency_contact", rows[0].emergencyContactEnc as string)),
+      JSON.parse(decryptProfileField(77, "emergency_contact", rows[0].emergencyContactEnc as string)),
     ).toEqual(EC);
     // Plaintext-by-design fields are stored as given (§3.1).
     expect(rows[0].passportExpiry).toBe("2031-05-01");
@@ -271,6 +271,21 @@ describe("getOwnProfile", () => {
     const view = await getOwnProfile(77);
     expect(view?.passportNumber).toBeNull();
     expect(view?.legalLastName).toBe("Rao");
+    expect(logInserts()).toHaveLength(0);
+  });
+
+  it("F-1: a ciphertext transplanted from another user's row fails the owner's view — it never surfaces", async () => {
+    // User 77's passport ciphertext sitting in user 88's row (DB-level
+    // copy, bad restore, write-path bug). The AAD binds the owner, so
+    // 88's view must fail closed rather than surface 77's number.
+    // (Mirrors QA's it.fails F-1 as a passing test.)
+    queue("traveler_profiles", [
+      profileRow({
+        userId: 88,
+        passportNumberEnc: encryptProfileField(77, "passport_number", PASSPORT),
+      }),
+    ]);
+    await expect(getOwnProfile(88)).rejects.toThrow();
     expect(logInserts()).toHaveLength(0);
   });
 });

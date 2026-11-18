@@ -366,19 +366,19 @@ function decryptRowFields(
       case "phone": values[field] = row.phone; break;
       case "date_of_birth":
         if (row.dateOfBirthEnc !== null) {
-          values[field] = decryptProfileField("date_of_birth", row.dateOfBirthEnc);
+          values[field] = decryptProfileField(row.userId, "date_of_birth", row.dateOfBirthEnc);
           decrypted.push(field);
         } else values[field] = null;
         break;
       case "passport_number":
         if (row.passportNumberEnc !== null) {
-          values[field] = decryptProfileField("passport_number", row.passportNumberEnc);
+          values[field] = decryptProfileField(row.userId, "passport_number", row.passportNumberEnc);
           decrypted.push(field);
         } else values[field] = null;
         break;
       case "emergency_contact":
         if (row.emergencyContactEnc !== null) {
-          const raw = decryptProfileField("emergency_contact", row.emergencyContactEnc);
+          const raw = decryptProfileField(row.userId, "emergency_contact", row.emergencyContactEnc);
           values[field] = JSON.parse(raw) as EmergencyContact;
           decrypted.push(field);
         } else values[field] = null;
@@ -513,13 +513,13 @@ export async function upsertProfile(
     columns.dateOfBirthEnc =
       input.dateOfBirth === null
         ? null
-        : encryptProfileField("date_of_birth", input.dateOfBirth);
+        : encryptProfileField(userId, "date_of_birth", input.dateOfBirth);
   }
   if (input.passportNumber !== undefined) {
     columns.passportNumberEnc =
       input.passportNumber === null
         ? null
-        : encryptProfileField("passport_number", input.passportNumber);
+        : encryptProfileField(userId, "passport_number", input.passportNumber);
   }
   if (input.passportIssuingCountry !== undefined) {
     columns.passportIssuingCountry = input.passportIssuingCountry;
@@ -531,7 +531,7 @@ export async function upsertProfile(
     columns.emergencyContactEnc =
       input.emergencyContact === null
         ? null
-        : encryptProfileField("emergency_contact", JSON.stringify(input.emergencyContact));
+        : encryptProfileField(userId, "emergency_contact", JSON.stringify(input.emergencyContact));
   }
 
   if (existing) {

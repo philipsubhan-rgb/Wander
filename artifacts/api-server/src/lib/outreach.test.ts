@@ -469,10 +469,10 @@ describe("traveler setup seam", () => {
     expect(JSON.stringify(profileRows[0])).not.toContain("XUK1234567");
     expect(JSON.stringify(profileRows[0])).not.toContain("1990-04-12");
     expect(
-      decryptProfileField("passport_number", profileRows[0].passportNumberEnc as string),
+      decryptProfileField(77, "passport_number", profileRows[0].passportNumberEnc as string),
     ).toBe("XUK1234567");
     expect(
-      decryptProfileField("date_of_birth", profileRows[0].dateOfBirthEnc as string),
+      decryptProfileField(77, "date_of_birth", profileRows[0].dateOfBirthEnc as string),
     ).toBe("1990-04-12");
 
     // Roster: linked to the user, then finalized ready with nothing missing.
