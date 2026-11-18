@@ -88,10 +88,36 @@ export async function loadMarcoHistory(
   userId: number,
   limit: number = MEMORY_CONTEXT_LIMIT,
 ): Promise<MemoryMessage[]> {
+  return loadMarcoHistoryForScope({ tripId }, userId, limit);
+}
+
+/**
+ * Conversation scope (ADR-3): a conversation belongs to a trip OR to a
+ * pre-trip intake session — exactly one. Intake rows are re-keyed to the
+ * trip at materialization (see lib/intake.ts), after which the trip scope
+ * serves the whole history.
+ */
+export type MarcoScope = { tripId: number } | { intakeSessionId: number };
+
+function scopeFilter(scope: MarcoScope, userId: number) {
+  return "tripId" in scope
+    ? and(eq(marcoMessagesTable.tripId, scope.tripId), eq(marcoMessagesTable.userId, userId))
+    : and(
+        eq(marcoMessagesTable.intakeSessionId, scope.intakeSessionId),
+        eq(marcoMessagesTable.userId, userId),
+      );
+}
+
+/** Load the recent persisted turns for a conversation scope, oldest first. */
+export async function loadMarcoHistoryForScope(
+  scope: MarcoScope,
+  userId: number,
+  limit: number = MEMORY_CONTEXT_LIMIT,
+): Promise<MemoryMessage[]> {
   const rows = await db
     .select({ role: marcoMessagesTable.role, content: marcoMessagesTable.content })
     .from(marcoMessagesTable)
-    .where(and(eq(marcoMessagesTable.tripId, tripId), eq(marcoMessagesTable.userId, userId)))
+    .where(scopeFilter(scope, userId))
     .orderBy(desc(marcoMessagesTable.id))
     .limit(limit);
   const out: MemoryMessage[] = [];
@@ -113,10 +139,20 @@ export async function persistMarcoTurn(
   userId: number,
   messages: MemoryMessage[],
 ): Promise<void> {
+  return persistMarcoTurnForScope({ tripId }, userId, messages);
+}
+
+/** Scope-generalized persist (ADR-3) — see loadMarcoHistoryForScope. */
+export async function persistMarcoTurnForScope(
+  scope: MarcoScope,
+  userId: number,
+  messages: MemoryMessage[],
+): Promise<void> {
   const rows = messages
     .filter((m) => m.role === "user" || m.role === "assistant")
     .map((m) => ({
-      tripId,
+      tripId: "tripId" in scope ? scope.tripId : null,
+      intakeSessionId: "intakeSessionId" in scope ? scope.intakeSessionId : null,
       userId,
       role: m.role as "user" | "assistant",
       content: m.content.slice(0, MEMORY_CONTENT_CHARS),
@@ -129,25 +165,24 @@ export async function persistMarcoTurn(
   const keep = await db
     .select({ id: marcoMessagesTable.id })
     .from(marcoMessagesTable)
-    .where(and(eq(marcoMessagesTable.tripId, tripId), eq(marcoMessagesTable.userId, userId)))
+    .where(scopeFilter(scope, userId))
     .orderBy(desc(marcoMessagesTable.id))
     .limit(MEMORY_RETAIN_LIMIT);
   const keepIds = keep.map((r) => r.id);
   if (keepIds.length > 0) {
     await db
       .delete(marcoMessagesTable)
-      .where(
-        and(
-          eq(marcoMessagesTable.tripId, tripId),
-          eq(marcoMessagesTable.userId, userId),
-          notInArray(marcoMessagesTable.id, keepIds),
-        ),
-      );
+      .where(and(scopeFilter(scope, userId), notInArray(marcoMessagesTable.id, keepIds)));
   }
 
   // Privacy-safe: counts only, never message content.
   logger.info(
-    { userId, tripId, persisted: rows.length },
+    {
+      userId,
+      tripId: "tripId" in scope ? scope.tripId : undefined,
+      intakeSessionId: "intakeSessionId" in scope ? scope.intakeSessionId : undefined,
+      persisted: rows.length,
+    },
     "[Marco] conversation turn persisted",
   );
 }

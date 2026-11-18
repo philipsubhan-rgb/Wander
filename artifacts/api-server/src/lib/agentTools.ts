@@ -35,6 +35,11 @@ import { logger } from "./logger";
 export interface ToolContext {
   userId: number;
   role: string;
+  /**
+   * Set only in intake scope (ADR-3): the intake session this conversation
+   * is running against. Intake tools require it; trip tools ignore it.
+   */
+  intakeSessionId?: number;
 }
 
 /** Plain result returned to the agent loop (not an MCP CallToolResult). */
