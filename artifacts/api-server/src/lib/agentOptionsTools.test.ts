@@ -214,7 +214,10 @@ describe("options_search_flights", () => {
 const stayTool = OPTIONS_TOOLS.find((t) => t.name === "options_search_stays")!;
 
 function stayOptionFixture(
-  overrides: Partial<StayOption> & { id: string; summary?: Partial<StaySummary> },
+  // Omit first: intersecting Partial<StayOption> with { summary?: Partial<…> }
+  // would make the effective summary type StaySummary & Partial<StaySummary>
+  // (a full summary), defeating the partial-override intent.
+  overrides: Omit<Partial<StayOption>, "summary"> & { id: string; summary?: Partial<StaySummary> },
 ): StayOption {
   const base: StayOption = {
     id: overrides.id,
