@@ -58,6 +58,7 @@ import { INTAKE_TOOLS, getIntakeToolDefinition } from "../lib/agentIntakeTools";
 import { CONTEXT_TOOLS, getContextToolDefinition } from "../lib/agentContextTools";
 import { OPTIONS_TOOLS, getOptionsToolDefinition } from "../lib/agentOptionsTools";
 import { EXTRAS_TOOLS, getExtrasToolDefinition } from "../lib/agentExtrasTools";
+import { BOOKING_TOOLS, getBookingToolDefinition } from "../lib/agentBookingTools";
 import {
   assertIntakeAccess,
   createIntakeSession,
@@ -503,7 +504,7 @@ async function callModelApiStream(
 // Options tools ride along too (§5.1): pricing a leg the traveler is
 // talking about is not trip-shaped either — intake prices the trip it
 // is forming; a trip conversation prices its changes.
-const TOOL_DEFINITIONS = [...AGENT_TOOLS, ...AGENT_RESEARCH_TOOLS, ...CONTEXT_TOOLS, ...OPTIONS_TOOLS, ...EXTRAS_TOOLS];
+const TOOL_DEFINITIONS = [...AGENT_TOOLS, ...AGENT_RESEARCH_TOOLS, ...CONTEXT_TOOLS, ...OPTIONS_TOOLS, ...EXTRAS_TOOLS, ...BOOKING_TOOLS];
 
 /** Why the tool loop ended without a usable final answer. */
 export type StuckReason = "duplicate_tool_call" | "iteration_exhausted" | "no_final_text";
@@ -840,7 +841,8 @@ async function runAgentLoop(
               AGENT_RESEARCH_TOOLS.find((t) => t.name === name) ??
               getContextToolDefinition(name) ??
               getOptionsToolDefinition(name) ??
-              getExtrasToolDefinition(name));
+              getExtrasToolDefinition(name) ??
+              getBookingToolDefinition(name));
 
         let toolResult: { ok: boolean; text: string; data?: unknown };
         if (!accessOk) {
