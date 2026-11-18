@@ -371,8 +371,12 @@ afterEach(() => {
 });
 
 describe("tool inventory + argument discipline", () => {
-  it("exposes exactly present / review / confirm / execute", () => {
+  it("exposes exactly the gate + lifecycle tool set (a closed set)", () => {
     expect(BOOKING_TOOLS.map((t) => t.name).sort()).toEqual([
+      "booking_cancel_confirm",
+      "booking_cancel_execute",
+      "booking_cancel_quote",
+      "booking_change_flight",
       "booking_confirm",
       "booking_execute",
       "booking_present_option",

@@ -32,6 +32,12 @@ import {
   type ConfirmResult,
   type ExecuteResult,
 } from "./bookingGate";
+import {
+  getDefaultBookingLifecycle,
+  LifecycleAccessDenied,
+  LifecycleNotFound,
+  LifecycleRefused,
+} from "./bookingLifecycle";
 import { GateTransitionError } from "./bookingGateLogic";
 import { getDefaultOptionsService } from "./optionsService";
 import { logger } from "./logger";
@@ -58,6 +64,30 @@ const PresentOptionInput = z.object({
 
 const AttemptIdInput = z.object({
   attemptId: z.number().int().positive(),
+});
+
+const BookingIdInput = z.object({
+  bookingId: z.number().int().positive(),
+});
+
+const OperationIdInput = z.object({
+  operationId: z.number().int().positive(),
+});
+
+const ChangeFlightInput = z.object({
+  bookingId: z.number().int().positive(),
+  removeSliceIds: z.array(z.string().min(1)).min(1).max(4),
+  addSlices: z
+    .array(
+      z.object({
+        origin: z.string().length(3),
+        destination: z.string().length(3),
+        departureDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        cabinClass: z.enum(["economy", "premium_economy", "business", "first"]).optional(),
+      }),
+    )
+    .min(1)
+    .max(4),
 });
 
 // ─── Formatting (the review surface Marco voices) ────────────────────────────
@@ -136,6 +166,9 @@ function gateErrorText(err: unknown): string {
     return `That step isn't possible from the booking's current state (${err.from}). Nothing was booked.`;
   }
   if (err instanceof BookingAccessDenied || err instanceof BookingNotFound || err instanceof BookingRefused) {
+    return err.message;
+  }
+  if (err instanceof LifecycleAccessDenied || err instanceof LifecycleNotFound || err instanceof LifecycleRefused) {
     return err.message;
   }
   return "Something went wrong in the booking gate. Nothing was booked.";
@@ -295,6 +328,141 @@ async function executeAttempt(
   }
 }
 
+// ─── Change & cancel (the lifecycle surface, E-3.4) ──────────────────────────
+//
+// Same discipline as booking, mirrored: a cancel presents its terms
+// BEFORE anything executes (booking_cancel_quote cancels NOTHING),
+// the traveler's confirmation is its own act (booking_cancel_confirm),
+// and execution is reachable only from the confirmed state
+// (booking_cancel_execute). A change is never a direct edit: priced
+// change offers come back as ordinary gate attempts
+// (booking_change_flight), and the change happens only when the
+// traveler confirms one and it executes through booking_execute.
+
+async function cancelQuote(
+  ctx: ToolContext,
+  args: z.infer<typeof BookingIdInput>,
+): Promise<AgentToolResult> {
+  logger.info({ tool: "booking_cancel_quote", userId: ctx.userId, bookingId: args.bookingId }, "[Agent] tool call");
+  try {
+    const result = await getDefaultBookingLifecycle().quoteCancellation(args.bookingId, {
+      userId: ctx.userId,
+      role: ctx.role,
+    });
+    if (!result.supported) {
+      return toolOk(result.guidance ?? "Cancellation isn't available for this booking. Nothing was changed.", result);
+    }
+    return toolOk(
+      [
+        `Cancellation terms for booking #${result.booking.id} (quote #${result.operation!.id}) — NOT cancelled yet:`,
+        "",
+        result.termsText ?? "",
+        "",
+        "If these terms are right, confirm the cancellation (booking_cancel_confirm) — only then can it be executed.",
+      ].join("\n"),
+      result,
+    );
+  } catch (err) {
+    logger.warn({ tool: "booking_cancel_quote", userId: ctx.userId, err }, "[Agent] booking tool error");
+    return toolErr(gateErrorText(err));
+  }
+}
+
+async function cancelConfirm(
+  ctx: ToolContext,
+  args: z.infer<typeof OperationIdInput>,
+): Promise<AgentToolResult> {
+  logger.info({ tool: "booking_cancel_confirm", userId: ctx.userId, operationId: args.operationId }, "[Agent] tool call");
+  try {
+    const result = await getDefaultBookingLifecycle().confirmCancellation(args.operationId, {
+      userId: ctx.userId,
+      role: ctx.role,
+      // Voice proposes, screen confirms — the lifecycle enforces it.
+      channel: ctx.channel,
+    });
+    if (!result.confirmed) {
+      return toolOk(
+        `Not confirmed: ${result.reason} The booking stands — nothing was cancelled.`,
+        result,
+      );
+    }
+    return toolOk(
+      `Cancellation #${result.operation.id} confirmed at the quoted terms. Say the word and I'll execute it (booking_cancel_execute).`,
+      result,
+    );
+  } catch (err) {
+    logger.warn({ tool: "booking_cancel_confirm", userId: ctx.userId, err }, "[Agent] booking tool error");
+    return toolErr(gateErrorText(err));
+  }
+}
+
+async function cancelExecute(
+  ctx: ToolContext,
+  args: z.infer<typeof OperationIdInput>,
+): Promise<AgentToolResult> {
+  logger.info({ tool: "booking_cancel_execute", userId: ctx.userId, operationId: args.operationId }, "[Agent] tool call");
+  try {
+    const result = await getDefaultBookingLifecycle().executeCancellation(args.operationId, {
+      userId: ctx.userId,
+      role: ctx.role,
+    });
+    if (!result.executed) {
+      return toolOk(result.reason ?? "The cancellation didn't go through. The booking stands.", result);
+    }
+    if (result.alreadyExecuted) {
+      return toolOk("Already cancelled — the cancellation wasn't sent twice.", result);
+    }
+    const refund =
+      result.operation.refundAmountMinor !== null && result.operation.refundCurrency
+        ? ` A refund of ${formatMoney({ amountMinor: result.operation.refundAmountMinor, currency: result.operation.refundCurrency }, "en-US")} is expected.`
+        : "";
+    return toolOk(
+      `Cancelled — booking #${result.booking?.id ?? result.operation.bookingId} is cancelled with the airline.${refund} The flights stay in the trip history, marked cancelled, and the trip watch is off.`,
+      result,
+    );
+  } catch (err) {
+    logger.warn({ tool: "booking_cancel_execute", userId: ctx.userId, err }, "[Agent] booking tool error");
+    return toolErr(gateErrorText(err));
+  }
+}
+
+async function changeFlight(
+  ctx: ToolContext,
+  args: z.infer<typeof ChangeFlightInput>,
+): Promise<AgentToolResult> {
+  logger.info({ tool: "booking_change_flight", userId: ctx.userId, bookingId: args.bookingId }, "[Agent] tool call");
+  try {
+    const lifecycle = getDefaultBookingLifecycle();
+    const result = await lifecycle.prepareFlightChange(
+      args.bookingId,
+      { userId: ctx.userId, role: ctx.role },
+      { removeSliceIds: args.removeSliceIds, addSlices: args.addSlices },
+    );
+    if (!result.supported) {
+      return toolOk(result.guidance ?? "That change isn't available for this booking. Nothing was changed.", result);
+    }
+    if (!result.attempts || result.attempts.length === 0) {
+      return toolOk(result.guidance ?? "No priced change options came back. Your original flights are unchanged.", result);
+    }
+    const gate = getDefaultBookingGate();
+    const sections: string[] = [
+      `Priced change options for booking #${result.booking.id} — each is a booking review: the amount shown is the CHANGE total (what confirming charges, or refunds when negative), on top of the original booking. Your original flights are unchanged until one is confirmed AND executed.`,
+    ];
+    for (const attempt of result.attempts) {
+      const { coverage } = await gate.getAttemptView(attempt.id, {
+        userId: ctx.userId,
+        role: ctx.role,
+      });
+      sections.push("");
+      sections.push(formatReviewText(attempt, coverage));
+    }
+    return toolOk(sections.join("\n"), result);
+  } catch (err) {
+    logger.warn({ tool: "booking_change_flight", userId: ctx.userId, err }, "[Agent] booking tool error");
+    return toolErr(gateErrorText(err));
+  }
+}
+
 // ─── Registration ────────────────────────────────────────────────────────────
 
 export const BOOKING_TOOLS: ToolDefinition[] = [
@@ -363,7 +531,9 @@ export const BOOKING_TOOLS: ToolDefinition[] = [
     description:
       "Execute a CONFIRMED booking attempt: re-verifies the price one last time (a change sends it back to " +
       "review — nothing is booked at a different price than confirmed), then creates the booking with the " +
-      "supplier exactly once. Passenger details come from the travelers' own profiles — never ask the traveler " +
+      "supplier exactly once. Works for flights, stays (booked against the firm quote from review), and flight " +
+      "CHANGE attempts from booking_change_flight (executes the change against the original booking). " +
+      "Passenger/guest details come from the travelers' own profiles — never ask the traveler " +
       "to dictate passport or personal details into chat for a booking. Fails openly with the reason when the " +
       "supplier refuses; never substitutes a different option.",
     parameters: {
@@ -376,6 +546,97 @@ export const BOOKING_TOOLS: ToolDefinition[] = [
     },
     input: AttemptIdInput,
     run: executeAttempt as ToolDefinition["run"],
+  },
+  {
+    name: "booking_cancel_quote",
+    description:
+      "Fetch a booked flight's cancellation terms (refund amount, penalty, quote deadline) and present them. " +
+      "This CANCELS NOTHING — it only quotes. The terms are presented first, the traveler confirms them with " +
+      "booking_cancel_confirm, and only then can booking_cancel_execute run. When the airline doesn't support " +
+      "API cancellation for the order, returns plain phone-path guidance instead.",
+    parameters: {
+      type: "object",
+      properties: {
+        bookingId: { type: "integer", description: "The ledger booking id (from a booked attempt)" },
+      },
+      required: ["bookingId"],
+      additionalProperties: false,
+    },
+    input: BookingIdInput,
+    run: cancelQuote as ToolDefinition["run"],
+  },
+  {
+    name: "booking_cancel_confirm",
+    description:
+      "Record the traveler's EXPLICIT confirmation of a quoted cancellation at exactly the terms presented " +
+      "by booking_cancel_quote. This is the binding act: execution is impossible without it. A traveler can " +
+      "confirm only a cancellation of a booking that covers themselves; shared bookings can't be cancelled " +
+      "by one traveler alone under the current policy (the refusal states why). Confirming cancels NOTHING " +
+      "yet — execution is a separate step.",
+    parameters: {
+      type: "object",
+      properties: {
+        operationId: { type: "integer", description: "The cancellation quote id from booking_cancel_quote" },
+      },
+      required: ["operationId"],
+      additionalProperties: false,
+    },
+    input: OperationIdInput,
+    run: cancelConfirm as ToolDefinition["run"],
+  },
+  {
+    name: "booking_cancel_execute",
+    description:
+      "Execute a CONFIRMED cancellation: confirms the cancellation with the airline exactly once, records " +
+      "the refund expectation on the booking, marks (never deletes) the itinerary flights as cancelled, and " +
+      "stops the trip watch. Refuses plainly when the cancellation was never confirmed — there is no way to " +
+      "cancel straight from a quote.",
+    parameters: {
+      type: "object",
+      properties: {
+        operationId: { type: "integer", description: "The CONFIRMED cancellation id from booking_cancel_confirm" },
+      },
+      required: ["operationId"],
+      additionalProperties: false,
+    },
+    input: OperationIdInput,
+    run: cancelExecute as ToolDefinition["run"],
+  },
+  {
+    name: "booking_change_flight",
+    description:
+      "Price a change to a booked flight: removes the given order slices and searches the replacement " +
+      "slices. Each priced change comes back as an ordinary booking review (its own attempt) whose total is " +
+      "the CHANGE amount — extra charge, or a refund when negative — with the resulting booking total in the " +
+      "review. NOTHING about the original booking changes until the traveler picks one, confirms it with " +
+      "booking_confirm, and it executes with booking_execute. When the airline doesn't support API changes " +
+      "for the order, returns cancel-and-rebook / phone guidance instead. Slice ids come from the booked " +
+      "order — never invent them; if you don't know them, say so and ask.",
+    parameters: {
+      type: "object",
+      properties: {
+        bookingId: { type: "integer", description: "The ledger booking id to change" },
+        removeSliceIds: { type: "array", items: { type: "string" }, description: "Ids of the booked order's slices to remove" },
+        addSlices: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              origin: { type: "string", description: "IATA origin of the replacement slice" },
+              destination: { type: "string", description: "IATA destination of the replacement slice" },
+              departureDate: { type: "string", description: "YYYY-MM-DD" },
+              cabinClass: { type: "string", enum: ["economy", "premium_economy", "business", "first"] },
+            },
+            required: ["origin", "destination", "departureDate"],
+          },
+          description: "Replacement slices to price",
+        },
+      },
+      required: ["bookingId", "removeSliceIds", "addSlices"],
+      additionalProperties: false,
+    },
+    input: ChangeFlightInput,
+    run: changeFlight as ToolDefinition["run"],
   },
 ];
 
