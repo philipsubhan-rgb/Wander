@@ -1,0 +1,1 @@
+{"devDependencies":{"vitest":"^4.1.10"},"exports":{".":"./src/index.ts"},"name":"@workspace/money","private":true,"type":"module","version":"0.0.0"}

@@ -14,6 +14,9 @@
     },
     {
       "path": "./lib/flight-time"
+    },
+    {
+      "path": "./lib/money"
     }
   ]
 }

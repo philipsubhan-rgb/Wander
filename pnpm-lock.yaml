@@ -194,6 +194,9 @@ importers:
       '@workspace/flight-time':
         specifier: workspace:*
         version: link:../../lib/flight-time
+      '@workspace/money':
+        specifier: workspace:*
+        version: link:../../lib/money
       bcryptjs:
         specifier: ^3.0.3
         version: 3.0.3
@@ -622,6 +625,9 @@ importers:
       '@workspace/flight-time':
         specifier: workspace:*
         version: link:../../lib/flight-time
+      '@workspace/money':
+        specifier: workspace:*
+        version: link:../../lib/money
       class-variance-authority:
         specifier: 'catalog:'
         version: 0.7.1
@@ -911,6 +917,12 @@ importers:
         version: 0.31.10
 
   lib/flight-time:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@25.9.5)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@7.3.6(@types/node@25.9.5)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.23.0)(yaml@2.9.0))
+
+  lib/money:
     devDependencies:
       vitest:
         specifier: ^4.1.10
