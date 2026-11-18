@@ -17,5 +17,6 @@ export * from "./tripRosterEntries";
 export * from "./travelerInviteTokens";
 export * from "./travelerProfiles";
 export * from "./profileAccessLog";
+export * from "./travelerContext";
 export * from "./connectedAccounts";
 export * from "./fxRateSnapshots";
