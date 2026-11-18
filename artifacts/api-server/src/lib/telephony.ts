@@ -39,7 +39,10 @@
  * (conciergeCalls.ts): the ask, the ranked fallbacks, the may-not
  * list, the authority cap. When payment is needed it reads the
  * single-use virtual card's details (virtualCards.ts) from the live
- * session only. At session end the driver calls
+ * session only — and per international-foundation §3.4 the driver
+ * MUST pause/redact the recording and the transcript around any card
+ * digits it speaks: card details never enter the transcript, the
+ * recording, or any log. At session end the driver calls
  * `ConciergeCallService.recordOutcome` with the structured outcome +
  * transcript; provider status callbacks land in
  * `handleStatusCallback`. Recording: calls are recorded
