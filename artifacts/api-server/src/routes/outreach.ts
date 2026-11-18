@@ -13,8 +13,10 @@
  *
  * Traveler surface (unauthenticated — the token IS the credential):
  *   GET  /traveler-setup/:token                — validate + begin setup
- *   POST /traveler-setup/:token/submit         — 503 until the profile
- *                                                vault lands (see outreach.ts)
+ *   POST /traveler-setup/:token/submit         — write fields into the
+ *                                                profile vault (see
+ *                                                lib/outreach.ts +
+ *                                                lib/travelerProfile.ts)
  *   POST /traveler-setup/:token/decline
  */
 
@@ -25,7 +27,6 @@ import {
   InviteTokenError,
   OutreachAccessDenied,
   OutreachNotFound,
-  ProfileSetupUnavailable,
   beginTravelerSetup,
   declineInvite,
   getRosterStatus,
@@ -34,7 +35,9 @@ import {
   sendRosterInvites,
   setChasePaused,
   submitTravelerProfile,
+  type TravelerProfileSubmission,
 } from "../lib/outreach.js";
+import { ProfileValidationError } from "../lib/travelerProfile.js";
 
 const router: IRouter = Router();
 
@@ -184,14 +187,20 @@ router.get("/traveler-setup/:token", async (req: Request, res: Response) => {
 router.post("/traveler-setup/:token/submit", async (req: Request, res: Response) => {
   const token = Array.isArray(req.params.token) ? req.params.token[0] : req.params.token;
   try {
-    await submitTravelerProfile(token);
-    // Unreachable today: submitTravelerProfile always throws until the
-    // vault lands. Kept so the success shape is defined when it does.
-    res.json({ status: "ready" });
+    const result = await submitTravelerProfile(
+      token,
+      (req.body ?? {}) as TravelerProfileSubmission,
+    );
+    res.json({
+      status: result.status,
+      missingFields: result.missingFields,
+      warnings: result.warnings,
+      profileSetupAvailable: true,
+    });
   } catch (err) {
     if (handleTokenError(res, err)) return;
-    if (err instanceof ProfileSetupUnavailable) {
-      res.status(503).json({ error: err.message, profileSetupAvailable: false });
+    if (err instanceof ProfileValidationError) {
+      res.status(400).json({ error: err.message, problems: err.problems });
       return;
     }
     logger.error({ err }, "[Outreach] traveler setup submit failed");

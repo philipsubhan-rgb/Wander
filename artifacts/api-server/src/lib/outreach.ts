@@ -10,12 +10,15 @@
  * execution (Story 4.2 — decisions live in decideChaseAction), and the
  * organizer roster projection (Story 3.2).
  *
- * The traveler-profile vault is the NEXT build. The submission endpoint
- * therefore rejects with ProfileSetupUnavailable rather than collecting
- * private fields into any interim store — there is no shadow profile
- * table, by design.
+ * Profile submission writes into the traveler-profile vault through the
+ * Context/Profile service (lib/travelerProfile.ts) — the only module
+ * that touches the vault. There is no shadow profile store here either:
+ * this service validates the invite token, resolves/creates the
+ * traveler's user record, and hands the fields to the vault service.
  */
 
+import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import {
   db,
@@ -29,6 +32,14 @@ import {
 } from "@workspace/db";
 import { sendEmail } from "./email.js";
 import { logger } from "./logger.js";
+import {
+  ProfileValidationError,
+  computeMissingFields,
+  flagProfileChangeForTrips,
+  loadProfileRow,
+  upsertProfile,
+  type TravelerProfileInput,
+} from "./travelerProfile.js";
 import {
   OUTREACH_CONFIG,
   buildInviteEmail,
@@ -79,19 +90,7 @@ export class InviteTokenError extends Error {
   }
 }
 
-/**
- * Thrown by the profile-submission seam until the traveler-profile vault
- * lands. The token is NOT consumed and nothing is stored — the traveler
- * keeps a working link for when setup opens.
- */
-export class ProfileSetupUnavailable extends Error {
-  constructor() {
-    super(
-      "Profile setup is not available yet — your link stays valid, and Wander will be able to accept your details soon.",
-    );
-    this.name = "ProfileSetupUnavailable";
-  }
-}
+
 
 // ---------------------------------------------------------------------------
 // Shared lookups & access
@@ -198,6 +197,8 @@ async function updateEntry(
     status: string;
     missingFields: string[];
     chaseState: Record<string, unknown>;
+    userId: number;
+    invitedEmail: string;
   }>,
 ): Promise<void> {
   await db
@@ -516,7 +517,7 @@ export interface TravelerSetupContext {
   missingFields: Array<{ name: string; label: string }>;
   /** The Story 4.3 disclosure, stated before any field is shown. */
   privacyNotice: string;
-  /** False until the profile vault lands; the page renders accordingly. */
+  /** True — the profile vault is live; the page may collect fields. */
   profileSetupAvailable: boolean;
 }
 
@@ -558,23 +559,191 @@ export async function beginTravelerSetup(
       `Your details are private. You enter them yourself, directly to Wander. ` +
       `${organizerName} can only see whether your details are complete — never the details themselves. ` +
       `Nobody else on the trip can see them either.`,
-    profileSetupAvailable: false,
+    profileSetupAvailable: true,
   };
 }
 
 /**
- * The submission seam. Until the traveler-profile vault exists this
- * rejects with ProfileSetupUnavailable: the token stays unconsumed and
- * NOTHING the traveler sent is stored anywhere. When the vault lands,
- * this becomes the consuming write into it (token → used_at, entry →
- * ready, missingFields recomputed by the vault service).
+ * What the account-wall-free setup page submits. All fields optional —
+ * a partial submission is a real state (setting_up with the true
+ * remaining missing fields), not an error. `legalName` is a convenience
+ * for a single name box; explicit first/middle/last win when present.
+ * `email` is used only when the roster entry itself carries none (the
+ * hand-delivered share-link path).
+ */
+export interface TravelerProfileSubmission {
+  email?: string;
+  legalFirstName?: string;
+  legalMiddleName?: string;
+  legalLastName?: string;
+  legalName?: string;
+  dateOfBirth?: string;
+  passportNumber?: string;
+  passportIssuingCountry?: string;
+  passportExpiry?: string;
+  nationality?: string;
+  phone?: string;
+  emergencyContact?: {
+    name?: string;
+    relationship?: string | null;
+    phone?: string;
+  } | null;
+}
+
+function submissionToProfileInput(sub: TravelerProfileSubmission): TravelerProfileInput {
+  const input: TravelerProfileInput = {
+    legalFirstName: sub.legalFirstName,
+    legalMiddleName: sub.legalMiddleName,
+    legalLastName: sub.legalLastName,
+    dateOfBirth: sub.dateOfBirth,
+    passportNumber: sub.passportNumber,
+    passportIssuingCountry: sub.passportIssuingCountry,
+    passportExpiry: sub.passportExpiry,
+    nationality: sub.nationality,
+    phone: sub.phone,
+  };
+  if (sub.legalName && !sub.legalFirstName && !sub.legalLastName) {
+    const tokens = sub.legalName.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 1) {
+      input.legalFirstName = tokens[0];
+    } else if (tokens.length >= 2) {
+      input.legalFirstName = tokens[0];
+      input.legalLastName = tokens[tokens.length - 1];
+      if (tokens.length > 2) input.legalMiddleName = tokens.slice(1, -1).join(" ");
+    }
+  }
+  if (sub.emergencyContact !== undefined) {
+    input.emergencyContact =
+      sub.emergencyContact === null
+        ? null
+        : {
+            name: sub.emergencyContact.name ?? "",
+            relationship: sub.emergencyContact.relationship ?? null,
+            phone: sub.emergencyContact.phone ?? "",
+          };
+  }
+  return input;
+}
+
+/**
+ * Resolve the traveler's user record: an existing account with this
+ * email is claimed (linked), otherwise one is created silently behind
+ * the profile (§3.4). A created account's password hash is of a random
+ * secret that is hashed and discarded — the account cannot be logged
+ * into until the traveler claims it via the password-reset flow (the
+ * Story 4.3 "offer afterward"). No login flow is built here.
+ */
+async function findOrCreateTravelerUser(
+  email: string,
+  displayName: string,
+): Promise<UserRow> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const [existing] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.email, normalizedEmail));
+  if (existing) return existing;
+
+  const passwordHash = await bcrypt.hash(randomBytes(32).toString("hex"), 10);
+  await db.insert(usersTable).values({
+    username: `traveler-${randomBytes(6).toString("hex")}`,
+    name: displayName,
+    email: normalizedEmail,
+    role: "traveler",
+    passwordHash,
+  });
+  const [created] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.email, normalizedEmail));
+  if (!created) throw new Error("Failed to create the traveler's user record.");
+  logger.info({ userId: created.id }, "[Outreach] silent user record created for traveler profile");
+  return created;
+}
+
+export interface SubmitProfileResult {
+  status: string;
+  /** Required field NAMES still outstanding — never values. */
+  missingFields: string[];
+  /** Non-fatal flags for the traveler (e.g. "passport_expired"). */
+  warnings: string[];
+  userId: number;
+}
+
+/**
+ * The submission flow (Story 4.3/5.1), now backed by the vault:
+ * validate token → resolve/create the traveler's user record → write
+ * the fields into the vault via the Context/Profile service → link the
+ * roster entry → recompute missingFields from real profile state →
+ * advance status (ready when nothing required is missing, else
+ * setting_up) → consume the token. The token is consumed LAST, so a
+ * validation failure leaves the traveler a working link to retry with.
  */
 export async function submitTravelerProfile(
   rawToken: string,
+  submission: TravelerProfileSubmission = {},
   now: Date = new Date(),
-): Promise<never> {
-  await validateInviteToken(rawToken, now);
-  throw new ProfileSetupUnavailable();
+): Promise<SubmitProfileResult> {
+  const { tokenId, entry } = await validateInviteToken(rawToken, now);
+  if (entry.status === "declined") {
+    throw new InviteTokenError(
+      "used",
+      "This invitation was declined. Ask the organizer to send you a fresh one if that was a mistake.",
+    );
+  }
+
+  // Resolve whose profile this is. A linked entry already knows; an
+  // emailed entry resolves by its invited email; a hand-delivered share
+  // link relies on the email the traveler provides in the submission.
+  let userId = entry.userId;
+  let entryEmail = entry.invitedEmail;
+  if (userId === null) {
+    const email = entry.invitedEmail ?? submission.email?.trim();
+    if (!email) {
+      throw new ProfileValidationError([
+        "an email address is required to save your details",
+      ]);
+    }
+    const user = await findOrCreateTravelerUser(email, entry.invitedName);
+    userId = user.id;
+    entryEmail = email.trim().toLowerCase();
+  }
+
+  const { profileVersion, warnings } = await upsertProfile(
+    userId,
+    submissionToProfileInput(submission),
+    { now },
+  );
+
+  // Link the entry to the profile owner (and record a traveler-supplied
+  // email on share-link entries that had none).
+  await updateEntry(entry.id, {
+    userId,
+    ...(entry.invitedEmail === null && entryEmail ? { invitedEmail: entryEmail } : {}),
+  });
+
+  // Change propagation covers this traveler's OTHER in-flight trips;
+  // this entry is then recomputed directly so its post-submit state is
+  // exact regardless of trip dates.
+  await flagProfileChangeForTrips(userId, profileVersion, now);
+  const profileRow = await loadProfileRow(userId);
+  const missing = computeMissingFields(profileRow, entry.requiredFieldsProfile ?? []);
+  const status = missing.length === 0 ? "ready" : "setting_up";
+  const chase = parseChaseState(entry.chaseState);
+  await updateEntry(entry.id, {
+    missingFields: missing,
+    status,
+    ...(missing.length === 0
+      ? { chaseState: { ...chase, nextDueAt: null } as unknown as Record<string, unknown> }
+      : {}),
+  });
+
+  await consumeInviteToken(tokenId, now);
+  logger.info(
+    { entryId: entry.id, tripId: entry.tripId, userId, status, missingCount: missing.length },
+    "[Outreach] traveler profile submitted",
+  );
+  return { status, missingFields: missing, warnings, userId };
 }
 
 /** Decline from the setup flow (Story 4.3): consumes the token, stops chasing. */
