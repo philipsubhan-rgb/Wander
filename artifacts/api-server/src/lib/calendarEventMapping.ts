@@ -156,6 +156,182 @@ export function mapReservationToCalendarEvent(
   return payload;
 }
 
+// ─── Flights / stays / car rentals (§6/§9 extension beyond reservations) ────
+
+export interface MappableFlight {
+  id: number;
+  flightNumber: string;
+  airline: string;
+  departureAirport: string;
+  arrivalAirport: string;
+  /** Airport-local wall clock "YYYY-MM-DDTHH:mm" (may carry seconds). */
+  departureDatetime: string;
+  arrivalDatetime: string;
+  departureTimezone?: string | null;
+  arrivalTimezone?: string | null;
+  confirmationCode?: string | null;
+  notes?: string | null;
+}
+
+export interface MappableAccommodation {
+  id: number;
+  name: string;
+  address: string;
+  /** "YYYY-MM-DD" or a datetime — the date part is what the stay spans. */
+  checkIn: string;
+  checkOut: string;
+  confirmationCode?: string | null;
+  phone?: string | null;
+  notes?: string | null;
+}
+
+export interface MappableCarRental {
+  id: number;
+  company: string;
+  pickupLocation: string;
+  dropoffLocation?: string | null;
+  /** "YYYY-MM-DDTHH:mm" wall clock (may be date-only). */
+  pickupDatetime: string;
+  dropoffDatetime: string;
+  confirmationCode?: string | null;
+  driverName?: string | null;
+  notes?: string | null;
+}
+
+const DATETIME_RE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/;
+
+/**
+ * Normalize a stored "YYYY-MM-DDTHH:mm" wall-clock datetime to Google's
+ * "YYYY-MM-DDTHH:MM:SS" shape. Returns null for anything unparseable
+ * (caller skips write-back for that item rather than guessing).
+ */
+export function normalizeWallClock(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const m = DATETIME_RE.exec(raw.trim());
+  if (!m) return null;
+  const [, date, hh, mm, ss] = m;
+  if (+hh > 23 || +mm > 59 || (ss !== undefined && +ss > 59)) return null;
+  return `${date}T${hh}:${mm}:${ss ?? "00"}`;
+}
+
+function sharedDescription(
+  lines: Array<string | null | undefined>,
+  tripTitle?: string,
+): string | undefined {
+  const parts = [
+    ...lines,
+    tripTitle ? `Trip: ${tripTitle}` : null,
+    "Booked via Wander",
+  ].filter((p): p is string => Boolean(p));
+  return parts.length > 0 ? parts.join("\n") : undefined;
+}
+
+/**
+ * Map a flight to a calendar event: departure → arrival, each end in
+ * its own airport's timezone when Wander knows it (the datetimes are
+ * airport-local wall clock, so the zone is what makes them absolute).
+ */
+export function mapFlightToCalendarEvent(
+  f: MappableFlight,
+  opts: { tripTitle?: string } = {},
+): GoogleCalendarEventPayload | null {
+  const start = normalizeWallClock(f.departureDatetime);
+  const end = normalizeWallClock(f.arrivalDatetime);
+  if (!start || !end) return null;
+  const payload: GoogleCalendarEventPayload = {
+    summary: `${f.airline} ${f.flightNumber} — ${f.departureAirport} → ${f.arrivalAirport}`,
+    location: f.departureAirport,
+    start: { dateTime: start },
+    end: { dateTime: end },
+  };
+  if (f.departureTimezone) (payload.start as GoogleEventDateTime).timeZone = f.departureTimezone;
+  if (f.arrivalTimezone) (payload.end as GoogleEventDateTime).timeZone = f.arrivalTimezone;
+  const description = sharedDescription(
+    [f.confirmationCode ? `Confirmation: ${f.confirmationCode}` : null, f.notes ?? null],
+    opts.tripTitle,
+  );
+  if (description) payload.description = description;
+  return payload;
+}
+
+/**
+ * Map a stay to an all-day event spanning check-in → check-out. Google
+ * all-day end dates are exclusive, and the check-out DATE is exactly
+ * that: the stay's nights end that morning, so [checkIn, checkOut) is
+ * the correct span with no +1 adjustment.
+ */
+export function mapAccommodationToCalendarEvent(
+  a: MappableAccommodation,
+  opts: { tripTitle?: string } = {},
+): GoogleCalendarEventPayload | null {
+  const checkIn = a.checkIn?.slice(0, 10) ?? "";
+  const checkOut = a.checkOut?.slice(0, 10) ?? "";
+  if (!DATE_RE.test(checkIn) || !DATE_RE.test(checkOut) || checkOut <= checkIn) return null;
+  const payload: GoogleCalendarEventPayload = {
+    summary: a.name || "Wander stay",
+    start: { date: checkIn },
+    end: { date: checkOut },
+  };
+  if (a.address) payload.location = a.address;
+  const description = sharedDescription(
+    [
+      a.confirmationCode ? `Confirmation: ${a.confirmationCode}` : null,
+      a.phone ? `Property phone: ${a.phone}` : null,
+      a.notes ?? null,
+    ],
+    opts.tripTitle,
+  );
+  if (description) payload.description = description;
+  return payload;
+}
+
+/**
+ * Map a car rental to a timed event, pickup → drop-off (floating local
+ * wall clock, like reservations — Wander stores no zone for rentals).
+ * Date-only values fall back to an all-day span.
+ */
+export function mapCarRentalToCalendarEvent(
+  r: MappableCarRental,
+  opts: { timeZone?: string; tripTitle?: string } = {},
+): GoogleCalendarEventPayload | null {
+  const description = sharedDescription(
+    [
+      r.confirmationCode ? `Confirmation: ${r.confirmationCode}` : null,
+      r.driverName ? `Driver: ${r.driverName}` : null,
+      r.dropoffLocation && r.dropoffLocation !== r.pickupLocation
+        ? `Drop-off: ${r.dropoffLocation}`
+        : null,
+      r.notes ?? null,
+    ],
+    opts.tripTitle,
+  );
+  const payload: GoogleCalendarEventPayload = {
+    summary: `${r.company} car rental`,
+    start: { date: "" },
+    end: { date: "" },
+  };
+  if (r.pickupLocation) payload.location = r.pickupLocation;
+  if (description) payload.description = description;
+
+  const start = normalizeWallClock(r.pickupDatetime);
+  const end = normalizeWallClock(r.dropoffDatetime);
+  if (start && end) {
+    payload.start = { dateTime: start };
+    payload.end = { dateTime: end };
+    if (opts.timeZone) {
+      (payload.start as GoogleEventDateTime).timeZone = opts.timeZone;
+      (payload.end as GoogleEventDateTime).timeZone = opts.timeZone;
+    }
+    return payload;
+  }
+  const startDate = r.pickupDatetime?.slice(0, 10) ?? "";
+  const endDate = r.dropoffDatetime?.slice(0, 10) ?? "";
+  if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate) || endDate < startDate) return null;
+  payload.start = { date: startDate };
+  payload.end = { date: addDays(endDate, 1) };
+  return payload;
+}
+
 /** Stable content hash of a payload — what "changed?" is judged against. */
 export function hashCalendarEventPayload(payload: GoogleCalendarEventPayload): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");

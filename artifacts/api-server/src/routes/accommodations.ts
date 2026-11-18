@@ -9,7 +9,7 @@ import {
   UpdateAccommodationBody,
   DeleteAccommodationParams,
 } from "@workspace/api-zod";
-import { requireTripParticipant } from "../middlewares/auth";
+import { requireTripParticipant, getAuthUserId } from "../middlewares/auth";
 
 // Extras pass hook (§7): lazy-loaded like the calendar-sync hook in
 // reservations.ts — the pass is best-effort (a failure never fails
@@ -51,6 +51,12 @@ router.post("/trips/:tripId/accommodations", requireTripParticipant(), async (re
   const parsed = CreateAccommodationBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [item] = await db.insert(accommodationsTable).values({ ...parsed.data, tripId: params.data.tripId }).returning();
+  // Calendar write-back (best-effort; never fails the request).
+  const userId = getAuthUserId(req, res);
+  if (userId) {
+    const { syncAccommodationForUser } = await import("../lib/calendarSync");
+    await syncAccommodationForUser(userId, item);
+  }
   const ex = await extras();
   if (ex) await ex.runExtrasPassBestEffort(params.data.tripId, "stay_added");
   res.status(201).json(toAccommodationResponse(item));
@@ -63,12 +69,18 @@ router.patch("/trips/:tripId/accommodations/:accommodationId", requireTripPartic
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [item] = await db.update(accommodationsTable).set(parsed.data).where(and(eq(accommodationsTable.id, params.data.accommodationId), eq(accommodationsTable.tripId, params.data.tripId))).returning();
   if (!item) { res.status(404).json({ error: "Accommodation not found" }); return; }
+  // Keep linked calendar events in sync (best-effort).
+  const { updateLinkedCalendarEventsForItem } = await import("../lib/calendarSync");
+  await updateLinkedCalendarEventsForItem({ type: "accommodation", item });
   res.json(toAccommodationResponse(item));
 });
 
 router.delete("/trips/:tripId/accommodations/:accommodationId", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = DeleteAccommodationParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
+  // Remove linked calendar events first (links cascade with the row).
+  const { deleteLinkedCalendarEventsForItem } = await import("../lib/calendarSync");
+  await deleteLinkedCalendarEventsForItem("accommodation", params.data.accommodationId);
   const [item] = await db.delete(accommodationsTable).where(and(eq(accommodationsTable.id, params.data.accommodationId), eq(accommodationsTable.tripId, params.data.tripId))).returning();
   if (!item) { res.status(404).json({ error: "Accommodation not found" }); return; }
   res.json({ success: true });

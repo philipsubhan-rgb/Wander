@@ -9,7 +9,7 @@ import {
   UpdateFlightBody,
   DeleteFlightParams,
 } from "@workspace/api-zod";
-import { requireTripParticipant } from "../middlewares/auth";
+import { requireTripParticipant, getAuthUserId } from "../middlewares/auth";
 
 // Extras pass hook (§7): lazy-loaded like the calendar-sync hook in
 // reservations.ts — keeps this router's import graph light, and the
@@ -52,6 +52,12 @@ router.post("/trips/:tripId/flights", requireTripParticipant(), async (req, res)
   const parsed = CreateFlightBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [flight] = await db.insert(flightsTable).values({ ...parsed.data, tripId: params.data.tripId }).returning();
+  // Calendar write-back (best-effort; never fails the request).
+  const userId = getAuthUserId(req, res);
+  if (userId) {
+    const { syncFlightForUser } = await import("../lib/calendarSync");
+    await syncFlightForUser(userId, flight);
+  }
   // The golf rule (§7): extras like club shipping must surface BEFORE
   // flights finalize — a flight landing on the trip fires the pass.
   const ex = await extras();
@@ -66,12 +72,18 @@ router.patch("/trips/:tripId/flights/:flightId", requireTripParticipant(), async
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [flight] = await db.update(flightsTable).set(parsed.data).where(and(eq(flightsTable.id, params.data.flightId), eq(flightsTable.tripId, params.data.tripId))).returning();
   if (!flight) { res.status(404).json({ error: "Flight not found" }); return; }
+  // Keep linked calendar events in sync (best-effort).
+  const { updateLinkedCalendarEventsForItem } = await import("../lib/calendarSync");
+  await updateLinkedCalendarEventsForItem({ type: "flight", item: flight });
   res.json(toFlightResponse(flight));
 });
 
 router.delete("/trips/:tripId/flights/:flightId", requireTripParticipant(), async (req, res): Promise<void> => {
   const params = DeleteFlightParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: "Invalid params" }); return; }
+  // Remove linked calendar events first (links cascade with the row).
+  const { deleteLinkedCalendarEventsForItem } = await import("../lib/calendarSync");
+  await deleteLinkedCalendarEventsForItem("flight", params.data.flightId);
   const [flight] = await db.delete(flightsTable).where(and(eq(flightsTable.id, params.data.flightId), eq(flightsTable.tripId, params.data.tripId))).returning();
   if (!flight) { res.status(404).json({ error: "Flight not found" }); return; }
   res.json({ success: true });

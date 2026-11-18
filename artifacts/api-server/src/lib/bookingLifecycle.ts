@@ -60,7 +60,11 @@ import {
   type DuffelOrderCancellation,
   type DuffelOrdersClient,
 } from "./duffel";
-import { deleteLinkedCalendarEvents } from "./calendarSync";
+import {
+  deleteLinkedCalendarEvents,
+  deleteLinkedCalendarEventsForItem,
+} from "./calendarSync";
+import type { CalendarItemType } from "@workspace/db";
 import { deregisterWatchForFlight } from "./watching";
 import { logger } from "./logger";
 
@@ -137,6 +141,11 @@ export interface BookingLifecycleDeps {
   gate?: BookingGate;
   deregisterWatch?: (flightId: number) => Promise<unknown>;
   deleteCalendarEvents?: (reservationId: number) => Promise<unknown>;
+  /** Calendar cleanup for the booking's projected itinerary items. */
+  deleteItemCalendarEvents?: (
+    itemType: CalendarItemType,
+    itemId: number,
+  ) => Promise<unknown>;
   policy?: ConfirmationPolicy;
   now?: () => Date;
 }
@@ -148,6 +157,10 @@ export class BookingLifecycle {
   private readonly gate: BookingGate;
   private readonly deregisterWatch: (flightId: number) => Promise<unknown>;
   private readonly deleteCalendarEvents: (reservationId: number) => Promise<unknown>;
+  private readonly deleteItemCalendarEvents: (
+    itemType: CalendarItemType,
+    itemId: number,
+  ) => Promise<unknown>;
   private readonly policy: ConfirmationPolicy;
   private readonly now: () => Date;
 
@@ -160,6 +173,9 @@ export class BookingLifecycle {
     this.deleteCalendarEvents =
       deps.deleteCalendarEvents ??
       (async (reservationId) => deleteLinkedCalendarEvents(reservationId));
+    this.deleteItemCalendarEvents =
+      deps.deleteItemCalendarEvents ??
+      (async (itemType, itemId) => deleteLinkedCalendarEventsForItem(itemType, itemId));
     this.policy = deps.policy ?? new ConservativeSelfOnlyPolicy();
     this.now = deps.now ?? (() => new Date());
   }
@@ -553,16 +569,23 @@ export class BookingLifecycle {
         logger.warn({ operationId, flightId, err }, "[BookingLifecycle] watch deregistration failed (best-effort)");
       }
     }
-    // Calendar: the write-back hook deletes events for
-    // RESERVATION-linked bookings. Gate flight bookings are not
-    // reservation-linked (flight calendar write-back was never wired
-    // — reservations only), so for them there are no calendar events
-    // to delete today; when that wiring lands, this call covers it.
+    // Calendar: delete the events write-back created for this
+    // booking — the reservation link (when reservation-linked) and
+    // every projected flight leg (gate flight bookings write flight
+    // events since the §6 extension). Best-effort: a stranded event
+    // never un-cancels a cancellation.
     if (booking.reservationId) {
       try {
         await this.deleteCalendarEvents(booking.reservationId);
       } catch (err) {
         logger.warn({ operationId, err }, "[BookingLifecycle] calendar cleanup failed (best-effort)");
+      }
+    }
+    for (const flightId of flightIds) {
+      try {
+        await this.deleteItemCalendarEvents("flight", flightId);
+      } catch (err) {
+        logger.warn({ operationId, flightId, err }, "[BookingLifecycle] flight calendar cleanup failed (best-effort)");
       }
     }
 

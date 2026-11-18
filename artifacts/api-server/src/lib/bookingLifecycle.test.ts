@@ -303,12 +303,15 @@ function makeLifecycle(opts: {
   gate?: unknown;
   deregisterWatch?: (flightId: number) => Promise<unknown>;
   deleteCalendarEvents?: (reservationId: number) => Promise<unknown>;
+  deleteItemCalendarEvents?: (itemType: string, itemId: number) => Promise<unknown>;
 }) {
   return new BookingLifecycle({
     ordersClient: opts.ordersClient as never,
     gate: opts.gate as BookingGate | undefined,
     deregisterWatch: opts.deregisterWatch ?? vi.fn(async () => ({ deregistered: true })),
     deleteCalendarEvents: opts.deleteCalendarEvents ?? vi.fn(async () => undefined),
+    deleteItemCalendarEvents:
+      (opts.deleteItemCalendarEvents as never) ?? vi.fn(async () => undefined),
     now: NOW,
   });
 }
@@ -449,7 +452,13 @@ describe("executeCancellation — reachable only from CONFIRMED", () => {
     const { client, calls } = fakeOrdersClient({});
     const deregisterWatch = vi.fn(async () => ({ deregistered: true }));
     const deleteCalendarEvents = vi.fn(async () => undefined);
-    const lifecycle = makeLifecycle({ ordersClient: client, deregisterWatch, deleteCalendarEvents });
+    const deleteItemCalendarEvents = vi.fn(async () => undefined);
+    const lifecycle = makeLifecycle({
+      ordersClient: client,
+      deregisterWatch,
+      deleteCalendarEvents,
+      deleteItemCalendarEvents,
+    });
 
     // CONFIRM (self-only coverage).
     store.selectQueues["booking_operations"] = [[operationRow()]];
@@ -492,14 +501,19 @@ describe("executeCancellation — reachable only from CONFIRMED", () => {
     expect((flightUpdate.set as { notes: string }).notes).toContain("Cancelled 2026-11-18");
     expect((flightUpdate.set as { notes: string }).notes).toContain("$400.00");
 
-    // Operation executed; watch deregistered; no calendar events
-    // exist for a gate flight booking (reservationId null) → no call.
+    // Operation executed; watch deregistered. Calendar: the booking
+    // is not reservation-linked (reservationId null) so the
+    // reservation hook stays silent — but since the §6 write-back
+    // extension, gate flight bookings DO have flight events, and the
+    // item hook deletes them for the cancelled leg.
     const opUpdate = opsOn("booking_operations", "update").find(
       (o) => (o.set as { state?: string }).state === "executed",
     );
     expect(opUpdate).toBeTruthy();
     expect(deregisterWatch).toHaveBeenCalledWith(11);
     expect(deleteCalendarEvents).not.toHaveBeenCalled();
+    expect(deleteItemCalendarEvents).toHaveBeenCalledTimes(1);
+    expect(deleteItemCalendarEvents).toHaveBeenCalledWith("flight", 11);
   });
 });
 

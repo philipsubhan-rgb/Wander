@@ -28,6 +28,7 @@ import {
   bookingsTable,
   bookingTravelersTable,
   bookingSplitsTable,
+  calendarEventLinksTable,
   commissionRecordsTable,
   flightsTable,
   tripParticipantsTable,
@@ -36,7 +37,9 @@ import {
   type BookingAttempt,
   type BookingAttemptTraveler,
   type BookingChangeContext,
+  type CalendarEventLink,
 } from "@workspace/db";
+import type { CalendarItemRef } from "./calendarSync";
 import { formatMoney, fromMajorDecimal, money, subtract, toLegacyPrice, type Money } from "@workspace/money";
 import {
   assertTransition,
@@ -143,6 +146,17 @@ export interface BookingGateDeps {
   readProfile?: typeof readProfileFields;
   registerWatch?: (flightId: number) => Promise<unknown>;
   deregisterWatch?: (flightId: number) => Promise<unknown>;
+  /**
+   * Calendar write-back (§6): after a booking lands, its projected
+   * items are pushed to each covered traveler's Wander calendar.
+   * Defaults to the real sync (lazy-imported); best-effort always.
+   */
+  syncCalendarItem?: (userId: number, ref: CalendarItemRef) => Promise<unknown>;
+  /** Calendar cleanup for link rows captured while a change removes
+   * projected rows outright (their links cascade with the rows). */
+  deleteCalendarEventsByLinks?: (
+    links: Array<Pick<CalendarEventLink, "id" | "accountId" | "googleCalendarId" | "googleEventId">>,
+  ) => Promise<unknown>;
   loadRules?: (userId: number) => Promise<RuleInput[]>;
   policy?: ConfirmationPolicy;
   now?: () => Date;
@@ -226,6 +240,10 @@ export class BookingGate {
   private readonly readProfile: typeof readProfileFields;
   private readonly registerWatch: (flightId: number) => Promise<unknown>;
   private readonly deregisterWatch: (flightId: number) => Promise<unknown>;
+  private readonly syncCalendarItem: (userId: number, ref: CalendarItemRef) => Promise<unknown>;
+  private readonly deleteCalendarEventsByLinks: (
+    links: Array<Pick<CalendarEventLink, "id" | "accountId" | "googleCalendarId" | "googleEventId">>,
+  ) => Promise<unknown>;
   private readonly loadRules: (userId: number) => Promise<RuleInput[]>;
   private readonly policy: ConfirmationPolicy;
   private readonly now: () => Date;
@@ -240,10 +258,61 @@ export class BookingGate {
     this.registerWatch = deps.registerWatch ?? (async (flightId) => registerWatchForFlight(flightId));
     this.deregisterWatch =
       deps.deregisterWatch ?? (async (flightId) => deregisterWatchForFlight(flightId));
+    this.syncCalendarItem =
+      deps.syncCalendarItem ??
+      (async (userId, ref) => {
+        const { syncCalendarItemForUser } = await import("./calendarSync");
+        return syncCalendarItemForUser(userId, ref);
+      });
+    this.deleteCalendarEventsByLinks =
+      deps.deleteCalendarEventsByLinks ??
+      (async (links) => {
+        const { deleteCalendarEventsByLinks } = await import("./calendarSync");
+        return deleteCalendarEventsByLinks(links);
+      });
     this.loadRules =
       deps.loadRules ?? (async (userId) => (await listRules(userId)).map(ruleRowToInput));
     this.policy = deps.policy ?? new ConservativeSelfOnlyPolicy();
     this.now = deps.now ?? (() => new Date());
+  }
+
+  /**
+   * Calendar write-back for a finalized booking (§6): push each
+   * projected item to every covered traveler who has a Wander account
+   * (roster-only travelers have no calendar to write to). Best-effort
+   * end to end — a calendar failure never un-books a booking.
+   */
+  private async syncCalendarForBooking(
+    attemptId: number,
+    refs: CalendarItemRef[],
+  ): Promise<void> {
+    if (refs.length === 0) return;
+    let coverage: BookingAttemptTraveler[];
+    try {
+      coverage = await this.loadCoverage(attemptId);
+    } catch (err) {
+      logger.warn({ attemptId, err }, "[BookingGate] calendar write-back skipped (coverage load failed)");
+      return;
+    }
+    const userIds = [
+      ...new Set(
+        coverage
+          .map((c) => c.userId)
+          .filter((u): u is number => typeof u === "number"),
+      ),
+    ];
+    for (const userId of userIds) {
+      for (const ref of refs) {
+        try {
+          await this.syncCalendarItem(userId, ref);
+        } catch (err) {
+          logger.warn(
+            { attemptId, userId, err },
+            "[BookingGate] calendar write-back failed (best-effort)",
+          );
+        }
+      }
+    }
   }
 
   /**
@@ -938,6 +1007,18 @@ export class BookingGate {
         .where(eq(bookingsTable.id, booking.id));
     }
 
+    // Calendar write-back (§6): the booked legs land on each covered
+    // traveler's Wander calendar — best-effort, like watching.
+    const flightRefs: CalendarItemRef[] = [];
+    for (const flightId of finalized.flightIds) {
+      const [row] = await db
+        .select()
+        .from(flightsTable)
+        .where(eq(flightsTable.id, flightId));
+      if (row) flightRefs.push({ type: "flight", item: row });
+    }
+    await this.syncCalendarForBooking(attemptId, flightRefs);
+
     logger.info(
       { attemptId, bookingId: booking.id, pendingConfirmation },
       "[BookingGate] booking executed",
@@ -1172,6 +1253,20 @@ export class BookingGate {
       );
       return { booking: updatedBooking ?? booking, bookedAttempt };
     });
+
+    // Calendar write-back (§6): the stay lands on each covered
+    // traveler's Wander calendar — best-effort, like the flight path.
+    if (finalized.booking.accommodationId) {
+      const [acc] = await db
+        .select()
+        .from(accommodationsTable)
+        .where(eq(accommodationsTable.id, finalized.booking.accommodationId));
+      if (acc) {
+        await this.syncCalendarForBooking(attemptId, [
+          { type: "accommodation", item: acc },
+        ]);
+      }
+    }
 
     logger.info(
       { attemptId, bookingId: booking.id, pendingConfirmation },
@@ -1418,8 +1513,19 @@ export class BookingGate {
           if (inserted) newFlightIds.push(inserted.id);
         }
       }
+      // Calendar: a surplus row's event links are captured (and the
+      // link rows removed) BEFORE the row delete — the links would
+      // cascade away with the row, taking the Google event ids with
+      // them. The events themselves are deleted after commit, from
+      // the captured links (see the calendar tail below).
+      const removedCalendarLinks: CalendarEventLink[] = [];
       for (const surplus of currentRows.slice(rows.length)) {
         removedRows.push(surplus);
+        const links = await tx
+          .delete(calendarEventLinksTable)
+          .where(eq(calendarEventLinksTable.flightId, surplus.id))
+          .returning();
+        removedCalendarLinks.push(...links);
         await tx.delete(flightsTable).where(eq(flightsTable.id, surplus.id));
       }
 
@@ -1492,7 +1598,7 @@ export class BookingGate {
         { bookingId: original.id },
         tx,
       );
-      return { booking: updatedBooking ?? original, flightIds: newFlightIds, bookedAttempt };
+      return { booking: updatedBooking ?? original, flightIds: newFlightIds, bookedAttempt, removedCalendarLinks };
     });
 
     // Watching: register watches for the new legs — best-effort, the
@@ -1520,6 +1626,27 @@ export class BookingGate {
           updatedAt: this.now(),
         })
         .where(eq(bookingsTable.id, original.id));
+    }
+
+    // Calendar write-back (§6): the changed legs re-sync to each
+    // covered traveler's Wander calendar, and legs the change
+    // removed outright lose their events (from the links captured
+    // inside the transaction) — best-effort throughout.
+    const changedRefs: CalendarItemRef[] = [];
+    for (const flightId of finalized.flightIds) {
+      const [row] = await db
+        .select()
+        .from(flightsTable)
+        .where(eq(flightsTable.id, flightId));
+      if (row) changedRefs.push({ type: "flight", item: row });
+    }
+    await this.syncCalendarForBooking(attemptId, changedRefs);
+    if (finalized.removedCalendarLinks.length > 0) {
+      try {
+        await this.deleteCalendarEventsByLinks(finalized.removedCalendarLinks);
+      } catch (err) {
+        logger.warn({ attemptId, err }, "[BookingGate] calendar cleanup for removed legs failed (best-effort)");
+      }
     }
 
     logger.info({ attemptId, bookingId: original.id }, "[BookingGate] flight change executed");

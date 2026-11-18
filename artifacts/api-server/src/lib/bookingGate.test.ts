@@ -124,7 +124,7 @@ vi.mock("./email.js", () => ({
   sendEmail: vi.fn(async () => ({ sent: true })),
 }));
 
-import { BookingGate, BookingAccessDenied, type RequoteInfo } from "./bookingGate";
+import { BookingGate, BookingAccessDenied, type BookingGateDeps, type RequoteInfo } from "./bookingGate";
 import { GateTransitionError } from "./bookingGateLogic";
 import { DuffelError } from "./duffel";
 
@@ -306,6 +306,7 @@ function makeGate(overrides: {
   createOrderImpl?: CreateOrderFn;
   profile?: Record<string, string | null>;
   rules?: unknown[];
+  gateDeps?: Partial<BookingGateDeps>;
 } = {}) {
   const readProfileCalls: Array<Record<string, unknown>> = [];
   const watchCalls: number[] = [];
@@ -347,6 +348,7 @@ function makeGate(overrides: {
       return { created: true, watch: { ident: "UAL30", alertId: "alert_1" } };
     }),
     loadRules: vi.fn(async () => (overrides.rules ?? []) as never),
+    ...(overrides.gateDeps ?? {}),
   });
   return { gate, ordersClient, readProfileCalls, watchCalls };
 }
@@ -613,6 +615,38 @@ describe("executeAttempt — confirm-then-book, exactly once", () => {
 
     // Watching registered for the projected leg.
     expect(watchCalls).toEqual([55]);
+  });
+
+  it("calendar write-back: the booked leg syncs to each covered traveler's Wander calendar (§6)", async () => {
+    const calendarCalls: Array<{ userId: number; ref: { type: string; item: { id: number } } }> = [];
+    const { gate } = makeGate({
+      gateDeps: {
+        syncCalendarItem: vi.fn(async (userId: number, ref: never) => {
+          calendarCalls.push({ userId, ref });
+        }),
+      },
+    });
+    queueConfirmedExecute();
+    // Post-finalization reads the calendar tail performs: the
+    // projected flight row, then coverage again for the sync.
+    store.selectQueues["flights"] = [
+      [{
+        id: 55, tripId: 3, flightNumber: "UA30", airline: "United Airlines",
+        departureAirport: "EWR", arrivalAirport: "MUC",
+        departureDatetime: "2026-09-23T17:00", arrivalDatetime: "2026-09-24T07:10",
+        departureTimezone: "America/New_York", arrivalTimezone: "Europe/Berlin",
+      }],
+    ];
+    store.selectQueues["booking_attempt_travelers"] = [
+      [coverageRow({ confirmedAt: new Date() })],
+      [coverageRow({ confirmedAt: new Date() })],
+    ];
+    const result = await gate.executeAttempt(42, ACTOR);
+    expect(result.executed).toBe(true);
+    expect(calendarCalls).toHaveLength(1);
+    expect(calendarCalls[0].userId).toBe(7);
+    expect(calendarCalls[0].ref.type).toBe("flight");
+    expect(calendarCalls[0].ref.item.id).toBe(55);
   });
 
   it("execute without CONFIRMED is impossible at the service level — no provider call, no writes", async () => {
