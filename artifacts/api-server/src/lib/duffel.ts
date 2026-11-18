@@ -19,6 +19,7 @@
 
 import { fromMajorDecimal } from "@workspace/money";
 import type {
+  FlightOption,
   FlightSearchContext,
   FlightSliceSummary,
   OptionsAdapter,
@@ -268,7 +269,7 @@ function mapSlice(slice: DuffelOfferSlice): FlightSliceSummary | null {
  * offer cannot be represented exactly (missing/unparseable total) — a
  * price we cannot state exactly is not shown at all.
  */
-export function mapDuffelOffer(offer: DuffelOffer, pricedAt: string): WanderOption | null {
+export function mapDuffelOffer(offer: DuffelOffer, pricedAt: string): FlightOption | null {
   if (!offer.id || !offer.total_amount || !offer.total_currency) return null;
   let total;
   try {

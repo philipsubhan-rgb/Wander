@@ -85,14 +85,78 @@ export interface HomeEquivalent {
   rateAsOf: string;
 }
 
-export interface WanderOption {
+/**
+ * The itemized shape of a stay's full-stay total (Story 2.1). Every
+ * component is a payload-stated figure in the total's own currency —
+ * never derived by splitting a total the supplier didn't split, and
+ * never in a second currency. A component is null when the payload
+ * didn't state it.
+ */
+export interface StayRateBreakdown {
+  /** The rent/base for the WHOLE stay. */
+  base: Money | null;
+  /** Taxes for the whole stay, when stated separately. */
+  tax: Money | null;
+  /** Fees (service/cleaning) for the whole stay, when stated separately. */
+  fee: Money | null;
+  /** Combined taxes & fees (total − base) when the payload states only
+   * a base — labeled combined, never presented as a finer split. */
+  taxesAndFees: Money | null;
+  /** Portion of the total payable AT the property (not at booking). */
+  dueAtAccommodation: Money | null;
+}
+
+export interface StaySummary {
+  propertyName: string;
+  /** Supplier's property type as stated, normalized lowercase ("hotel", "apartment", …). */
+  propertyType: string;
+  /**
+   * Canonical style for the stay_style rule, derived by the adapter
+   * (the normalization layer): "chain" when a chain brand is stated,
+   * "home" for a whole-home property, "boutique" for an independent
+   * hotel-style property.
+   */
+  stayStyle: string;
+  /** True for whole-home properties (house/apartment/villa-style units). */
+  isWholeHome: boolean;
+  chainName: string | null;
+  cityName: string | null;
+  /** "Munich, Bavaria" — city + region/country as the payload states them. */
+  areaLabel: string;
+  /** Hotel star rating, when stated. */
+  starRating: number | null;
+  /** Guest review score (supplier's scale), when stated. */
+  reviewScore: number | null;
+  reviewCount: number | null;
+  /** The room/unit behind the cheapest rate, when rates were fetched. */
+  roomName: string | null;
+  beds: string | null;
+  checkInDate: string;
+  checkOutDate: string;
+  nights: number;
+  guestCount: number;
+  rooms: number;
+  breakdown: StayRateBreakdown;
+  /** Derived display only: full-stay total ÷ nights (exact, half-up). */
+  nightlyRate: Money | null;
+  /** Derived display only: full-stay total ÷ (nights × guests). */
+  perPersonPerNight: Money | null;
+  /** Plain-language cancellation position from the rate's timeline;
+   * null = the search payload didn't state one (confirmed at quote). */
+  cancellationTerms: string | null;
+  freeCancellation: boolean;
+  /** Meal plan as stated ("breakfast included", "room only"), normalized lightly. */
+  boardType: string | null;
+  /** Voiceable one-liner label, also the rules-engine label. */
+  label: string;
+}
+
+interface WanderOptionBase {
   /** Adapter-scoped id (e.g. the Duffel offer id). */
   id: string;
-  kind: OptionKind;
   /** Which adapter produced this ("duffel"). */
   adapter: string;
   supplier: string;
-  summary: FlightSummary;
   /** Charge currency, supplier-quoted, untouched. */
   money: Money;
   /** Converted display figure — estimate, snapshot-backed, or null. */
@@ -104,6 +168,23 @@ export interface WanderOption {
   ruleViolations: RuleViolation[];
   partner: PartnerRef | null;
 }
+
+export interface FlightOption extends WanderOptionBase {
+  kind: "flight";
+  summary: FlightSummary;
+}
+
+export interface StayOption extends WanderOptionBase {
+  kind: "stay";
+  summary: StaySummary;
+}
+
+/**
+ * A normalized option. A discriminated union on `kind`: each kind's
+ * summary carries exactly the fields that kind's payload supports —
+ * nothing is padded with invented values to fit a shared shape.
+ */
+export type WanderOption = FlightOption | StayOption;
 
 // ─── Search context & the adapter interface ──────────────────────────────────
 
@@ -118,12 +199,33 @@ export interface FlightSearchContext {
   maxConnections?: number;
 }
 
+export interface StaySearchContext {
+  /** Duffel searches stays around a point — the caller geocodes the
+   * traveler's place name (see the stays tool); the adapter never
+   * guesses coordinates. */
+  latitude: number;
+  longitude: number;
+  radiusKm: number;
+  checkInDate: string;
+  checkOutDate: string;
+  guestCount: number;
+  rooms: number;
+  freeCancellationOnly?: boolean;
+}
+
+/**
+ * One adapter interface, many providers (§5.1). Search methods are
+ * per-kind and OPTIONAL: an adapter implements the kinds it can price
+ * (the flights adapter flies; the stays adapter stays), and the
+ * service selects by capability, never by position.
+ */
 export interface OptionsAdapter {
   readonly id: string;
   readonly enabled: boolean;
   /** Why the adapter is off, in plain language ("" when enabled). */
   readonly disabledReason: string;
-  searchFlights(ctx: FlightSearchContext): Promise<WanderOption[]>;
+  searchFlights?(ctx: FlightSearchContext): Promise<WanderOption[]>;
+  searchStays?(ctx: StaySearchContext): Promise<WanderOption[]>;
 }
 
 // ─── Cache (§8 near-time tier) ───────────────────────────────────────────────
@@ -177,6 +279,36 @@ export class OptionCache {
   get size(): number {
     return this.entries.size;
   }
+}
+
+/**
+ * Canonical stay cache key: search parameters only, nothing
+ * user-shaped. Coordinates are rounded to 3 dp (~100 m) so trivially
+ * different geocodes of the same place share one entry — the search is
+ * the same search.
+ */
+export function stayCacheKey(ctx: StaySearchContext): string {
+  const round3 = (n: number) => Math.round(n * 1000) / 1000;
+  return JSON.stringify({
+    kind: "stay",
+    latitude: round3(ctx.latitude),
+    longitude: round3(ctx.longitude),
+    radiusKm: ctx.radiusKm,
+    checkInDate: ctx.checkInDate,
+    checkOutDate: ctx.checkOutDate,
+    guestCount: ctx.guestCount,
+    rooms: ctx.rooms,
+    freeCancellationOnly: ctx.freeCancellationOnly ?? false,
+  });
+}
+
+/** Whole nights between two YYYY-MM-DD dates; null when unparseable or ≤ 0. */
+export function nightsBetween(checkInDate: string, checkOutDate: string): number | null {
+  const a = Date.parse(`${checkInDate}T00:00:00Z`);
+  const b = Date.parse(`${checkOutDate}T00:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  const nights = Math.round((b - a) / 86400000);
+  return nights > 0 ? nights : null;
 }
 
 /** Canonical cache key: normalized search parameters, nothing user-shaped. */
@@ -305,9 +437,12 @@ export async function attachHomeEquivalents(
 /**
  * The ranking function's input: an option with the partner field REMOVED
  * at the type level. There is no commission field anywhere in this
- * module. Ranking cannot see what it cannot see.
+ * module. Ranking cannot see what it cannot see. (Distributive Omit so
+ * the flight/stay union survives the projection and `kind` still
+ * narrows the summary.)
  */
-export type RankableOption = Omit<WanderOption, "partner">;
+type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
+export type RankableOption = DistributiveOmit<WanderOption, "partner">;
 
 export interface RankedOption {
   option: RankableOption;
@@ -335,6 +470,16 @@ export interface RankedSet {
 
 /** Project a WanderOption onto the rules engine's normalized shape. */
 export function toNormalizedOption(option: RankableOption): NormalizedOption {
+  if (option.kind === "stay") {
+    const s = option.summary;
+    return {
+      kind: "stay",
+      label: s.label,
+      stayStyle: s.stayStyle,
+      priceMinor: option.money.amountMinor,
+      currency: option.money.currency,
+    };
+  }
   const s = option.summary;
   return {
     kind: "flight",
@@ -359,12 +504,17 @@ function fitReasons(
       reasons.push("Cheapest option that fits your rules");
     }
   }
-  const durations = kept
-    .map((o) => o.summary.totalDurationMinutes)
-    .filter((d): d is number => d !== null);
-  if (option.summary.totalDurationMinutes !== null && durations.length > 1) {
-    if (option.summary.totalDurationMinutes === Math.min(...durations)) {
-      reasons.push("Fastest option");
+  // Duration fit is a flight concept; stay sets compare on totals and
+  // per-night figures at presentation instead.
+  if (option.kind === "flight") {
+    const durations = kept
+      .filter((o): o is Extract<RankableOption, { kind: "flight" }> => o.kind === "flight")
+      .map((o) => o.summary.totalDurationMinutes)
+      .filter((d): d is number => d !== null);
+    if (option.summary.totalDurationMinutes !== null && durations.length > 1) {
+      if (option.summary.totalDurationMinutes === Math.min(...durations)) {
+        reasons.push("Fastest option");
+      }
     }
   }
   return { reasons };
@@ -402,8 +552,12 @@ export function rankOptionSet(
         return a.option.money.amountMinor - b.option.money.amountMinor;
       }
     }
-    const da = a.option.summary.totalDurationMinutes ?? Number.MAX_SAFE_INTEGER;
-    const db = b.option.summary.totalDurationMinutes ?? Number.MAX_SAFE_INTEGER;
+    const durationOf = (o: RankableOption): number =>
+      o.kind === "flight"
+        ? (o.summary.totalDurationMinutes ?? Number.MAX_SAFE_INTEGER)
+        : Number.MAX_SAFE_INTEGER;
+    const da = durationOf(a.option);
+    const db = durationOf(b.option);
     if (da !== db) return da - db;
     return a.index - b.index;
   });

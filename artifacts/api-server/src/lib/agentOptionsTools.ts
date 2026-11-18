@@ -2,8 +2,8 @@
  * Marco agent — options tools (`options_*`).
  *
  * Thin, typed façades over the Options Service (architecture §5.1):
- * this is how Marco shows REAL priced options — Duffel flights today —
- * filtered by the traveler's hard rules and ranked by their tastes,
+ * this is how Marco shows REAL priced options — Duffel flights and
+ * Duffel Stays today — filtered by the traveler's hard rules and ranked by their tastes,
  * with every price carrying its priced-at age. Presentation only:
  * there is deliberately NO booking tool here (the gate is January);
  * Marco can show options and their totals, never commit money.
@@ -18,9 +18,18 @@
 import { z } from "zod";
 import { formatMoney } from "@workspace/money";
 import type { AgentToolResult, ToolContext, ToolDefinition } from "./agentTools";
-import type { FlightSearchContext, OptionSet, PresentedOption } from "./options";
+import type {
+  FlightSearchContext,
+  FlightSummary,
+  OptionSet,
+  PresentedOption,
+  StayOption,
+  StaySearchContext,
+} from "./options";
+import { nightsBetween } from "./options";
 import { getDefaultOptionsService } from "./optionsService";
 import { DuffelError, OptionsAdapterDisabledError } from "./duffel";
+import { geocodeDestination } from "./weather";
 import { logger } from "./logger";
 
 function toolOk(text: string, data?: unknown): AgentToolResult {
@@ -44,6 +53,18 @@ const SearchFlightsInput = z.object({
   passengers: z.number().int().min(1).max(9).optional(),
   cabinClass: z.enum(["economy", "premium_economy", "business", "first"]).optional(),
   maxConnections: z.number().int().min(0).max(2).optional(),
+  tripScope: z.enum(["work", "personal"]).optional(),
+  refresh: z.boolean().optional(),
+});
+
+const SearchStaysInput = z.object({
+  location: z.string().min(2, "location is required"),
+  checkInDate: z.string().regex(DATE, "checkInDate must be YYYY-MM-DD"),
+  checkOutDate: z.string().regex(DATE, "checkOutDate must be YYYY-MM-DD"),
+  guests: z.number().int().min(1).max(16).optional(),
+  rooms: z.number().int().min(1).max(8).optional(),
+  radiusKm: z.number().min(1).max(50).optional(),
+  freeCancellationOnly: z.boolean().optional(),
   tripScope: z.enum(["work", "personal"]).optional(),
   refresh: z.boolean().optional(),
 });
@@ -82,8 +103,7 @@ function durationText(minutes: number | null): string {
   return h === 0 ? `${m} min` : `${h} h ${String(m).padStart(2, "0")} min`;
 }
 
-function stopsText(p: PresentedOption): string {
-  const s = p.option.summary;
+function stopsText(s: FlightSummary): string {
   if (s.totalStops === 0) return "nonstop";
   const parts = s.slices.flatMap((slice) =>
     slice.layovers.map((l) => `${l.airport} (${durationText(l.minutes)} layover)`),
@@ -93,12 +113,13 @@ function stopsText(p: PresentedOption): string {
 
 function formatOption(p: PresentedOption, index: number): string {
   const o = p.option;
+  if (o.kind !== "flight") return ""; // flight sets only; stays use formatStayOption
   const s = o.summary;
   const lines: string[] = [];
   const first = s.slices[0];
   const last = s.slices[s.slices.length - 1];
   const roundTrip = s.slices.length > 1 ? " (round trip)" : "";
-  lines.push(`${index + 1}. ${s.carrier} — ${stopsText(p)}${roundTrip}`);
+  lines.push(`${index + 1}. ${s.carrier} — ${stopsText(s)}${roundTrip}`);
   if (first && last) {
     const offset = dayOffset(first.departAt, last.arriveAt);
     lines.push(
@@ -165,6 +186,148 @@ export function formatOptionSetText(set: OptionSet, ctx: FlightSearchContext): s
   return lines.join("\n");
 }
 
+// ─── Stay formatting (what Marco voices) ─────────────────────────────────────
+
+type PresentedStay = PresentedOption & { option: StayOption };
+
+function isStayPresented(p: PresentedOption): p is PresentedStay {
+  return p.option.kind === "stay";
+}
+
+function formatStayOption(p: PresentedStay, index: number): string {
+  const o = p.option;
+  const s = o.summary;
+  const lines: string[] = [];
+  const typeBits = [
+    s.isWholeHome ? "whole home" : s.propertyType,
+    s.chainName,
+    s.starRating ? `${s.starRating}★` : null,
+    s.reviewScore !== null
+      ? `guest score ${s.reviewScore}${s.reviewCount !== null ? ` (${s.reviewCount} reviews)` : ""}`
+      : null,
+  ].filter(Boolean);
+  lines.push(`${index + 1}. ${s.propertyName} — ${s.areaLabel}${typeBits.length ? ` · ${typeBits.join(" · ")}` : ""}`);
+  const roomBits = [s.roomName, s.beds, s.boardType].filter(Boolean);
+  if (roomBits.length > 0) lines.push(`   ${roomBits.join(" · ")}`);
+  // THE total: the full stay, for the whole party — never a nightly rate.
+  let priceLine = `   Total for ${s.nights} night${s.nights === 1 ? "" : "s"}: ${formatMoney(o.money, "en-US")}`;
+  if (o.priceNature !== "firm") priceLine += ` (${o.priceNature} — final price confirmed at quote)`;
+  if (o.homeEquivalent) {
+    priceLine += ` — ≈ ${formatMoney(o.homeEquivalent.money, "en-US")} in your currency (estimate)`;
+  }
+  lines.push(priceLine);
+  const b = s.breakdown;
+  const breakdownBits = [
+    b.base ? `rent ${formatMoney(b.base, "en-US")}` : null,
+    b.tax ? `taxes ${formatMoney(b.tax, "en-US")}` : null,
+    b.fee ? `fees ${formatMoney(b.fee, "en-US")}` : null,
+    b.taxesAndFees ? `taxes & fees ${formatMoney(b.taxesAndFees, "en-US")}` : null,
+    b.dueAtAccommodation ? `${formatMoney(b.dueAtAccommodation, "en-US")} due at the property` : null,
+  ].filter(Boolean);
+  if (breakdownBits.length > 0) lines.push(`   ${breakdownBits.join(" · ")}`);
+  const derivedBits = [
+    s.nightlyRate ? `≈ ${formatMoney(s.nightlyRate, "en-US")} per night` : null,
+    s.perPersonPerNight
+      ? `≈ ${formatMoney(s.perPersonPerNight, "en-US")} per person per night (${s.guestCount} guests)`
+      : null,
+  ].filter(Boolean);
+  if (derivedBits.length > 0) lines.push(`   ${derivedBits.join(" · ")}`);
+  lines.push(
+    `   ${s.cancellationTerms ?? "Cancellation terms aren't stated at search time — confirmed when we request the quote."}`,
+  );
+  if (p.reasons.length > 0) lines.push(`   Why: ${p.reasons.join("; ")}`);
+  if (p.against.length > 0) lines.push(`   Trade-offs: ${p.against.join("; ")}`);
+  if (p.violations.length > 0) {
+    lines.push(`   ⚠ ${p.violations.map((v) => v.message).join(" ")}`);
+  }
+  if (p.disclosure) lines.push(`   ${p.disclosure}`);
+  return lines.join("\n");
+}
+
+/**
+ * The home-over-hotel SIGNAL (Story 2.3), surfaced honestly at
+ * presentation: when the party is a group (≥5 guests) or the stay is
+ * long (≥4 nights), whole homes are usually worth comparing against
+ * hotel rooms. The note says whether whole-home options actually came
+ * back in THIS search — it never pretends a unified cross-type ranking
+ * happened; hotels and homes are listed together with full-stay
+ * totals, and the judgment call stays visible as a note.
+ */
+export interface StaySearchSignals {
+  /** Group ≥5 or stay ≥4 nights — the signal applies. */
+  applies: boolean;
+  wholeHomesIncluded: number;
+  note: string | null;
+}
+
+export function staySearchSignals(ctx: StaySearchContext, set: OptionSet): StaySearchSignals {
+  const nights = nightsBetween(ctx.checkInDate, ctx.checkOutDate) ?? 0;
+  const applies = ctx.guestCount >= 5 || nights >= 4;
+  const wholeHomesIncluded = [...set.options, ...set.casualties].filter(
+    (p) => p.option.kind === "stay" && p.option.summary.isWholeHome,
+  ).length;
+  if (!applies) return { applies, wholeHomesIncluded, note: null };
+  const why =
+    ctx.guestCount >= 5 && nights >= 4
+      ? `a group of ${ctx.guestCount} staying ${nights} nights`
+      : ctx.guestCount >= 5
+        ? `a group of ${ctx.guestCount}`
+        : `a ${nights}-night stay`;
+  const note =
+    wholeHomesIncluded > 0
+      ? `Whole-home note: this list includes ${wholeHomesIncluded} whole-home option${wholeHomesIncluded === 1 ? "" : "s"} — for ${why}, a whole home often beats separate hotel rooms on shared space and per-person cost. Compare the full-stay totals above.`
+      : `Whole-home note: no whole-home options came back in this search — for ${why}, a home is often worth comparing. Ask me to widen the search area if you'd like me to look.`;
+  return { applies, wholeHomesIncluded, note };
+}
+
+export function formatStayOptionSetText(
+  set: OptionSet,
+  ctx: StaySearchContext,
+  locationLabel: string,
+): string {
+  const guests = `${ctx.guestCount} guest${ctx.guestCount === 1 ? "" : "s"}`;
+  const nights = nightsBetween(ctx.checkInDate, ctx.checkOutDate);
+  if (set.options.length === 0 && set.casualties.length === 0) {
+    if (set.notices.length > 0) {
+      return `${set.notices.join(" ")} No prices are shown rather than invented ones.`;
+    }
+    return `No stays found near ${locationLabel} for ${ctx.checkInDate} → ${ctx.checkOutDate} (${guests}). Try different dates or a wider search area.`;
+  }
+  const lines: string[] = [];
+  const staleNote = set.stale ? " — STALE: these prices are past their freshness window" : "";
+  lines.push(
+    `Stay options near ${locationLabel}, ${weekday(ctx.checkInDate)} ${ctx.checkInDate} → ${weekday(ctx.checkOutDate)} ${ctx.checkOutDate}` +
+      `${nights ? ` (${nights} night${nights === 1 ? "" : "s"})` : ""} (${guests}) — ${set.staleness}${staleNote}:`,
+  );
+  for (const notice of set.notices) lines.push(notice);
+  if (set.relaxed) {
+    lines.push(
+      "Every option breaks at least one of your rules, so here are the closest matches — each labeled with the rule it breaks:",
+    );
+  }
+  lines.push("");
+  set.options
+    .filter(isStayPresented)
+    .slice(0, MAX_VOICED_OPTIONS)
+    .forEach((p, i) => lines.push(formatStayOption(p, i)));
+  if (set.options.length > MAX_VOICED_OPTIONS) {
+    lines.push(`…and ${set.options.length - MAX_VOICED_OPTIONS} more options.`);
+  }
+  const signals = staySearchSignals(ctx, set);
+  if (signals.note) {
+    lines.push("");
+    lines.push(signals.note);
+  }
+  if (set.casualties.length > 0) {
+    lines.push("");
+    lines.push("Not shown — excluded by your rules:");
+    for (const c of set.casualties) {
+      lines.push(`- ${c.option.summary.label} — ${c.violations.map((v) => v.message).join(" ")}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 // ─── Tool run ────────────────────────────────────────────────────────────────
 
 async function searchFlights(
@@ -203,6 +366,57 @@ async function searchFlights(
   }
 }
 
+async function searchStays(
+  ctx: ToolContext,
+  args: z.infer<typeof SearchStaysInput>,
+): Promise<AgentToolResult> {
+  logger.info(
+    { tool: "options_search_stays", userId: ctx.userId, location: args.location, checkInDate: args.checkInDate },
+    "[Agent] tool call",
+  );
+  if (!nightsBetween(args.checkInDate, args.checkOutDate)) {
+    return toolErr(
+      `Check-out (${args.checkOutDate}) must be after check-in (${args.checkInDate}). No search was run.`,
+    );
+  }
+  // Duffel searches stays around coordinates; the place name is
+  // geocoded with the same Open-Meteo geocoder the weather briefing
+  // uses. No geocode → no search → no invented results.
+  const geo = await geocodeDestination(args.location);
+  if (!geo) {
+    return toolOk(
+      `I couldn't find a place called "${args.location}" — try a more specific name (for example "Munich, Germany"). No prices are shown rather than invented ones.`,
+    );
+  }
+  const search: StaySearchContext = {
+    latitude: geo.lat,
+    longitude: geo.lon,
+    radiusKm: args.radiusKm ?? 5,
+    checkInDate: args.checkInDate,
+    checkOutDate: args.checkOutDate,
+    guestCount: args.guests ?? 2,
+    rooms: args.rooms ?? 1,
+    freeCancellationOnly: args.freeCancellationOnly,
+  };
+  try {
+    const set = await getDefaultOptionsService().searchStays(ctx.userId, search, {
+      tripScope: args.tripScope,
+      refresh: args.refresh,
+    });
+    return toolOk(formatStayOptionSetText(set, search, args.location), set);
+  } catch (err) {
+    if (err instanceof OptionsAdapterDisabledError) {
+      return toolOk(`${err.message} No prices are shown rather than invented ones.`);
+    }
+    if (err instanceof DuffelError) {
+      logger.warn({ tool: "options_search_stays", userId: ctx.userId, err }, "[Agent] Duffel Stays search failed");
+      return toolErr(`Stay search failed: ${err.message} No prices are shown rather than invented ones.`);
+    }
+    logger.error({ tool: "options_search_stays", userId: ctx.userId, err }, "[Agent] tool error");
+    return toolErr("Stay search failed with an internal error. No prices are shown rather than invented ones.");
+  }
+}
+
 // ─── Registration ────────────────────────────────────────────────────────────
 
 export const OPTIONS_TOOLS: ToolDefinition[] = [
@@ -233,6 +447,36 @@ export const OPTIONS_TOOLS: ToolDefinition[] = [
     },
     input: SearchFlightsInput,
     run: searchFlights as ToolDefinition["run"],
+  },
+  {
+    name: "options_search_stays",
+    description:
+      "Search LIVE stay prices (Duffel Stays: hotels and whole homes) near a place for dates and a party size: real options " +
+      "with FULL-STAY totals (rent + taxes + fees itemized where the supplier states them, any amount due at the property " +
+      "flagged), per-night and per-person-per-night figures shown alongside, already filtered by the traveler's hard rules " +
+      "(e.g. stay style) and ranked by their tastes. Prices are estimates until a quote confirms them. For a group of 5+ " +
+      "or a stay of 4+ nights the output notes whether whole-home options are included, since a home often beats hotel " +
+      "rooms there. Each option carries a 'priced at' age — if the traveler asks to refresh, or dates/party changed, call " +
+      "again with refresh: true. This tool only SHOWS options — it cannot book anything. If stay search is not configured " +
+      "it says so plainly instead of inventing prices.",
+    parameters: {
+      type: "object",
+      properties: {
+        location: { type: "string", description: "Place to stay near — a city or neighborhood name (e.g. \"Munich\", \"Lawrenceville, NJ\")" },
+        checkInDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Check-in date as YYYY-MM-DD" },
+        checkOutDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Check-out date as YYYY-MM-DD (after check-in)" },
+        guests: { type: "integer", minimum: 1, maximum: 16, description: "Number of guests (default 2)" },
+        rooms: { type: "integer", minimum: 1, maximum: 8, description: "Number of rooms/units (default 1)" },
+        radiusKm: { type: "number", minimum: 1, maximum: 50, description: "Search radius in km around the place (default 5)" },
+        freeCancellationOnly: { type: "boolean", description: "Only stays with free cancellation (optional)" },
+        tripScope: { type: "string", enum: ["work", "personal"], description: "Whether this stay is for a work or personal trip — decides which scoped rules apply (optional)" },
+        refresh: { type: "boolean", description: "True to bypass the price cache and re-price live (traveler asked, or details changed)" },
+      },
+      required: ["location", "checkInDate", "checkOutDate"],
+      additionalProperties: false,
+    },
+    input: SearchStaysInput,
+    run: searchStays as ToolDefinition["run"],
   },
 ];
 

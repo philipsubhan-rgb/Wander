@@ -13,10 +13,17 @@ import {
   convertWithRate,
   flightCacheKey,
   isStale,
+  nightsBetween,
   parseDecimalToRational,
   presentRankedSet,
+  stayCacheKey,
+  toNormalizedOption,
+  type StayOption,
+  type StaySearchContext,
+  type StaySummary,
   rankOptionSet,
   stalenessLabel,
+  type FlightOption,
   type FxRate,
   type RankableOption,
   type WanderOption,
@@ -26,8 +33,8 @@ import type { RuleInput } from "./rulesEngine";
 const T0 = Date.parse("2026-11-18T08:00:00Z");
 const PRICED_AT = "2026-11-18T08:00:00Z";
 
-function flightOption(overrides: Partial<WanderOption> & { id: string }): WanderOption {
-  const base: WanderOption = {
+function flightOption(overrides: Partial<FlightOption> & { id: string }): FlightOption {
+  const base: FlightOption = {
     id: overrides.id,
     kind: "flight",
     adapter: "duffel",
@@ -159,12 +166,12 @@ describe("rankOptionSet — hard rules filter, casualties reported (TC-3 shape)"
   const basic = flightOption({
     id: "basic",
     money: money(45000, "USD"),
-    summary: { fareClass: "Basic Economy", changeable: false, label: "UA30 Basic Economy" } as WanderOption["summary"],
+    summary: { fareClass: "Basic Economy", changeable: false, label: "UA30 Basic Economy" } as FlightOption["summary"],
   });
   const standard = flightOption({
     id: "standard",
     money: money(61200, "USD"),
-    summary: { fareClass: "Economy", label: "UA31 Economy" } as WanderOption["summary"],
+    summary: { fareClass: "Economy", label: "UA31 Economy" } as FlightOption["summary"],
   });
   const strip = (o: WanderOption): RankableOption => {
     const { partner: _p, ...rest } = o;
@@ -184,7 +191,7 @@ describe("rankOptionSet — hard rules filter, casualties reported (TC-3 shape)"
     const basic2 = flightOption({
       id: "basic2",
       money: money(47000, "USD"),
-      summary: { fareClass: "Basic Economy", changeable: false, label: "LH458 Basic Economy" } as WanderOption["summary"],
+      summary: { fareClass: "Basic Economy", changeable: false, label: "LH458 Basic Economy" } as FlightOption["summary"],
     });
     const set = rankOptionSet([strip(basic), strip(basic2)], [NO_BASIC]);
     expect(set.relaxed).toBe(true);
@@ -209,12 +216,12 @@ describe("rankOptionSet — hard rules filter, casualties reported (TC-3 shape)"
     const cheapRigid = flightOption({
       id: "rigid",
       money: money(40000, "USD"),
-      summary: { changeable: false, label: "UA1 Economy" } as WanderOption["summary"],
+      summary: { changeable: false, label: "UA1 Economy" } as FlightOption["summary"],
     });
     const pricierFlex = flightOption({
       id: "flex",
       money: money(50000, "USD"),
-      summary: { changeable: true, label: "UA2 Economy" } as WanderOption["summary"],
+      summary: { changeable: true, label: "UA2 Economy" } as FlightOption["summary"],
     });
     const set = rankOptionSet([strip(cheapRigid), strip(pricierFlex)], [pref]);
     expect(set.ranked.map((r) => r.option.id)).toEqual(["flex", "rigid"]);
@@ -262,5 +269,171 @@ describe("ranking purity (§5.5) — partner metadata cannot move the ordering",
     expect(presented.options[0].disclosure).toBeNull();
     expect(presented.options[1].disclosure).toBe("Partner: Partner One");
     expect(presented.options[1].option.partner).toEqual({ id: "p1", name: "Partner One" });
+  });
+});
+
+// ─── Stays through the core (Task 3) ─────────────────────────────────────────
+
+function stayOption(
+  overrides: Partial<StayOption> & { id: string; summary?: Partial<StaySummary> },
+): StayOption {
+  const base: StayOption = {
+    id: overrides.id,
+    kind: "stay",
+    adapter: "duffel",
+    supplier: "Hotel Beispiel",
+    summary: {
+      propertyName: "Hotel Beispiel",
+      propertyType: "hotel",
+      stayStyle: "boutique",
+      isWholeHome: false,
+      chainName: null,
+      cityName: "Munich",
+      areaLabel: "Munich, Bavaria",
+      starRating: 4,
+      reviewScore: 8.7,
+      reviewCount: 100,
+      roomName: "Double Room",
+      beds: null,
+      checkInDate: "2026-12-03",
+      checkOutDate: "2026-12-08",
+      nights: 5,
+      guestCount: 2,
+      rooms: 1,
+      breakdown: { base: null, tax: null, fee: null, taxesAndFees: null, dueAtAccommodation: null },
+      nightlyRate: null,
+      perPersonPerNight: null,
+      cancellationTerms: null,
+      freeCancellation: false,
+      boardType: null,
+      label: "Hotel Beispiel, Munich",
+    },
+    money: money(80000, "EUR"),
+    homeEquivalent: null,
+    pricedAt: PRICED_AT,
+    priceNature: "estimate",
+    fulfillment: "api_rail",
+    ruleViolations: [],
+    partner: null,
+  };
+  return {
+    ...base,
+    ...overrides,
+    summary: { ...base.summary, ...(overrides.summary ?? {}) },
+  };
+}
+
+const BOUTIQUE_ONLY: RuleInput = {
+  id: 11,
+  ruleClass: "hard",
+  ruleType: "stay_style",
+  params: { style: "boutique" },
+  scope: "all",
+  source: "explicit",
+  active: true,
+};
+
+const CAP_500_EUR: RuleInput = {
+  id: 12,
+  ruleClass: "hard",
+  ruleType: "budget_cap",
+  params: { capMinor: 50000, currency: "EUR" },
+  scope: "all",
+  source: "explicit",
+  active: true,
+};
+
+const stripStay = (o: StayOption): RankableOption => {
+  const { partner: _p, ...rest } = o;
+  return rest;
+};
+
+describe("stays — normalization, rules, ranking", () => {
+  it("projects a stay onto the rules engine with its style and full-stay price", () => {
+    const n = toNormalizedOption(stripStay(stayOption({ id: "s1" })));
+    expect(n.kind).toBe("stay");
+    expect(n.stayStyle).toBe("boutique");
+    expect(n.priceMinor).toBe(80000);
+    expect(n.currency).toBe("EUR");
+    expect(n.label).toBe("Hotel Beispiel, Munich");
+  });
+
+  it("stay_style hard rule filters chain stays, keeps boutique", () => {
+    const chain = stayOption({
+      id: "chain",
+      summary: { stayStyle: "chain", chainName: "Accor", label: "Chain Hotel, Munich" },
+    });
+    const boutique = stayOption({ id: "boutique" });
+    const { ranked, casualties, relaxed } = rankOptionSet(
+      [stripStay(chain), stripStay(boutique)],
+      [BOUTIQUE_ONLY],
+    );
+    expect(relaxed).toBe(false);
+    expect(ranked.map((r) => r.option.id)).toEqual(["boutique"]);
+    expect(casualties.map((c) => c.option.id)).toEqual(["chain"]);
+    expect(casualties[0].violations[0].message).toContain("boutique stays only");
+  });
+
+  it("budget_cap judges the FULL-STAY total, not a nightly figure", () => {
+    const over = stayOption({ id: "over", money: money(80000, "EUR") }); // €800 for 5 nights
+    const under = stayOption({ id: "under", money: money(40000, "EUR") });
+    const { ranked, casualties } = rankOptionSet(
+      [stripStay(over), stripStay(under)],
+      [CAP_500_EUR],
+    );
+    expect(ranked.map((r) => r.option.id)).toEqual(["under"]);
+    expect(casualties.map((c) => c.option.id)).toEqual(["over"]);
+    expect(casualties[0].violations[0].message).toContain("budget cap");
+  });
+
+  it("ranks stays by preference fit then price, with no duration input", () => {
+    const dear = stayOption({ id: "dear", money: money(90000, "EUR") });
+    const cheap = stayOption({ id: "cheap", money: money(70000, "EUR") });
+    const { ranked } = rankOptionSet([stripStay(dear), stripStay(cheap)], []);
+    expect(ranked.map((r) => r.option.id)).toEqual(["cheap", "dear"]);
+    expect(ranked[0].reasons).toContain("Cheapest option that fits your rules");
+  });
+});
+
+describe("stays — cache key, TTL (§8: 6h), nights", () => {
+  const STAY_CTX: StaySearchContext = {
+    latitude: 48.137154,
+    longitude: 11.576124,
+    radiusKm: 5,
+    checkInDate: "2026-12-03",
+    checkOutDate: "2026-12-08",
+    guestCount: 5,
+    rooms: 1,
+  };
+
+  it("stayCacheKey is parameter-canonical and coordinate-tolerant", () => {
+    expect(stayCacheKey(STAY_CTX)).toBe(stayCacheKey({ ...STAY_CTX }));
+    // A 4th-decimal geocode wobble is the same search.
+    expect(stayCacheKey(STAY_CTX)).toBe(
+      stayCacheKey({ ...STAY_CTX, latitude: 48.137149, longitude: 11.576131 }),
+    );
+    expect(stayCacheKey(STAY_CTX)).not.toBe(stayCacheKey({ ...STAY_CTX, checkOutDate: "2026-12-09" }));
+    expect(stayCacheKey(STAY_CTX)).not.toBe(stayCacheKey({ ...STAY_CTX, guestCount: 2 }));
+  });
+
+  it("a stay entry is fresh at 5h and stale at 7h (TTL 6h, unlike flights' 20m)", () => {
+    let now = T0;
+    const cache = new OptionCache(() => now);
+    cache.set(stayCacheKey(STAY_CTX), [stayOption({ id: "s1" })], PRICED_AT);
+    now = T0 + 60 * 60 * 1000; // +1h — long past the flight TTL
+    expect(cache.get(stayCacheKey(STAY_CTX))?.fresh).toBe(true);
+    now = T0 + 5 * 60 * 60 * 1000;
+    expect(cache.get(stayCacheKey(STAY_CTX))?.fresh).toBe(true);
+    now = T0 + 7 * 60 * 60 * 1000;
+    expect(cache.get(stayCacheKey(STAY_CTX))?.fresh).toBe(false);
+    expect(isStale(PRICED_AT, "stay", T0 + 7 * 60 * 60 * 1000)).toBe(true);
+    expect(isStale(PRICED_AT, "stay", T0 + 5 * 60 * 60 * 1000)).toBe(false);
+  });
+
+  it("nightsBetween counts whole nights and rejects nonsense", () => {
+    expect(nightsBetween("2026-12-03", "2026-12-08")).toBe(5);
+    expect(nightsBetween("2026-12-08", "2026-12-03")).toBeNull();
+    expect(nightsBetween("2026-12-03", "2026-12-03")).toBeNull();
+    expect(nightsBetween("soon", "later")).toBeNull();
   });
 });

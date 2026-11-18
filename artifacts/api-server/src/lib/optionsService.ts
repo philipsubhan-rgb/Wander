@@ -25,19 +25,23 @@ import {
   parseDecimalToRational,
   presentRankedSet,
   rankOptionSet,
+  stayCacheKey,
   stalenessLabel,
   OptionCache,
   type FlightSearchContext,
   type FxRate,
   type FxRateResolver,
+  type OptionKind,
   type OptionSet,
   type OptionsAdapter,
   type PartnerRef,
+  type StaySearchContext,
   type WanderOption,
 } from "./options";
 import type { RuleInput, TripScope } from "./rulesEngine";
 import { listRules, ruleRowToInput } from "./travelerContext";
 import { duffelAdapterFromEnv, OptionsAdapterDisabledError } from "./duffel";
+import { duffelStaysAdapterFromEnv } from "./duffelStays";
 import { logger } from "./logger";
 
 export interface OptionsServiceDeps {
@@ -55,6 +59,8 @@ export interface FlightSearchOptions {
   refresh?: boolean;
 }
 
+export type StaySearchOptions = FlightSearchOptions;
+
 export class OptionsService {
   private readonly now: () => number;
 
@@ -62,36 +68,64 @@ export class OptionsService {
     this.now = deps.now ?? Date.now;
   }
 
+  /**
+   * Adapters are selected by CAPABILITY (which search they implement),
+   * not by list position: the stays adapter must never be handed a
+   * flight search, nor the flights adapter a stay search. An enabled
+   * capable adapter wins; otherwise the (disabled) capable one is
+   * returned so its plain disabled reason is what the traveler hears.
+   */
   private flightAdapter(): OptionsAdapter | undefined {
-    return this.deps.adapters.find((a) => a.enabled) ?? this.deps.adapters[0];
+    return (
+      this.deps.adapters.find((a) => a.enabled && a.searchFlights) ??
+      this.deps.adapters.find((a) => a.searchFlights)
+    );
   }
 
-  async searchFlights(
-    userId: number,
-    ctx: FlightSearchContext,
-    opts: FlightSearchOptions = {},
-  ): Promise<OptionSet> {
-    const adapter = this.flightAdapter();
-    const nowMs = this.now();
-    if (!adapter || !adapter.enabled) {
-      return {
-        kind: "flight",
-        options: [],
-        casualties: [],
-        relaxed: false,
-        pricedAt: new Date(nowMs).toISOString(),
-        fromCache: false,
-        stale: false,
-        staleness: "",
-        adapterId: adapter?.id ?? "none",
-        notices: [
-          adapter?.disabledReason ??
-            "No flight provider is configured, so live flight prices are unavailable.",
-        ],
-      };
-    }
+  private stayAdapter(): OptionsAdapter | undefined {
+    return (
+      this.deps.adapters.find((a) => a.enabled && a.searchStays) ??
+      this.deps.adapters.find((a) => a.searchStays)
+    );
+  }
 
-    const key = flightCacheKey(ctx);
+  private disabledSet(kind: OptionKind, adapter: OptionsAdapter | undefined): OptionSet {
+    const fallback =
+      kind === "stay"
+        ? "No stay provider is configured, so live stay prices are unavailable."
+        : "No flight provider is configured, so live flight prices are unavailable.";
+    return {
+      kind,
+      options: [],
+      casualties: [],
+      relaxed: false,
+      pricedAt: new Date(this.now()).toISOString(),
+      fromCache: false,
+      stale: false,
+      staleness: "",
+      adapterId: adapter?.id ?? "none",
+      notices: [adapter?.disabledReason ?? fallback],
+    };
+  }
+
+  /**
+   * The one search pipeline every kind flows through (§8): shared
+   * parameter-keyed cache → adapter on miss/stale/refresh (stale set
+   * served, labeled, when a refresh fails) → snapshot-backed home
+   * equivalents → hard-rule FILTER → preference RANK with partner
+   * stripped → presentation with partner labels re-attached.
+   */
+  private async executeSearch(args: {
+    kind: OptionKind;
+    userId: number;
+    cacheKey: string;
+    fetchFresh: () => Promise<WanderOption[]>;
+    adapterId: string;
+    opts: FlightSearchOptions;
+  }): Promise<OptionSet> {
+    const { kind, userId, cacheKey: key, adapterId } = args;
+    const opts = args.opts;
+    const nowMs = this.now();
     const notices: string[] = [];
     let raw: WanderOption[] | null = null;
     let pricedAt = "";
@@ -104,7 +138,7 @@ export class OptionsService {
       fromCache = true;
     } else {
       try {
-        raw = await adapter.searchFlights(ctx);
+        raw = await args.fetchFresh();
         pricedAt = raw[0]?.pricedAt ?? new Date(nowMs).toISOString();
         this.deps.cache.set(key, raw, pricedAt);
       } catch (err) {
@@ -115,7 +149,7 @@ export class OptionsService {
           pricedAt = cached.pricedAt;
           fromCache = true;
           notices.push("Couldn't refresh prices just now — showing the last prices we fetched.");
-          logger.warn({ adapter: adapter.id, err }, "[Options] refresh failed; serving stale cache");
+          logger.warn({ adapter: adapterId, err }, "[Options] refresh failed; serving stale cache");
         } else {
           throw err;
         }
@@ -134,9 +168,9 @@ export class OptionsService {
     const rankedSet = rankOptionSet(rankable, rules, opts.tripScope);
     const presented = presentRankedSet(rankedSet, partnerById);
 
-    const stale = isStale(pricedAt, "flight", nowMs);
+    const stale = isStale(pricedAt, kind, nowMs);
     return {
-      kind: "flight",
+      kind,
       options: presented.options,
       casualties: presented.casualties,
       relaxed: rankedSet.relaxed,
@@ -144,9 +178,49 @@ export class OptionsService {
       fromCache,
       stale,
       staleness: stalenessLabel(pricedAt, nowMs),
-      adapterId: adapter.id,
+      adapterId,
       notices,
     };
+  }
+
+  async searchFlights(
+    userId: number,
+    ctx: FlightSearchContext,
+    opts: FlightSearchOptions = {},
+  ): Promise<OptionSet> {
+    const adapter = this.flightAdapter();
+    const search = adapter?.searchFlights;
+    if (!adapter || !adapter.enabled || !search) {
+      return this.disabledSet("flight", adapter);
+    }
+    return this.executeSearch({
+      kind: "flight",
+      userId,
+      cacheKey: flightCacheKey(ctx),
+      fetchFresh: () => search.call(adapter, ctx),
+      adapterId: adapter.id,
+      opts,
+    });
+  }
+
+  async searchStays(
+    userId: number,
+    ctx: StaySearchContext,
+    opts: StaySearchOptions = {},
+  ): Promise<OptionSet> {
+    const adapter = this.stayAdapter();
+    const search = adapter?.searchStays;
+    if (!adapter || !adapter.enabled || !search) {
+      return this.disabledSet("stay", adapter);
+    }
+    return this.executeSearch({
+      kind: "stay",
+      userId,
+      cacheKey: stayCacheKey(ctx),
+      fetchFresh: () => search.call(adapter, ctx),
+      adapterId: adapter.id,
+      opts,
+    });
   }
 }
 
@@ -200,7 +274,7 @@ export const dbFxRateResolver: FxRateResolver = async (fromCurrency, toCurrency)
 
 export function createDefaultOptionsService(): OptionsService {
   return new OptionsService({
-    adapters: [duffelAdapterFromEnv()],
+    adapters: [duffelAdapterFromEnv(), duffelStaysAdapterFromEnv()],
     cache: new OptionCache(),
     loadRules: async (userId) => (await listRules(userId)).map(ruleRowToInput),
     loadHomeCurrency: async (userId) => {

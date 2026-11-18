@@ -36,8 +36,20 @@ vi.mock("@workspace/db", () => {
   };
 });
 
+// The stays tool geocodes its place name through the weather module's
+// geocoder; mock it so tool tests stay offline and deterministic.
+const geoMock = vi.hoisted(() => ({ geocode: vi.fn() }));
+vi.mock("./weather", () => ({ geocodeDestination: geoMock.geocode }));
+
 import { money } from "@workspace/money";
-import { OptionCache, parseDecimalToRational, type OptionsAdapter, type WanderOption } from "./options";
+import {
+  OptionCache,
+  parseDecimalToRational,
+  type OptionsAdapter,
+  type StayOption,
+  type StaySummary,
+  type WanderOption,
+} from "./options";
 import { OptionsService, setDefaultOptionsServiceForTests } from "./optionsService";
 import { OPTIONS_TOOLS } from "./agentOptionsTools";
 import type { ToolContext } from "./agentTools";
@@ -194,5 +206,214 @@ describe("options_search_flights", () => {
     const props = (tool.parameters as { properties: Record<string, unknown> }).properties;
     expect(Object.keys(props)).not.toContain("userId");
     expect(Object.keys(props)).not.toContain("tripId");
+  });
+});
+
+// ─── options_search_stays (Task 3) ───────────────────────────────────────────
+
+const stayTool = OPTIONS_TOOLS.find((t) => t.name === "options_search_stays")!;
+
+function stayOptionFixture(
+  overrides: Partial<StayOption> & { id: string; summary?: Partial<StaySummary> },
+): StayOption {
+  const base: StayOption = {
+    id: overrides.id,
+    kind: "stay",
+    adapter: "stub",
+    supplier: "Accor",
+    summary: {
+      propertyName: "Hotel Beispiel",
+      propertyType: "hotel",
+      stayStyle: "chain",
+      isWholeHome: false,
+      chainName: "Accor",
+      cityName: "Munich",
+      areaLabel: "Munich, Bavaria",
+      starRating: 4,
+      reviewScore: 8.7,
+      reviewCount: 1240,
+      roomName: "Deluxe King Room",
+      beds: "king bed",
+      checkInDate: "2026-12-03",
+      checkOutDate: "2026-12-08",
+      nights: 5,
+      guestCount: 5,
+      rooms: 1,
+      breakdown: {
+        base: money(66583, "GBP"),
+        tax: money(8223, "GBP"),
+        fee: money(5094, "GBP"),
+        taxesAndFees: null,
+        dueAtAccommodation: money(3995, "GBP"),
+      },
+      nightlyRate: money(15980, "GBP"),
+      perPersonPerNight: money(3196, "GBP"),
+      cancellationTerms: "Free cancellation until 2026-12-01",
+      freeCancellation: true,
+      boardType: "Breakfast included",
+      label: "Hotel Beispiel, Munich",
+    },
+    money: money(79900, "GBP"),
+    homeEquivalent: null,
+    pricedAt: "2026-11-18T08:00:00Z",
+    priceNature: "estimate",
+    fulfillment: "api_rail",
+    ruleViolations: [],
+    partner: null,
+  };
+  return { ...base, ...overrides, summary: { ...base.summary, ...(overrides.summary ?? {}) } };
+}
+
+function homeFixture(): StayOption {
+  return stayOptionFixture({
+    id: "home1",
+    supplier: "Altstadt Loft",
+    money: money(120000, "EUR"),
+    summary: {
+      propertyName: "Altstadt Loft",
+      propertyType: "apartment",
+      stayStyle: "home",
+      isWholeHome: true,
+      chainName: null,
+      roomName: null,
+      beds: null,
+      boardType: null,
+      breakdown: {
+        base: money(100000, "EUR"),
+        tax: null,
+        fee: null,
+        taxesAndFees: money(20000, "EUR"),
+        dueAtAccommodation: null,
+      },
+      nightlyRate: money(24000, "EUR"),
+      perPersonPerNight: money(4800, "EUR"),
+      cancellationTerms: null,
+      freeCancellation: false,
+      label: "Altstadt Loft, Munich",
+    },
+  });
+}
+
+function stubStayAdapter(options: WanderOption[]): OptionsAdapter {
+  return {
+    id: "stub",
+    enabled: true,
+    disabledReason: "",
+    searchStays: async () => options,
+  };
+}
+
+describe("options_search_stays", () => {
+  beforeEach(() => {
+    geoMock.geocode.mockResolvedValue({ lat: 48.137, lon: 11.575 });
+    injectService(stubStayAdapter([stayOptionFixture({ id: "hotel1" }), homeFixture()]));
+  });
+
+  it("voices FULL-STAY totals with itemization, due-at-property, and derived per-night figures", async () => {
+    const result = await stayTool.run(CTX, {
+      location: "Munich",
+      checkInDate: "2026-12-03",
+      checkOutDate: "2026-12-08",
+      guests: 5,
+    } as never);
+    expect(result.ok).toBe(true);
+    const text = result.text;
+    expect(text).toContain("Stay options near Munich");
+    expect(text).toContain("(5 nights) (5 guests)");
+    expect(text).toContain("priced just now");
+    // The total is the whole stay — and the itemization sums to it.
+    expect(text).toContain("Total for 5 nights: £799.00");
+    expect(text).toContain("rent £665.83");
+    expect(text).toContain("taxes £82.23");
+    expect(text).toContain("fees £50.94");
+    expect(text).toContain("£39.95 due at the property");
+    expect(text).toContain("≈ £159.80 per night");
+    expect(text).toContain("≈ £31.96 per person per night (5 guests)");
+    expect(text).toContain("Free cancellation until 2026-12-01");
+    // The home shows its combined taxes & fees (no invented split).
+    expect(text).toContain("Total for 5 nights: €1,200.00");
+    expect(text).toContain("taxes & fees €200.00");
+    expect(text).toContain("Cancellation terms aren't stated at search time");
+    const data = result.data as { kind: string; options: unknown[] };
+    expect(data.kind).toBe("stay");
+    expect(data.options).toHaveLength(2);
+  });
+
+  it("surfaces the whole-home signal for a group/long stay when homes are in the list", async () => {
+    const result = await stayTool.run(CTX, {
+      location: "Munich",
+      checkInDate: "2026-12-03",
+      checkOutDate: "2026-12-08",
+      guests: 5,
+    } as never);
+    expect(result.text).toContain("Whole-home note: this list includes 1 whole-home option");
+    expect(result.text).toContain("a group of 5 staying 5 nights");
+  });
+
+  it("surfaces the signal honestly when NO whole home came back", async () => {
+    injectService(stubStayAdapter([stayOptionFixture({ id: "hotel1" })]));
+    const result = await stayTool.run(CTX, {
+      location: "Munich",
+      checkInDate: "2026-12-03",
+      checkOutDate: "2026-12-05", // 2 nights — the signal comes from the group size alone
+      guests: 6,
+    } as never);
+    expect(result.text).toContain("Whole-home note: no whole-home options came back in this search");
+    expect(result.text).toContain("a group of 6");
+  });
+
+  it("stays silent about whole homes for a small party on a short stay", async () => {
+    const result = await stayTool.run(CTX, {
+      location: "Munich",
+      checkInDate: "2026-12-03",
+      checkOutDate: "2026-12-05",
+      guests: 2,
+    } as never);
+    expect(result.ok).toBe(true);
+    expect(result.text).not.toContain("Whole-home note");
+  });
+
+  it("says plainly when the place can't be found — no search, no invented prices", async () => {
+    geoMock.geocode.mockResolvedValue(null);
+    const result = await stayTool.run(CTX, {
+      location: "Nowheresville",
+      checkInDate: "2026-12-03",
+      checkOutDate: "2026-12-08",
+    } as never);
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("couldn't find a place called \"Nowheresville\"");
+    expect(result.text).toContain("No prices are shown rather than invented ones.");
+    expect(result.text).not.toContain("£");
+  });
+
+  it("rejects a check-out that isn't after check-in", async () => {
+    const result = await stayTool.run(CTX, {
+      location: "Munich",
+      checkInDate: "2026-12-08",
+      checkOutDate: "2026-12-03",
+    } as never);
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain("must be after check-in");
+  });
+
+  it("says plainly when stay search isn't configured — and shows no prices", async () => {
+    injectService({
+      id: "duffel",
+      enabled: false,
+      disabledReason: "Duffel isn't configured (no DUFFEL_API_TOKEN), so live stay prices are unavailable.",
+      searchStays: async () => {
+        throw new Error("must never be called while disabled");
+      },
+    });
+    const result = await stayTool.run(CTX, {
+      location: "Munich",
+      checkInDate: "2026-12-03",
+      checkOutDate: "2026-12-08",
+    } as never);
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("Duffel isn't configured");
+    expect(result.text).toContain("live stay prices are unavailable");
+    expect(result.text).toContain("No prices are shown rather than invented ones.");
+    expect(result.text).not.toContain("£");
   });
 });
