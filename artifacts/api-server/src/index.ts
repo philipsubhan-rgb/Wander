@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { startBriefingScheduler } from "./lib/briefingScheduler";
 import { startOutreachScheduler } from "./lib/outreachScheduler";
 import { startWatchingScheduler } from "./lib/watchingScheduler";
+import { startFxScheduler } from "./lib/fxScheduler";
 import { pool } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
@@ -53,6 +54,12 @@ app.listen(port, (err) => {
   // lookup per leg, and alert deregistration for finished trips.
   startWatchingScheduler();
   logger.info("Watching scheduler started");
+
+  // Start the daily FX snapshot refresh (ECB reference rates via
+  // Frankfurter) — populates fx_rate_snapshots so Options Service home
+  // equivalents resolve against real, dated rates.
+  startFxScheduler();
+  logger.info("FX scheduler started");
 
   // Do not block the HTTP startup probe on a database connection. Production
   // databases can take time to become reachable while an autoscale instance is
