@@ -147,6 +147,17 @@ export interface StaySummary {
   freeCancellation: boolean;
   /** Meal plan as stated ("breakfast included", "room only"), normalized lightly. */
   boardType: string | null;
+  /**
+   * The provider rate behind this option (Duffel Stays): the handle
+   * the gate's re-verification turns into a quote. Null when the
+   * payload didn't identify a rate — such an option can be presented
+   * but never quoted or booked, and the gate says so plainly.
+   */
+  rateId: string | null;
+  /** The quote id, once the gate's re-verification has created one. */
+  quoteId: string | null;
+  /** Street address line, when the payload states it (ledger projection). */
+  addressLine: string | null;
   /** Voiceable one-liner label, also the rules-engine label. */
   label: string;
 }

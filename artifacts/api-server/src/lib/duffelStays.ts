@@ -119,8 +119,99 @@ export interface DuffelStaySearchResponse {
 
 // ─── Client ──────────────────────────────────────────────────────────────────
 
+/**
+ * A stay quote — the gate's re-verification artifact (E-3.2). Creating
+ * one (POST /stays/quotes with a rate_id) turns the search ESTIMATE
+ * into a firm, bookable price with a quote_id; the booking is then
+ * created against the quote, never against the search result.
+ */
+export interface DuffelStayQuote {
+  id?: string;
+  rate_id?: string;
+  total_amount?: string;
+  total_currency?: string;
+  base_amount?: string;
+  base_currency?: string;
+  tax_amount?: string;
+  tax_currency?: string;
+  fee_amount?: string;
+  fee_currency?: string;
+  due_at_accommodation_amount?: string;
+  due_at_accommodation_currency?: string;
+  cancellation_timeline?: DuffelStayRate["cancellation_timeline"];
+  expires_at?: string;
+  check_in_date?: string;
+  check_out_date?: string;
+}
+
+/** One guest on a stay booking — names + date of birth, from the vault. */
+export interface DuffelStayGuestInput {
+  givenName: string;
+  familyName: string;
+  /** YYYY-MM-DD. */
+  bornOn: string;
+}
+
+/** A created stay booking (POST /stays/bookings against a quote). */
+export interface DuffelStayBooking {
+  id?: string;
+  /** The reference the traveler quotes to the property. */
+  reference?: string;
+  quote_id?: string;
+  total_amount?: string;
+  total_currency?: string;
+  check_in_date?: string;
+  check_out_date?: string;
+}
+
+export interface CreateStayBookingResult {
+  /** HTTP status: 200/201 = confirmed; 202 = accepted, confirming async. */
+  status: number;
+  booking: DuffelStayBooking | null;
+}
+
 export interface DuffelStaysClient {
   searchStays(ctx: StaySearchContext): Promise<DuffelStaySearchResponse>;
+  /** Create a quote from a rate — the estimate becomes a firm price. */
+  createQuote(rateId: string): Promise<DuffelStayQuote>;
+  /** Create a booking from a quote. Sent exactly once, ever (never-retry discipline). */
+  createBooking(input: {
+    quoteId: string;
+    guests: DuffelStayGuestInput[];
+    email: string;
+    phoneNumber: string;
+    specialRequests?: string;
+  }): Promise<CreateStayBookingResult>;
+}
+
+/** The documented /stays/quotes body. */
+export function buildCreateStayQuoteBody(rateId: string): Record<string, unknown> {
+  return { data: { rate_id: rateId } };
+}
+
+/** The documented /stays/bookings body. */
+export function buildCreateStayBookingBody(input: {
+  quoteId: string;
+  guests: DuffelStayGuestInput[];
+  email: string;
+  phoneNumber: string;
+  specialRequests?: string;
+}): Record<string, unknown> {
+  return {
+    data: {
+      quote_id: input.quoteId,
+      guests: input.guests.map((g) => ({
+        given_name: g.givenName,
+        family_name: g.familyName,
+        born_on: g.bornOn,
+      })),
+      email: input.email,
+      phone_number: input.phoneNumber,
+      ...(input.specialRequests
+        ? { accommodation_special_requests: input.specialRequests }
+        : {}),
+    },
+  };
 }
 
 /** The documented /stays/search body for a search context. */
@@ -152,49 +243,88 @@ export interface DuffelStaysClientOptions {
 export function createDuffelStaysClient(opts: DuffelStaysClientOptions): DuffelStaysClient {
   const fetchFn = opts.fetchFn ?? ((url, init) => fetch(url, init));
   const baseUrl = opts.baseUrl ?? DUFFEL_BASE_URL;
+
+  /** One POST against the Stays API; returns status + parsed data. */
+  async function post<T>(path: string, body: Record<string, unknown>): Promise<{ status: number; data: T }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const authValue = "Bearer " + opts.token;
+    let res: Response;
+    try {
+      res = await fetchFn(`${baseUrl}${path}`, {
+        method: "POST",
+        headers: {
+          Authorization: authValue,
+          "Duffel-Version": DUFFEL_VERSION,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      throw new DuffelError(
+        `Duffel Stays request failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+    const text = await res.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new DuffelError(`Duffel returned a non-JSON response (HTTP ${res.status}).`, res.status);
+    }
+    if (!res.ok) {
+      const errors = (parsed as { errors?: Array<{ title?: string; detail?: string }> })?.errors;
+      const first = errors?.[0];
+      const detail = first?.detail ?? first?.title ?? "unknown error";
+      throw new DuffelError(`Duffel error (HTTP ${res.status}): ${detail}`, res.status);
+    }
+    const data = (parsed as { data?: T })?.data;
+    if (!data) throw new DuffelError("Duffel Stays response carried no data.", res.status);
+    return { status: res.status, data };
+  }
+
   return {
     async searchStays(ctx: StaySearchContext): Promise<DuffelStaySearchResponse> {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-      const authValue = "Bearer " + opts.token;
-      let res: Response;
-      try {
-        res = await fetchFn(`${baseUrl}/stays/search`, {
-          method: "POST",
-          headers: {
-            Authorization: authValue,
-            "Duffel-Version": DUFFEL_VERSION,
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify(buildStaySearchBody(ctx)),
-          signal: controller.signal,
-        });
-      } catch (err) {
-        throw new DuffelError(
-          `Duffel Stays request failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      } finally {
-        clearTimeout(timer);
-      }
-      const text = await res.text();
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        throw new DuffelError(`Duffel returned a non-JSON response (HTTP ${res.status}).`, res.status);
-      }
-      if (!res.ok) {
-        const errors = (parsed as { errors?: Array<{ title?: string; detail?: string }> })?.errors;
-        const first = errors?.[0];
-        const detail = first?.detail ?? first?.title ?? "unknown error";
-        throw new DuffelError(`Duffel error (HTTP ${res.status}): ${detail}`, res.status);
-      }
-      const data = (parsed as { data?: DuffelStaySearchResponse })?.data;
-      if (!data) throw new DuffelError("Duffel Stays response carried no data.", res.status);
+      const { data } = await post<DuffelStaySearchResponse>("/stays/search", buildStaySearchBody(ctx));
       return data;
     },
+    async createQuote(rateId: string): Promise<DuffelStayQuote> {
+      const { data } = await post<DuffelStayQuote>("/stays/quotes", buildCreateStayQuoteBody(rateId));
+      return data;
+    },
+    async createBooking(input: {
+      quoteId: string;
+      guests: DuffelStayGuestInput[];
+      email: string;
+      phoneNumber: string;
+      specialRequests?: string;
+    }): Promise<CreateStayBookingResult> {
+      // Sent exactly once. No retry loop exists here by design — a
+      // booking create may return 200/201 (confirmed) or 202
+      // (accepted, confirming asynchronously); state reconciliation
+      // is the caller's job, re-sending is nobody's job.
+      const { status, data } = await post<DuffelStayBooking>(
+        "/stays/bookings",
+        buildCreateStayBookingBody(input),
+      );
+      return { status, booking: data };
+    },
   };
+}
+
+/**
+ * Build the raw stays client from the environment (the gate's
+ * execution rail needs the client, not the search adapter). No
+ * DUFFEL_API_TOKEN → null, and the gate says so plainly.
+ */
+export function duffelStaysClientFromEnv(fetchFn?: FetchFn): DuffelStaysClient | null {
+  const token = process.env.DUFFEL_API_TOKEN;
+  if (!token) return null;
+  return createDuffelStaysClient({ token, fetchFn });
 }
 
 // ─── Mapping: Duffel stay result → normalized option (§5.1) ──────────────────
@@ -242,7 +372,13 @@ function bedsText(room: DuffelStayRoom | undefined): string | null {
   return parts.length > 0 ? parts.join(", ") : null;
 }
 
-function cancellationFromTimeline(
+/**
+ * Derive plain-language cancellation terms from a rate's cancellation
+ * timeline. Exported for the booking gate: a stays QUOTE carries the
+ * same timeline shape, and the gate refreshes the presented terms from
+ * the quote with exactly this logic — one derivation, two call sites.
+ */
+export function stayCancellationTermsFromTimeline(
   rate: DuffelStayRate | undefined,
   total: Money,
 ): { terms: string | null; free: boolean } {
@@ -369,7 +505,7 @@ export function mapDuffelStayResult(
   const areaLabel =
     [cityName, address?.region ?? address?.country_code].filter(Boolean).join(", ") || "Location not stated";
 
-  const { terms: cancellationTerms, free: freeCancellation } = cancellationFromTimeline(detailRate, total);
+  const { terms: cancellationTerms, free: freeCancellation } = stayCancellationTermsFromTimeline(detailRate, total);
   const boardType = detailRate?.board_type
     ? detailRate.board_type.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())
     : null;
@@ -403,6 +539,9 @@ export function mapDuffelStayResult(
       cancellationTerms,
       freeCancellation,
       boardType,
+      rateId: detailRate?.id ?? null,
+      quoteId: null,
+      addressLine: address?.line_one ?? null,
       label: cityName ? `${accommodation.name}, ${cityName}` : accommodation.name,
     },
     money: total,
