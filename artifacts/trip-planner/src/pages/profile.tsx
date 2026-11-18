@@ -385,7 +385,7 @@ export default function TravelerProfilePage() {
                   <Field label="Issuing country">
                     <Input autoComplete="country-name" className={inputCls} value={form.passportIssuingCountry} onChange={set("passportIssuingCountry")} />
                   </Field>
-                  <Field label="Passport expiry">
+                  <Field label="Passport expiry date">
                     <Input type="date" className={inputCls} value={form.passportExpiry} onChange={set("passportExpiry")} />
                   </Field>
                 </div>
