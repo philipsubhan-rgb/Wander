@@ -1,7 +1,17 @@
 import { Router, type IRouter } from "express";
 import { eq, and, asc } from "drizzle-orm";
 import { db, reservationsTable } from "@workspace/db";
-import { requireTripParticipant } from "../middlewares/auth";
+import { requireTripParticipant, getAuthUserId } from "../middlewares/auth";
+
+// Calendar write-back is loaded lazily on first use so this router's
+// import graph — and every test that mounts it — doesn't pay for the
+// Google client stack up front. All sync functions are best-effort and
+// never throw.
+let calendarSyncPromise: Promise<typeof import("../lib/calendarSync.js") | null> | null = null;
+async function calendarSync() {
+  calendarSyncPromise ??= import("../lib/calendarSync.js").catch(() => null);
+  return calendarSyncPromise;
+}
 
 const router: IRouter = Router();
 
@@ -49,6 +59,10 @@ router.post("/trips/:tripId/reservations", requireTripParticipant(), async (req,
     tripId, type: type ?? "other", title, venue, address, date, time, endTime,
     confirmationCode, numberOfPeople, phone, notes, url, imageUrl, lat, lon,
   }).returning();
+  // Calendar write-back for the creating user (best-effort, never throws).
+  const userId = getAuthUserId(req, res);
+  const sync = await calendarSync();
+  if (userId && sync) await sync.syncReservationForUser(userId, row);
   res.status(201).json(map(row));
 });
 
@@ -66,6 +80,9 @@ router.patch("/trips/:tripId/reservations/:reservationId", requireTripParticipan
     .where(and(eq(reservationsTable.id, reservationId), eq(reservationsTable.tripId, tripId)))
     .returning();
   if (!row) { res.status(404).json({ error: "Not found" }); return; }
+  // Push the change to any Google Calendar events linked to this booking.
+  const sync = await calendarSync();
+  if (sync) await sync.updateLinkedCalendarEvents(row);
   res.json(map(row));
 });
 
@@ -92,6 +109,10 @@ router.delete("/trips/:tripId/reservations/:reservationId", requireTripParticipa
   const tripId        = Number(req.params.tripId);
   const reservationId = Number(req.params.reservationId);
   if (isNaN(tripId) || isNaN(reservationId)) { res.status(400).json({ error: "Invalid id" }); return; }
+  // Delete linked Google Calendar events first — the link rows cascade
+  // away with the reservation, so this is the last chance to find them.
+  const sync = await calendarSync();
+  if (sync) await sync.deleteLinkedCalendarEvents(reservationId);
   const [item] = await db.delete(reservationsTable).where(and(eq(reservationsTable.id, reservationId), eq(reservationsTable.tripId, tripId))).returning();
   if (!item) { res.status(404).json({ error: "Not found" }); return; }
   // Re-index remaining reservations on the same date to close any gaps

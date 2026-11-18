@@ -60,6 +60,28 @@ export function getGoogleAuthUrl(state: string): string {
   });
 }
 
+/**
+ * Incremental consent URL for calendar write-back. Requests the calendar
+ * scope IN ADDITION to the Gmail scopes, with include_granted_scopes so a
+ * user who already connected Gmail keeps that grant untouched — Google
+ * merges the new scope into the existing consent instead of replacing it.
+ */
+export function getGoogleCalendarAuthUrl(state: string): string {
+  const client = getOAuthClient();
+  return client.generateAuthUrl({
+    access_type: "offline",
+    prompt: "consent",
+    include_granted_scopes: true,
+    scope: [
+      "openid",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/calendar.events",
+    ],
+    state,
+  });
+}
+
 async function gmailFetch(client: OAuth2Client, path: string): Promise<any> {
   const { token } = await client.getAccessToken();
   const res = await fetch(`${GMAIL_API}${path}`, {

@@ -29,11 +29,13 @@ import {
   getOAuthClient,
   getAccountClient,
   getGoogleAuthUrl,
+  getGoogleCalendarAuthUrl,
   getGoogleUserEmail,
   revokeGoogleToken,
   scanGmail,
   googleOAuthConfigured,
 } from "../lib/gmailScan";
+import { syncReservationByIdForUser } from "../lib/calendarSync";
 import { parseReservation } from "../lib/reservationParser";
 import {
   newOAuthState,
@@ -41,6 +43,8 @@ import {
   matchTrip,
   normalizeConfirmationCode,
   isDuplicateConfirmationCode,
+  mergeScopes,
+  hasCalendarScope,
   type MatchableTrip,
 } from "../lib/scanLogic";
 
@@ -79,6 +83,36 @@ router.get("/integrations/google/connect", requireAuth, (req: Request, res: Resp
   res.redirect(getGoogleAuthUrl(state));
 });
 
+/**
+ * Start the incremental calendar write-back consent. Same account, one more
+ * scope: Google merges calendar.events into the existing Gmail grant
+ * (include_granted_scopes), so Gmail-only connections keep working as-is.
+ */
+router.get("/integrations/google/connect-calendar", requireAuth, (req: Request, res: Response) => {
+  const userId = getAuthUserId(req, res);
+  if (!userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  if (!googleOAuthConfigured()) {
+    res.status(503).json({
+      error: "Google OAuth is not configured on this server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET missing)",
+    });
+    return;
+  }
+  if (!credentialsEncryptionReady()) {
+    res.status(503).json({
+      error: "Token encryption is not configured on this server (CREDENTIALS_KEK missing)",
+    });
+    return;
+  }
+  const returnTo = typeof req.query.returnTo === "string" && req.query.returnTo.startsWith("/")
+    ? req.query.returnTo
+    : "/settings";
+  const state = newOAuthState(userId, returnTo, "calendar");
+  res.redirect(getGoogleCalendarAuthUrl(state));
+});
+
 /** Google redirects back here after consent. */
 router.get("/integrations/google/callback", async (req: Request, res: Response) => {
   const appBase = (process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
@@ -101,30 +135,12 @@ router.get("/integrations/google/callback", async (req: Request, res: Response) 
   try {
     const client = getOAuthClient();
     const { tokens } = await client.getToken(code);
-    if (!tokens.refresh_token) {
-      fail("Google did not return a refresh token");
-      return;
-    }
     client.setCredentials(tokens);
     const email = await getGoogleUserEmail(client);
-    const encrypted = encryptToken(tokens.refresh_token);
 
-    await db
-      .insert(connectedAccountsTable)
-      .values({
-        userId: state.userId,
-        provider: "google",
-        email,
-        encryptedRefreshToken: encrypted,
-        scopes: "gmail.readonly",
-      })
-      .onConflictDoNothing({
-        target: [connectedAccountsTable.userId, connectedAccountsTable.provider, connectedAccountsTable.email],
-      });
-    // Refresh the stored token on reconnect (upsert above ignores conflicts).
-    await db
-      .update(connectedAccountsTable)
-      .set({ encryptedRefreshToken: encrypted, scopes: "gmail.readonly" })
+    const [existing] = await db
+      .select()
+      .from(connectedAccountsTable)
       .where(
         and(
           eq(connectedAccountsTable.userId, state.userId),
@@ -133,8 +149,70 @@ router.get("/integrations/google/callback", async (req: Request, res: Response) 
         ),
       );
 
-    logger.info({ userId: state.userId, email }, "[Integrations] Google account connected");
-    res.redirect(`${appBase}${state.returnTo}?google=connected`);
+    // Incremental calendar consent may not return a fresh refresh token when
+    // one was already issued — that's fine if we already hold one.
+    if (!tokens.refresh_token && !existing) {
+      fail("Google did not return a refresh token");
+      return;
+    }
+
+    // Merge newly granted scopes into what the account already has — a plain
+    // Gmail reconnect must never clobber a calendar grant (and vice versa).
+    const granted = tokens.scope
+      ?? (state.purpose === "calendar"
+        ? "openid userinfo.email gmail.readonly calendar.events"
+        : "gmail.readonly");
+    const mergedScopes = mergeScopes(existing?.scopes, granted);
+    const enableCalendar =
+      state.purpose === "calendar" && hasCalendarScope(mergedScopes);
+
+    if (tokens.refresh_token) {
+      const encrypted = encryptToken(tokens.refresh_token);
+      await db
+        .insert(connectedAccountsTable)
+        .values({
+          userId: state.userId,
+          provider: "google",
+          email,
+          encryptedRefreshToken: encrypted,
+          scopes: mergedScopes,
+          calendarWritebackEnabled: enableCalendar,
+        })
+        .onConflictDoNothing({
+          target: [connectedAccountsTable.userId, connectedAccountsTable.provider, connectedAccountsTable.email],
+        });
+      // Refresh the stored token on reconnect (upsert above ignores conflicts).
+      await db
+        .update(connectedAccountsTable)
+        .set({
+          encryptedRefreshToken: encrypted,
+          scopes: mergedScopes,
+          ...(enableCalendar ? { calendarWritebackEnabled: true } : {}),
+        })
+        .where(
+          and(
+            eq(connectedAccountsTable.userId, state.userId),
+            eq(connectedAccountsTable.provider, "google"),
+            eq(connectedAccountsTable.email, email),
+          ),
+        );
+    } else if (existing) {
+      await db
+        .update(connectedAccountsTable)
+        .set({
+          scopes: mergedScopes,
+          ...(enableCalendar ? { calendarWritebackEnabled: true } : {}),
+        })
+        .where(eq(connectedAccountsTable.id, existing.id));
+    }
+
+    logger.info(
+      { userId: state.userId, email, purpose: state.purpose ?? "gmail" },
+      "[Integrations] Google account connected",
+    );
+    res.redirect(
+      `${appBase}${state.returnTo}?google=${state.purpose === "calendar" ? "calendar-connected" : "connected"}`,
+    );
   } catch (err) {
     fail(err instanceof Error ? err.message : "OAuth exchange failed");
   }
@@ -150,18 +228,60 @@ router.get("/integrations/accounts", requireAuth, async (req: Request, res: Resp
     res.status(401).json({ error: "Not authenticated" });
     return;
   }
-  const accounts = await db
+  const rows = await db
     .select({
       id: connectedAccountsTable.id,
       provider: connectedAccountsTable.provider,
       email: connectedAccountsTable.email,
+      scopes: connectedAccountsTable.scopes,
       lastScanAt: connectedAccountsTable.lastScanAt,
+      calendarWritebackEnabled: connectedAccountsTable.calendarWritebackEnabled,
+      calendarId: connectedAccountsTable.calendarId,
       createdAt: connectedAccountsTable.createdAt,
     })
     .from(connectedAccountsTable)
     .where(eq(connectedAccountsTable.userId, userId))
     .orderBy(desc(connectedAccountsTable.createdAt));
+  const accounts = rows.map(({ scopes, ...rest }) => ({
+    ...rest,
+    calendarGranted: hasCalendarScope(scopes),
+  }));
   res.json({ accounts, googleConfigured: googleOAuthConfigured() });
+});
+
+/** Toggle calendar write-back for one account. */
+router.patch("/integrations/accounts/:id", requireAuth, async (req: Request, res: Response) => {
+  const userId = getAuthUserId(req, res);
+  if (!userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  const accountId = Number(req.params.id);
+  const [account] = await db
+    .select()
+    .from(connectedAccountsTable)
+    .where(and(eq(connectedAccountsTable.id, accountId), eq(connectedAccountsTable.userId, userId)));
+  if (!account) {
+    res.status(404).json({ error: "Account not found" });
+    return;
+  }
+  const enabled = req.body?.calendarWritebackEnabled;
+  if (typeof enabled !== "boolean") {
+    res.status(400).json({ error: "calendarWritebackEnabled (boolean) is required" });
+    return;
+  }
+  if (enabled && !hasCalendarScope(account.scopes)) {
+    res.status(400).json({
+      error: "Calendar access hasn't been granted for this account yet — grant it first, then turn write-back on",
+    });
+    return;
+  }
+  await db
+    .update(connectedAccountsTable)
+    .set({ calendarWritebackEnabled: enabled })
+    .where(eq(connectedAccountsTable.id, accountId));
+  logger.info({ userId, accountId, enabled }, "[Integrations] calendar write-back toggled");
+  res.json({ ok: true, calendarWritebackEnabled: enabled });
 });
 
 router.delete("/integrations/accounts/:id", requireAuth, async (req: Request, res: Response) => {
@@ -395,6 +515,10 @@ router.post("/proposals/:id/accept", requireAuth, async (req: Request, res: Resp
     .update(reservationProposalsTable)
     .set({ status: "accepted", tripId })
     .where(eq(reservationProposalsTable.id, proposalId));
+
+  // Calendar write-back: best-effort, never fails the accept (sync logs its
+  // own errors). No-op unless the user enabled it on a connected account.
+  await syncReservationByIdForUser(userId, created.id);
 
   logger.info({ userId, proposalId, tripId }, "[Integrations] proposal accepted");
   res.json({ ok: true, reservationId: created.id, tripId });

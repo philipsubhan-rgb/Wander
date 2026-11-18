@@ -68,6 +68,9 @@ export interface OAuthState {
   returnTo: string;
   nonce: string;
   exp: number;
+  /** Which flow started this consent: plain Gmail connect, or the
+   *  incremental calendar write-back consent. Absent on pre-calendar states. */
+  purpose?: "gmail" | "calendar";
 }
 
 export function signState(state: OAuthState): string {
@@ -92,11 +95,59 @@ export function verifyState(raw: string): OAuthState | null {
 }
 
 /** Build a fresh signed OAuth state value (10-minute expiry). */
-export function newOAuthState(userId: number, returnTo: string): string {
+export function newOAuthState(
+  userId: number,
+  returnTo: string,
+  purpose: "gmail" | "calendar" = "gmail",
+): string {
   return signState({
     userId,
     returnTo,
     nonce: randomBytes(16).toString("hex"),
     exp: Date.now() + 10 * 60 * 1000,
+    purpose,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Granted-scope bookkeeping. `connected_accounts.scopes` stores the union of
+// scopes the user has granted (short names, space-separated, e.g.
+// "gmail.readonly calendar.events"). Google returns full scope URLs in the
+// token response; normalize them to short names before storing/comparing.
+// ---------------------------------------------------------------------------
+
+export const GMAIL_READONLY_SCOPE = "gmail.readonly";
+export const CALENDAR_EVENTS_SCOPE = "calendar.events";
+
+/** Normalize a Google scope URL (or short name) to its short name. */
+export function normalizeScope(scope: string): string {
+  return scope
+    .trim()
+    .replace(/^https:\/\/www\.googleapis\.com\/auth\//, "")
+    .replace(/^https:\/\/www\.googleapis\.com\/auth\/userinfo\./, "userinfo.");
+}
+
+/** Parse a stored/granted scope string (spaces or commas) into short names. */
+export function parseScopes(raw: string | null | undefined): Set<string> {
+  if (!raw) return new Set();
+  return new Set(
+    raw
+      .split(/[\s,]+/)
+      .map(normalizeScope)
+      .filter((s) => s.length > 0),
+  );
+}
+
+/** Union two scope strings into one canonical stored string (sorted). */
+export function mergeScopes(
+  existing: string | null | undefined,
+  granted: string | null | undefined,
+): string {
+  const union = new Set([...parseScopes(existing), ...parseScopes(granted)]);
+  return [...union].sort().join(" ");
+}
+
+/** True when the account has granted Google Calendar event write access. */
+export function hasCalendarScope(scopes: string | null | undefined): boolean {
+  return parseScopes(scopes).has(CALENDAR_EVENTS_SCOPE);
 }

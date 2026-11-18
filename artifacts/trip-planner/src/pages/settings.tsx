@@ -11,7 +11,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Mail, RefreshCw, Trash2, Check, X, Inbox } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Loader2, Mail, RefreshCw, Trash2, Check, X, Inbox, CalendarDays } from "lucide-react";
 import { toast } from "sonner";
 
 interface ConnectedAccount {
@@ -19,6 +20,9 @@ interface ConnectedAccount {
   provider: string;
   email: string;
   lastScanAt: string | null;
+  calendarWritebackEnabled: boolean;
+  calendarGranted: boolean;
+  calendarId: string | null;
   createdAt: string;
 }
 
@@ -93,6 +97,9 @@ function AccountsSection() {
     if (params.get("google") === "connected") {
       toast.success("Google account connected");
       window.history.replaceState({}, "", "/settings");
+    } else if (params.get("google") === "calendar-connected") {
+      toast.success("Calendar write-back enabled — accepted bookings will land on your Wander calendar");
+      window.history.replaceState({}, "", "/settings");
     } else if (params.get("google") === "error") {
       toast.error("Google connection failed — try again");
       window.history.replaceState({}, "", "/settings");
@@ -107,6 +114,20 @@ function AccountsSection() {
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Disconnect failed");
+    }
+  };
+
+  const toggleCalendar = async (a: ConnectedAccount, enabled: boolean) => {
+    try {
+      await api(`/api/integrations/accounts/${a.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ calendarWritebackEnabled: enabled }),
+      });
+      toast.success(enabled ? "Calendar write-back on" : "Calendar write-back off");
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Toggle failed");
     }
   };
 
@@ -160,35 +181,60 @@ function AccountsSection() {
         ) : (
           <ul className="space-y-2">
             {accounts.map((a) => (
-              <li
-                key={a.id}
-                className="flex items-center justify-between rounded-md border p-3"
-              >
-                <div>
-                  <p className="text-sm font-medium">{a.email}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {a.lastScanAt
-                      ? `Last scanned ${new Date(a.lastScanAt).toLocaleString()}`
-                      : "Never scanned"}
-                  </p>
+              <li key={a.id} className="rounded-md border p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">{a.email}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {a.lastScanAt
+                        ? `Last scanned ${new Date(a.lastScanAt).toLocaleString()}`
+                        : "Never scanned"}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={scanning === a.id}
+                      onClick={() => scan(a.id)}
+                    >
+                      {scanning === a.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                      <span className="ml-1">Scan now</span>
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => disconnect(a.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={scanning === a.id}
-                    onClick={() => scan(a.id)}
-                  >
-                    {scanning === a.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-4 w-4" />
-                    )}
-                    <span className="ml-1">Scan now</span>
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => disconnect(a.id)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                <div className="flex items-center gap-2 border-t pt-3">
+                  <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                  {a.calendarGranted ? (
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox
+                        checked={a.calendarWritebackEnabled}
+                        onCheckedChange={(v) => toggleCalendar(a, v === true)}
+                      />
+                      Calendar write-back
+                      <span className="text-xs text-muted-foreground">
+                        — accepted bookings go to your “Wander” calendar
+                      </span>
+                    </label>
+                  ) : (
+                    <>
+                      <span className="text-sm text-muted-foreground">
+                        Calendar write-back is off
+                      </span>
+                      <Button asChild size="sm" variant="outline" className="ml-auto">
+                        <a href="/api/integrations/google/connect-calendar?returnTo=/settings">
+                          Enable calendar write-back
+                        </a>
+                      </Button>
+                    </>
+                  )}
                 </div>
               </li>
             ))}
