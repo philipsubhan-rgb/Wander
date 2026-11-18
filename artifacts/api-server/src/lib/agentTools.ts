@@ -48,6 +48,14 @@ export interface ToolContext {
    * Absent = "text" (the typed chat and the app UI are one trust class).
    */
   channel?: "text" | "voice";
+  /**
+   * STT confidence ([0, 1]) of the traveler's current utterance, set by
+   * the voice channel when the provider reports one. Intake slot
+   * writes thread it into the §2.4 ASR read-back rule: a low-confidence
+   * hearing is stored as `needs_confirm` and read back before it
+   * settles. Absent on text turns and when the provider gives no score.
+   */
+  asrConfidence?: number;
 }
 
 /** Plain result returned to the agent loop (not an MCP CallToolResult). */

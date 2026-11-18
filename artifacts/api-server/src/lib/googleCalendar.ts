@@ -127,6 +127,51 @@ export async function updateCalendarEvent(
   );
 }
 
+/** One busy interval from a free/busy response — times only, never content. */
+export interface BusyInterval {
+  start: string;
+  end: string;
+}
+
+/**
+ * Query free/busy for the given calendars over a window. The freebusy
+ * endpoint returns ONLY busy intervals — no titles, attendees, or any
+ * event content exists in this response to leak (§4.1: Wander reads
+ * busy blocks, never event details). Per-calendar errors (e.g. a
+ * calendar the token can't see) yield an empty list for that calendar.
+ */
+export async function queryFreeBusy(
+  client: OAuth2Client,
+  calendarIds: string[],
+  timeMin: string,
+  timeMax: string,
+): Promise<Record<string, BusyInterval[]>> {
+  const res = await calendarFetch(client, `/freeBusy`, {
+    method: "POST",
+    body: JSON.stringify({
+      timeMin,
+      timeMax,
+      items: calendarIds.map((id) => ({ id })),
+    }),
+  });
+  const out: Record<string, BusyInterval[]> = {};
+  const calendars = (res?.calendars ?? {}) as Record<
+    string,
+    { busy?: Array<{ start?: string; end?: string }>; errors?: unknown }
+  >;
+  for (const id of calendarIds) {
+    const entry = calendars[id];
+    const busy = (entry?.busy ?? [])
+      .filter(
+        (b): b is { start: string; end: string } =>
+          typeof b?.start === "string" && typeof b?.end === "string",
+      )
+      .map((b) => ({ start: b.start, end: b.end }));
+    out[id] = busy;
+  }
+  return out;
+}
+
 /** Delete an event. Already-gone (404/410) counts as success. */
 export async function deleteCalendarEvent(
   client: OAuth2Client,

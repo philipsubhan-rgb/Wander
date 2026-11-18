@@ -88,6 +88,9 @@ function getVoiceSessionService(): VoiceSessionService {
           scope: input.scope as ChatScope,
           userText: input.userText,
           channel: "voice",
+          ...(input.asrConfidence !== undefined
+            ? { asrConfidence: input.asrConfidence }
+            : {}),
         }),
       gate: createBookingGateVoicePort(),
     });

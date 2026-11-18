@@ -118,6 +118,9 @@ export function newOAuthState(
 
 export const GMAIL_READONLY_SCOPE = "gmail.readonly";
 export const CALENDAR_EVENTS_SCOPE = "calendar.events";
+export const CALENDAR_FREEBUSY_SCOPE = "calendar.freebusy";
+export const CALENDAR_READONLY_SCOPE = "calendar.readonly";
+export const CALENDAR_FULL_SCOPE = "calendar";
 
 /** Normalize a Google scope URL (or short name) to its short name. */
 export function normalizeScope(scope: string): string {
@@ -150,4 +153,22 @@ export function mergeScopes(
 /** True when the account has granted Google Calendar event write access. */
 export function hasCalendarScope(scopes: string | null | undefined): boolean {
   return parseScopes(scopes).has(CALENDAR_EVENTS_SCOPE);
+}
+
+/**
+ * True when the account's grants let Wander READ free/busy. Deliberately
+ * generous: the dedicated `calendar.freebusy` scope is the least-
+ * privilege grant, but `calendar.events` (already granted for
+ * write-back) and the broader calendar scopes also authorize the
+ * freebusy endpoint — an account connected for write-back can be read
+ * for busy blocks with NO new consent (architecture §4.1).
+ */
+export function hasFreeBusyScope(scopes: string | null | undefined): boolean {
+  const granted = parseScopes(scopes);
+  return (
+    granted.has(CALENDAR_FREEBUSY_SCOPE) ||
+    granted.has(CALENDAR_EVENTS_SCOPE) ||
+    granted.has(CALENDAR_READONLY_SCOPE) ||
+    granted.has(CALENDAR_FULL_SCOPE)
+  );
 }

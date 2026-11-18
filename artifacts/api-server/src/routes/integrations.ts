@@ -160,7 +160,7 @@ router.get("/integrations/google/callback", async (req: Request, res: Response) 
     // Gmail reconnect must never clobber a calendar grant (and vice versa).
     const granted = tokens.scope
       ?? (state.purpose === "calendar"
-        ? "openid userinfo.email gmail.readonly calendar.events"
+        ? "openid userinfo.email gmail.readonly calendar.events calendar.freebusy"
         : "gmail.readonly");
     const mergedScopes = mergeScopes(existing?.scopes, granted);
     const enableCalendar =

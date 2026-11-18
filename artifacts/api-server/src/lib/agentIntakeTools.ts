@@ -20,14 +20,33 @@ import {
   applyIntakeSkip,
   applyIntakeSlotWrite,
   assertIntakeAccess,
+  confirmIntakeSlot,
   materializeIntake,
   IntakeAccessDenied,
   IntakeGroupNotFound,
   IntakeMaterializationError,
   type IntakeSessionView,
 } from "./intake";
-import { IntakeValidationError, type SlotProvenance } from "./intakeLogic";
+import {
+  IntakeValidationError,
+  type SlotName,
+  type SlotProvenance,
+  type SlotWriteSource,
+} from "./intakeLogic";
+import { checkFreeBusyForDates } from "./calendarFreeBusy";
 import { logger } from "./logger";
+
+/**
+ * The write source for the §2.4 ASR read-back rule: the channel this
+ * conversation runs on, plus the STT confidence of the traveler's
+ * current utterance when the voice provider reported one.
+ */
+function writeSource(ctx: ToolContext): SlotWriteSource {
+  return {
+    channel: ctx.channel ?? "text",
+    ...(ctx.asrConfidence !== undefined ? { asrConfidence: ctx.asrConfidence } : {}),
+  };
+}
 
 function toolOk(text: string, data?: unknown): AgentToolResult {
   return { ok: true, text, data };
@@ -111,7 +130,7 @@ async function setDestination(
       slot: "destination",
       value: { kind: args.kind, text: args.text },
       provenance: args.provenance as SlotProvenance,
-    });
+    }, writeSource(ctx));
     return toolOk(viewText(view, `Destination recorded: ${args.text}.`), view);
   });
 }
@@ -137,7 +156,7 @@ async function setParty(ctx: ToolContext, args: z.infer<typeof SetPartyInput>): 
       slot: "party",
       value: { solo: args.solo, travelers: args.travelers },
       provenance: args.provenance as SlotProvenance,
-    });
+    }, writeSource(ctx));
     const headline = args.solo
       ? "Party recorded: solo trip."
       : `Party recorded: ${args.travelers.map((t) => t.name).join(", ")}.`;
@@ -199,8 +218,41 @@ async function setDates(ctx: ToolContext, args: z.infer<typeof SetDatesInput>): 
       slot: "dates",
       value: { startDate: args.startDate, endDate: args.endDate, windowText: args.windowText },
       provenance: args.provenance as SlotProvenance,
-    });
-    return toolOk(viewText(view, "Dates recorded."), view);
+    }, writeSource(ctx));
+    let text = viewText(view, "Dates recorded.");
+    // Free/busy (context rung 2, §4.1): with exact dates and a
+    // connected calendar, flag a collision in plain terms — the fact
+    // only, never what the events are (the free/busy API returns busy
+    // intervals only, and this surface adds nothing beyond the fact).
+    const dates = view.slots.dates?.value;
+    if (dates?.startDate && dates?.endDate) {
+      const fb = await checkFreeBusyForDates(ctx.userId, dates.startDate, dates.endDate);
+      if (fb.connected && fb.conflict) {
+        text +=
+          "\nCalendar check: the traveler has something on those dates (from their connected calendar) — " +
+          "say exactly that, in plain terms, and ask whether they want to shift the window. " +
+          "You do not know what the events are; never guess or ask what they are.";
+      }
+    }
+    return toolOk(text, view);
+  });
+}
+
+// ─── intake_confirm_slot (§2.4 read-back) ────────────────────────────────────
+
+const ConfirmSlotInput = z.object({
+  slot: z
+    .enum(["destination", "party", "dates", "style"])
+    .describe("The slot whose read-back the traveler just confirmed"),
+});
+
+async function confirmSlot(
+  ctx: ToolContext,
+  args: z.infer<typeof ConfirmSlotInput>,
+): Promise<AgentToolResult> {
+  return withSession("intake_confirm_slot", ctx, async (sessionId) => {
+    const view = await confirmIntakeSlot(sessionId, ctx.userId, ctx.role, args.slot as SlotName);
+    return toolOk(viewText(view, `Confirmed — ${args.slot} stands as heard.`), view);
   });
 }
 
@@ -233,7 +285,7 @@ async function setStyle(ctx: ToolContext, args: z.infer<typeof SetStyleInput>): 
         budgetCurrency: args.budgetCurrency,
       },
       provenance: args.provenance as SlotProvenance,
-    });
+    }, writeSource(ctx));
     return toolOk(viewText(view, `Trip style recorded: ${args.text}.`), view);
   });
 }
@@ -387,10 +439,30 @@ export const INTAKE_TOOLS: ToolDefinition[] = [
     run: setPartyFromGroup as ToolDefinition["run"],
   },
   {
+    name: "intake_confirm_slot",
+    description:
+      "Settle a voice read-back (§2.4): when a slot was heard with low speech-recognition confidence, the " +
+      "state's next ask reads the value back ('I heard … — is that right?'). Call this ONLY when the " +
+      "traveler confirms the read-back. If they correct it instead, record the corrected value with the " +
+      "matching intake_set_* tool — never confirm a value the traveler disputed.",
+    parameters: {
+      type: "object",
+      properties: {
+        slot: { type: "string", enum: ["destination", "party", "dates", "style"] },
+      },
+      required: ["slot"],
+      additionalProperties: false,
+    },
+    input: ConfirmSlotInput,
+    run: confirmSlot as ToolDefinition["run"],
+  },
+  {
     name: "intake_set_dates",
     description:
       "Record the trip dates: exact start/end dates (YYYY-MM-DD) when known, or a fuzzy windowText " +
-      "('late September') when they aren't. Exact dates are required before the trip can be created.",
+      "('late September') when they aren't. Exact dates are required before the trip can be created. " +
+      "When the traveler has a connected calendar, the result flags plainly if they have something on " +
+      "those dates — relay that fact as-is; you never learn what the events are.",
     parameters: {
       type: "object",
       properties: {

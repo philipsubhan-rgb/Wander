@@ -21,7 +21,9 @@ import {
   type IntakeSession,
 } from "@workspace/db";
 import {
+  applyAsrProvenance,
   applySkip,
+  applySlotConfirmation,
   applySlotWrite,
   buildMaterializationPlan,
   buildReviewSummary,
@@ -32,7 +34,9 @@ import {
   type IntakeData,
   type IntakeStateName,
   type NextAsk,
+  type SlotName,
   type SlotWrite,
+  type SlotWriteSource,
 } from "./intakeLogic";
 import { getSavedGroupWithMembers } from "./travelerContext";
 import { logger } from "./logger";
@@ -222,8 +226,32 @@ export async function applyIntakeSlotWrite(
   userId: number,
   role: string,
   write: SlotWrite,
+  source?: SlotWriteSource,
 ): Promise<IntakeSessionView> {
-  return applyEvent(sessionId, userId, role, (data) => applySlotWrite(data, write));
+  // §2.4: the read-back rule is applied HERE, at the single write
+  // seam, so every voice surface inherits it — a low-confidence
+  // hearing is stored as needs_confirm regardless of the provenance
+  // the model claimed. Text writes pass no voice source and are
+  // untouched.
+  const effective: SlotWrite = {
+    ...write,
+    provenance: applyAsrProvenance(write.provenance, source),
+  } as SlotWrite;
+  return applyEvent(sessionId, userId, role, (data) => applySlotWrite(data, effective));
+}
+
+/**
+ * Settle a §2.4 read-back: the traveler confirmed what Wander heard
+ * ("yes, Scottsdale"). The slot's value stands and settles. A
+ * correction is NOT this — it arrives as a fresh slot write.
+ */
+export async function confirmIntakeSlot(
+  sessionId: number,
+  userId: number,
+  role: string,
+  slot: SlotName,
+): Promise<IntakeSessionView> {
+  return applyEvent(sessionId, userId, role, (data) => applySlotConfirmation(data, slot));
 }
 
 export async function applyIntakeSkip(

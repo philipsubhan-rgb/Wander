@@ -42,6 +42,7 @@ import {
   type RuleInput,
 } from "./rulesEngine.js";
 import { logger } from "./logger.js";
+import { hasFreeBusyAccount } from "./calendarFreeBusy.js";
 
 export class ContextValidationError extends Error {
   constructor(message: string) {
@@ -426,6 +427,12 @@ export interface ContextDigest {
   companions: Array<{ id: number; name: string; email: string | null }>;
   groups: SavedGroupView[];
   destinationSuggestions: DestinationSuggestion[];
+  /**
+   * §4.1: the traveler has a calendar connected that free/busy can be
+   * read from. A FACT only — busy data itself never enters the digest
+   * (free/busy is read live at date-suggestion time, never stored).
+   */
+  calendarConnected: boolean;
 }
 
 /**
@@ -434,13 +441,15 @@ export interface ContextDigest {
  * companions/groups are the organizer's own provided records (§4.3).
  */
 export async function loadContextDigest(userId: number): Promise<ContextDigest> {
-  const [contextRow, ruleRows, companions, groups, suggestions] = await Promise.all([
-    loadContextRow(userId),
-    listRules(userId),
-    listCompanions(userId),
-    listSavedGroups(userId),
-    loadDestinationSuggestions(userId),
-  ]);
+  const [contextRow, ruleRows, companions, groups, suggestions, calendarConnected] =
+    await Promise.all([
+      loadContextRow(userId),
+      listRules(userId),
+      listCompanions(userId),
+      listSavedGroups(userId),
+      loadDestinationSuggestions(userId),
+      hasFreeBusyAccount(userId),
+    ]);
 
   const rules = ruleRows.map(ruleRowToInput);
   const homeBaseConfirmed =
@@ -470,6 +479,7 @@ export async function loadContextDigest(userId: number): Promise<ContextDigest> 
     companions: companions.map((c) => ({ id: c.id, name: c.name, email: c.email })),
     groups,
     destinationSuggestions: suggestions,
+    calendarConnected,
   };
 }
 

@@ -24,8 +24,49 @@ export type IntakeStateName =
 export type SlotName = "destination" | "party" | "dates" | "style";
 
 /** Where a slot value came from (§2.1). `from_context` is filled by the
- *  context layer (a later step); rung 1 records `asked` / `stated`. */
-export type SlotProvenance = "asked" | "stated" | "from_context" | "inferred";
+ *  context layer (a later step); rung 1 records `asked` / `stated`.
+ *  `needs_confirm` is the §2.4 ASR read-back state: a voice-sourced
+ *  write whose recognition confidence was low — the value is stored,
+ *  but the slot does NOT settle until the traveler confirms the
+ *  read-back (or corrects it with a fresh write). */
+export type SlotProvenance = "asked" | "stated" | "from_context" | "inferred" | "needs_confirm";
+
+/**
+ * ASR confidence below this reads back before it settles (§2.4). One
+ * config value, deliberately conservative: Deepgram-style confidences
+ * cluster near 1.0 for clean speech, so 0.8 catches genuinely muddy
+ * audio without interrogating every turn.
+ */
+export const ASR_CONFIDENCE_THRESHOLD = 0.8;
+
+/** How a slot write arrived — drives the §2.4 read-back rule. */
+export interface SlotWriteSource {
+  channel: "text" | "voice";
+  /** STT confidence in [0, 1] for voice turns; absent when unknown. */
+  asrConfidence?: number;
+}
+
+/**
+ * The read-back rule (§2.4), applied by the service to every slot
+ * write: a VOICE write with known-low ASR confidence is stored as
+ * `needs_confirm` — whatever provenance the model claimed, a shaky
+ * hearing is never presented as settled fact. Text writes, voice
+ * writes at/above the threshold, and voice writes with no confidence
+ * signal are unaffected.
+ */
+export function applyAsrProvenance(
+  provenance: SlotProvenance,
+  source?: SlotWriteSource,
+): SlotProvenance {
+  if (
+    source?.channel === "voice" &&
+    source.asrConfidence !== undefined &&
+    source.asrConfidence < ASR_CONFIDENCE_THRESHOLD
+  ) {
+    return "needs_confirm";
+  }
+  return provenance;
+}
 
 export interface DestinationSlot {
   kind: "place" | "region" | "vibe" | "unknown";
@@ -109,7 +150,7 @@ export function isValidDateString(s: string): boolean {
 }
 
 function requireProvenance(p: SlotProvenance): SlotProvenance {
-  if (!["asked", "stated", "from_context", "inferred"].includes(p)) {
+  if (!["asked", "stated", "from_context", "inferred", "needs_confirm"].includes(p)) {
     throw new IntakeValidationError(`Unknown slot provenance "${String(p)}".`);
   }
   return p;
@@ -147,9 +188,13 @@ export function isStyleComplete(data: IntakeData): boolean {
   return true;
 }
 
-/** A slot is settled when captured (complete) or explicitly skipped. */
+/** A slot is settled when captured (complete) or explicitly skipped.
+ *  A `needs_confirm` value (§2.4) is captured but NOT settled: the
+ *  read-back must complete first — which also keeps REVIEW (and so
+ *  materialization) unreachable while a shaky hearing stands. */
 export function isSlotSettled(data: IntakeData, slot: SlotName): boolean {
   if (data.openItems.includes(slot)) return true;
+  if (data[slot]?.provenance === "needs_confirm") return false;
   switch (slot) {
     case "destination":
       return data.destination !== undefined;
@@ -189,10 +234,52 @@ export interface NextAsk {
 }
 
 /**
+ * The §2.4 read-back question for a slot holding an unconfirmed
+ * low-confidence hearing, or null when no slot needs one. The value is
+ * read back EXACTLY as stored — the traveler confirms what Wander
+ * heard, not a paraphrase.
+ */
+export function slotReadBackQuestion(data: IntakeData, slot: SlotName): string | null {
+  const held = data[slot];
+  if (!held || held.provenance !== "needs_confirm") return null;
+  switch (slot) {
+    case "destination":
+      return `I heard "${data.destination!.value.text}" — is that right?`;
+    case "party": {
+      const p = data.party!.value;
+      const heard = p.solo
+        ? "just you going"
+        : p.travelers
+            .map((t) => (t.email ? `${t.name} (${t.email})` : t.name))
+            .join(", ");
+      return `I heard the party is ${heard} — is that right?`;
+    }
+    case "dates": {
+      const d = data.dates!.value;
+      const heard =
+        d.startDate && d.endDate
+          ? `${d.startDate} to ${d.endDate}`
+          : (d.windowText ?? d.startDate ?? d.endDate ?? "");
+      return `I heard ${heard} for the dates — is that right?`;
+    }
+    case "style":
+      return `I heard "${data.style!.value.text}" for the kind of trip — is that right?`;
+  }
+}
+
+/**
  * Exactly one next ask per turn (§2.2). The model voices this question —
- * it does not improvise its own ordering.
+ * it does not improvise its own ordering. A pending §2.4 read-back
+ * outranks every other ask: the machine is parked on that slot until
+ * the traveler confirms or corrects the hearing.
  */
 export function nextAsk(data: IntakeData, materializedTripId: number | null): NextAsk | null {
+  if (materializedTripId === null && data.intentCaptured) {
+    for (const { slot } of SLOT_ORDER) {
+      const question = slotReadBackQuestion(data, slot);
+      if (question) return { key: `confirm:${slot}`, slot, question };
+    }
+  }
   const state = deriveState(data, materializedTripId);
   switch (state) {
     case "OPENING":
@@ -347,6 +434,17 @@ export function applySlotWrite(data: IntakeData, write: SlotWrite): IntakeData {
 }
 
 /**
+ * Settle a §2.4 read-back: the traveler confirmed what Wander heard.
+ * The value stands; provenance becomes `stated` (the traveler has now
+ * plainly stated it). A no-op for slots not awaiting confirmation.
+ */
+export function applySlotConfirmation(data: IntakeData, slot: SlotName): IntakeData {
+  const held = data[slot];
+  if (!held || held.provenance !== "needs_confirm") return data;
+  return { ...data, [slot]: { value: held.value, provenance: "stated" as SlotProvenance } };
+}
+
+/**
  * Record an explicit skip: a whole slot ("not sure about dates yet") or a
  * sub-item (`party_email:<name>`, `style_budget`). A skip marks the item
  * open and lets the machine advance — it never blocks (Story 1.3).
@@ -363,6 +461,7 @@ export function applySkip(data: IntakeData, item: string): IntakeData {
 function provenanceNote(p: SlotProvenance): string {
   if (p === "from_context") return " (from your profile — say the word to change it)";
   if (p === "inferred") return " (my best guess — correct me if wrong)";
+  if (p === "needs_confirm") return " (as heard by voice — awaiting your confirmation)";
   return "";
 }
 

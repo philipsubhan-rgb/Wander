@@ -226,6 +226,13 @@ function contextDigestLines(context: ContextDigest): string[] {
         .join("; ")} — offer these when narrowing a vague destination.`,
     );
   }
+  if (context.calendarConnected) {
+    lines.push(
+      "Calendar: connected — when trip dates are set, Wander checks free/busy and the intake_set_dates result " +
+        "will flag it plainly if the traveler has something on those dates. Busy times only: Wander never sees " +
+        "or mentions what the events are.",
+    );
+  }
   return lines;
 }
 

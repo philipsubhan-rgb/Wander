@@ -65,6 +65,9 @@ export function getGoogleAuthUrl(state: string): string {
  * scope IN ADDITION to the Gmail scopes, with include_granted_scopes so a
  * user who already connected Gmail keeps that grant untouched — Google
  * merges the new scope into the existing consent instead of replacing it.
+ * `calendar.freebusy` rides along so the free/busy read (§4.1) is
+ * covered by its own least-privilege scope too — though the events
+ * scope alone already authorizes that endpoint.
  */
 export function getGoogleCalendarAuthUrl(state: string): string {
   const client = getOAuthClient();
@@ -77,6 +80,7 @@ export function getGoogleCalendarAuthUrl(state: string): string {
       "https://www.googleapis.com/auth/userinfo.email",
       "https://www.googleapis.com/auth/gmail.readonly",
       "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/calendar.freebusy",
     ],
     state,
   });

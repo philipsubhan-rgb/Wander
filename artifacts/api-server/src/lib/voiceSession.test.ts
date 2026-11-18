@@ -213,6 +213,39 @@ describe("voice turns", () => {
     expect(result.heardText).toBe("Munich, in September");
   });
 
+  it("§2.4 threading: the STT confidence reaches the turn runner as asrConfidence", async () => {
+    const stt = {
+      id: "fake-stt-low",
+      transcribe: vi.fn(async () => ({ text: "Scottsdale", confidence: 0.42 })),
+    } as unknown as SpeechToTextProvider;
+    const seen: Array<{ asrConfidence?: number }> = [];
+    const runTurn: VoiceTurnRunner = async (input) => {
+      seen.push({ asrConfidence: input.asrConfidence });
+      return { reply: "I heard Scottsdale — is that right?" };
+    };
+    const { service } = makeService({
+      providers: { stt, tts: fakeTts().provider },
+      runTurn,
+    });
+    const session = makeSession(service);
+    await service.submitTurn(session.id, {
+      audioBase64: Buffer.from("raw-audio").toString("base64"),
+    });
+    expect(seen).toEqual([{ asrConfidence: 0.42 }]);
+  });
+
+  it("§2.4 threading: a text turn carries NO asrConfidence (the rule can't fire on text)", async () => {
+    const seen: Array<{ asrConfidence?: number }> = [];
+    const runTurn: VoiceTurnRunner = async (input) => {
+      seen.push({ asrConfidence: input.asrConfidence });
+      return { reply: "Ok." };
+    };
+    const { service } = makeService({ runTurn });
+    const session = makeSession(service);
+    await service.submitTurn(session.id, { text: "Scottsdale" });
+    expect(seen).toEqual([{ asrConfidence: undefined }]);
+  });
+
   it("voice and text turns share one conversation: same session, same scope, ordered history of events", async () => {
     const { service, runner } = makeService();
     const session = makeSession(service);

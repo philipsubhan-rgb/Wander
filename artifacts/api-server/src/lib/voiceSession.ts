@@ -53,6 +53,9 @@ export interface VoiceTurnRunnerInput {
   agentId?: string;
   scope: VoiceScope;
   userText: string;
+  /** STT confidence for this utterance, when the provider reported
+   * one — threaded into the engine for the §2.4 ASR read-back rule. */
+  asrConfidence?: number;
 }
 
 /**
@@ -463,6 +466,7 @@ export class VoiceSessionService {
       agentId: session.agentId,
       scope: session.scope,
       userText: heardText,
+      ...(heardConfidence !== undefined ? { asrConfidence: heardConfidence } : {}),
     });
 
     // Intake materialization moves the conversation to the new trip —

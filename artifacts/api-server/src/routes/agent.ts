@@ -1370,11 +1370,16 @@ async function finishIntakeTurn(
 }
 
 /** The ToolContext for a chat turn: session identity rides along in intake scope. */
-function toolContextFor(ctx: ChatContext, channel: "text" | "voice" = "text"): ToolContext {
+function toolContextFor(
+  ctx: ChatContext,
+  channel: "text" | "voice" = "text",
+  asrConfidence?: number,
+): ToolContext {
   return {
     userId: ctx.userId,
     role: ctx.role,
     channel,
+    ...(asrConfidence !== undefined ? { asrConfidence } : {}),
     ...(ctx.scope.kind === "intake" ? { intakeSessionId: ctx.scope.intakeSessionId } : {}),
   };
 }
@@ -1394,6 +1399,9 @@ export interface RunChatTurnInput {
    * money-moment tools can enforce channel policy (the gate refuses
    * voice confirmations); it changes nothing else about the turn. */
   channel: "text" | "voice";
+  /** Voice turns only: the STT confidence for this utterance, threaded
+   * into the ToolContext for the §2.4 ASR read-back rule. */
+  asrConfidence?: number;
   events?: AgentStreamEvents;
   signal?: AbortSignal;
 }
@@ -1443,7 +1451,7 @@ export async function runChatTurn(input: RunChatTurnInput): Promise<RunChatTurnR
     rawMessages: [{ role: "user", content: input.userText }],
   });
 
-  const { reply } = await runAgentLoop(agent, toolContextFor(ctx, input.channel), scope, ctx.messages, {
+  const { reply } = await runAgentLoop(agent, toolContextFor(ctx, input.channel, input.asrConfidence), scope, ctx.messages, {
     events: input.events,
     signal: input.signal,
   });
