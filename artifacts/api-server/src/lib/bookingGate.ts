@@ -376,10 +376,31 @@ export class BookingGate {
 
   async confirmAttempt(
     attemptId: number,
-    actor: { userId: number; role: string },
+    actor: { userId: number; role: string; channel?: "text" | "voice" },
   ): Promise<ConfirmResult> {
     let attempt = await this.loadAttempt(attemptId);
     await this.assertTripAccess(actor.userId, actor.role, attempt.tripId);
+    // Voice proposes, screen confirms (§2.4): a confirmation that arrives
+    // on the voice channel is refused BEFORE anything is recorded — no
+    // per-traveler confirmation, no transition, no writes at all. The
+    // gate enforces this, not the gateway, so no voice client (or model
+    // acting on a spoken "yes") can complete the money moment. The
+    // on-screen review surface confirms through this same method on the
+    // text channel.
+    if (actor.channel === "voice") {
+      logger.info(
+        { attemptId, userId: actor.userId },
+        "[BookingGate] voice-channel confirmation refused — screen confirmation required",
+      );
+      return {
+        confirmed: false,
+        reason:
+          "Voice can't confirm a booking. Confirmation has to happen on screen, on the review card, " +
+          "with the exact total and terms in front of you — tap Confirm there, then tell me to go ahead.",
+        attempt,
+        coverage: await this.loadCoverage(attemptId),
+      };
+    }
     if (attempt.state === "confirmed" && attempt.confirmedByUserId === actor.userId) {
       return {
         confirmed: true,

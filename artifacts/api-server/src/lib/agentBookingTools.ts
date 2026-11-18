@@ -234,6 +234,10 @@ async function confirmAttempt(
     const result: ConfirmResult = await gate.confirmAttempt(args.attemptId, {
       userId: ctx.userId,
       role: ctx.role,
+      // The channel rides along so the gate can enforce voice-proposes /
+      // screen-confirms (§2.4) — a spoken "yes" reaches the gate as a
+      // voice-channel confirmation and is refused there.
+      channel: ctx.channel,
     });
     if (!result.confirmed) {
       return toolOk(

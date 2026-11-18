@@ -40,6 +40,14 @@ export interface ToolContext {
    * is running against. Intake tools require it; trip tools ignore it.
    */
   intakeSessionId?: number;
+  /**
+   * The channel this conversation is running on (architecture §2.4).
+   * Turns are channel-agnostic everywhere EXCEPT money moments: the
+   * Booking Gate refuses confirmations that arrive on the voice channel —
+   * voice may present, only the on-screen review surface may confirm.
+   * Absent = "text" (the typed chat and the app UI are one trust class).
+   */
+  channel?: "text" | "voice";
 }
 
 /** Plain result returned to the agent loop (not an MCP CallToolResult). */
