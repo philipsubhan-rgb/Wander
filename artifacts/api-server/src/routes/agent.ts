@@ -145,7 +145,7 @@ function getAgent(agentId: unknown): AgentDefinition {
 // Trip access guard (assertTripAccess idiom from src/mcp/tools.ts)
 // ---------------------------------------------------------------------------
 
-async function assertTripAccess(userId: number, role: string, tripId: number): Promise<void> {
+export async function assertTripAccess(userId: number, role: string, tripId: number): Promise<void> {
   if (role === "super_admin") return;
 
   const [participant] = await db
@@ -1157,9 +1157,26 @@ interface ChatContext extends ParsedChatBody {
 }
 
 /**
- * Auth + scope existence + membership + snapshot load, shared by both chat
- * endpoints. Sends the HTTP error and returns null on failure. Must run
- * BEFORE any SSE headers are committed on the streaming endpoint.
+ * A chat-context load failure with the HTTP status the chat endpoints
+ * would have sent. Channel adapters (voice, §2.4) call buildChatContext
+ * directly and map this to their own transport.
+ */
+export class ChatContextError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ChatContextError";
+  }
+}
+
+/**
+ * Scope existence + membership + snapshot load, shared by both chat
+ * endpoints AND by channel adapters (voice turns run through here via
+ * runChatTurn, so a voice conversation and a text conversation are the
+ * same conversation — same access checks, same memory, same snapshot).
+ * Throws ChatContextError on failure.
  *
  * Trip scope: 404 if the trip doesn't exist, 403 if the caller isn't a
  * participant; the trip snapshot orients the model.
@@ -1168,18 +1185,11 @@ interface ChatContext extends ParsedChatBody {
  * (OPENING → DESTINATION); the planner snapshot orients the model on the
  * traveler and the machine state.
  */
-async function loadChatContext(
-  req: Request,
-  res: Response,
+async function buildChatContext(
+  userId: number,
+  role: string,
   parsed: ParsedChatBody,
-): Promise<ChatContext | null> {
-  const userId = getAuthUserId(req, res);
-  const role = getAuthRole(req, res) ?? "";
-  if (!userId) {
-    res.status(401).json({ error: "Not authenticated" });
-    return null;
-  }
-
+): Promise<ChatContext> {
   // Scope-specific access + the two scope-specific loads (history,
   // snapshot), resolved before the shared merge below. Trip-scope DB call
   // order is unchanged: trip row → participant check → history → snapshot.
@@ -1190,14 +1200,12 @@ async function loadChatContext(
     const tripId = parsed.scope.tripId;
     const [trip] = await db.select({ id: tripsTable.id }).from(tripsTable).where(eq(tripsTable.id, tripId));
     if (!trip) {
-      res.status(404).json({ error: `Trip ${tripId} not found` });
-      return null;
+      throw new ChatContextError(404, `Trip ${tripId} not found`);
     }
     try {
       await assertTripAccess(userId, role, tripId);
     } catch {
-      res.status(403).json({ error: `Trip access required for trip ${tripId}` });
-      return null;
+      throw new ChatContextError(403, `Trip access required for trip ${tripId}`);
     }
     loadHistory = () => loadMarcoHistory(tripId, userId, MEMORY_CONTEXT_LIMIT);
     loadSnapshotMessage = async () =>
@@ -1206,14 +1214,12 @@ async function loadChatContext(
     const sessionId = parsed.scope.intakeSessionId;
     let view = await loadIntakeSession(sessionId);
     if (!view) {
-      res.status(404).json({ error: `Intake session ${sessionId} not found` });
-      return null;
+      throw new ChatContextError(404, `Intake session ${sessionId} not found`);
     }
     try {
       await assertIntakeAccess(userId, role, sessionId);
     } catch {
-      res.status(403).json({ error: `Intake access required for session ${sessionId}` });
-      return null;
+      throw new ChatContextError(403, `Intake access required for session ${sessionId}`);
     }
     // The opening user message IS the intent (§2.2): arriving here in
     // OPENING means the traveler just said they want to plan a trip.
@@ -1261,8 +1267,7 @@ async function loadChatContext(
     snapshotMessage = await loadSnapshotMessage();
   } catch (err) {
     logger.error({ scope: scopeLabel(parsed.scope), userId, err }, "[Agent] snapshot load failed");
-    res.status(500).json({ error: "Failed to load conversation context" });
-    return null;
+    throw new ChatContextError(500, "Failed to load conversation context");
   }
 
   const messages: ChatMessage[] = [
@@ -1271,6 +1276,34 @@ async function loadChatContext(
     ...history,
   ];
   return { ...parsed, userId, role, messages, freshMessages: fresh };
+}
+
+/**
+ * HTTP wrapper over buildChatContext for the chat endpoints: resolves
+ * the session identity, sends the HTTP error and returns null on
+ * failure. Must run BEFORE any SSE headers are committed on the
+ * streaming endpoint.
+ */
+async function loadChatContext(
+  req: Request,
+  res: Response,
+  parsed: ParsedChatBody,
+): Promise<ChatContext | null> {
+  const userId = getAuthUserId(req, res);
+  const role = getAuthRole(req, res) ?? "";
+  if (!userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return null;
+  }
+  try {
+    return await buildChatContext(userId, role, parsed);
+  } catch (err) {
+    if (err instanceof ChatContextError) {
+      res.status(err.status).json({ error: err.message });
+      return null;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -1330,11 +1363,95 @@ async function finishIntakeTurn(
 }
 
 /** The ToolContext for a chat turn: session identity rides along in intake scope. */
-function toolContextFor(ctx: ChatContext): ToolContext {
+function toolContextFor(ctx: ChatContext, channel: "text" | "voice" = "text"): ToolContext {
   return {
     userId: ctx.userId,
     role: ctx.role,
+    channel,
     ...(ctx.scope.kind === "intake" ? { intakeSessionId: ctx.scope.intakeSessionId } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Channel-adapter entry point (§2.4 — voice is an adapter, not an agent)
+// ---------------------------------------------------------------------------
+
+export interface RunChatTurnInput {
+  userId: number;
+  role: string;
+  agentId?: string;
+  scope: ChatScope;
+  /** The traveler's new turn, already text (the voice gateway transcribes). */
+  userText: string;
+  /** The channel this turn arrived on. Recorded in the ToolContext so
+   * money-moment tools can enforce channel policy (the gate refuses
+   * voice confirmations); it changes nothing else about the turn. */
+  channel: "text" | "voice";
+  events?: AgentStreamEvents;
+  signal?: AbortSignal;
+}
+
+export interface RunChatTurnResult {
+  agentId: string;
+  reply: string;
+  mock: boolean;
+  /** Intake scope only: the machine state after the turn. */
+  intakeState?: string | null;
+  /** Intake scope only: set once the session has materialized a trip. */
+  tripId?: number;
+}
+
+/**
+ * Run ONE conversation turn through the exact machinery the /agent/chat
+ * endpoints use — same agent resolution, same mock rule, same context
+ * build (access checks, snapshot, persisted-memory merge), same tool
+ * loop, same turn persistence. This is what makes voice/text switching
+ * lossless (§2.4): a channel adapter supplies a transcribed user turn
+ * and receives the assistant's text turn; all state lives in the shared
+ * conversation services, never in the adapter.
+ *
+ * Throws ChatContextError for scope/access failures (the caller maps
+ * the status); model failures propagate as thrown errors (the chat
+ * endpoints render those as 502).
+ */
+export async function runChatTurn(input: RunChatTurnInput): Promise<RunChatTurnResult> {
+  const agent = getAgent(input.agentId);
+  const scope: ChatScope = input.scope;
+
+  // Same mock rule as /agent/chat: the "wander" agent has no external
+  // model, and without a model key every agent is mock. The mock path
+  // performs no access check and no DB access, and persists nothing.
+  if (agent.id === "wander" || !process.env.MUSE_SPARK_API_KEY) {
+    return {
+      agentId: agent.id,
+      reply: mockReply(agent, scope, [{ role: "user", content: input.userText }]),
+      mock: true,
+      ...(scope.kind === "intake" ? { intakeState: null } : {}),
+    };
+  }
+
+  const ctx = await buildChatContext(input.userId, input.role, {
+    agent,
+    scope,
+    rawMessages: [{ role: "user", content: input.userText }],
+  });
+
+  const { reply } = await runAgentLoop(agent, toolContextFor(ctx, input.channel), scope, ctx.messages, {
+    events: input.events,
+    signal: input.signal,
+  });
+
+  if (scope.kind === "trip") {
+    await rememberTurn(scope.tripId, input.userId, ctx.freshMessages, reply);
+    return { agentId: agent.id, reply, mock: false };
+  }
+  const fin = await finishIntakeTurn(scope.intakeSessionId, input.userId, ctx.freshMessages, reply);
+  return {
+    agentId: agent.id,
+    reply,
+    mock: false,
+    intakeState: fin.state,
+    ...(fin.tripId !== null ? { tripId: fin.tripId } : {}),
   };
 }
 
