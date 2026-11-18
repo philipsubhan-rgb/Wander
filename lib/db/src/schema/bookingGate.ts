@@ -66,6 +66,15 @@ export const bookingStatusValues = [
   "confirmed",
   /** Provider accepted the create (HTTP 202) but has not confirmed yet. */
   "pending",
+  /**
+   * Lifecycle (§5.2/E-3.4): a change attempt against this booking has
+   * been CONFIRMED and its execution is pending/imminent. Returns to
+   * "confirmed" if the change execution fails; becomes "changed" on
+   * success. Attempts and bookings are different machines — the gate
+   * state machine above governs attempts only; these values govern
+   * the ledger record's own lifecycle.
+   */
+  "change_pending",
   "changed",
   "cancelled",
   "failed",
@@ -112,6 +121,30 @@ export interface BookingOptionSnapshot {
   setSize?: number;
   /** Fit reasons as voiced at presentation (fit inputs only, §5.5). */
   fitReasons?: string[];
+  /**
+   * Present when this attempt is a CHANGE of an existing booking
+   * (E-3.4): the option is a provider change offer, its money is the
+   * change total (the delta — negative means a refund is due), and
+   * execution runs the provider's change flow against the original
+   * order instead of creating a new one. A change NEVER executes
+   * except as its own gate attempt — fresh presentation, delta
+   * stated, fresh confirmation.
+   */
+  change?: BookingChangeContext;
+}
+
+/** Change context carried on a change attempt's snapshot (E-3.4). */
+export interface BookingChangeContext {
+  /** The ledger booking being changed. */
+  bookingId: number;
+  /** The provider order-change request that produced this offer. */
+  orderChangeRequestId: string;
+  /** The order's total AFTER the change (the resulting booking total). */
+  newTotalAmountMinor: number;
+  newTotalCurrency: string;
+  /** Airline change penalty included in the change total, when stated. */
+  penaltyAmountMinor: number | null;
+  penaltyCurrency: string | null;
 }
 
 // ─── booking_attempts — the gate ─────────────────────────────────────────────
@@ -357,3 +390,90 @@ export const commissionRecordsTable = pgTable(
 );
 
 export type CommissionRecord = typeof commissionRecordsTable.$inferSelect;
+
+// ─── booking_operations — post-booking change/cancel records (E-3.4) ─────────
+
+export const bookingOperationKindValues = ["cancel", "change"] as const;
+export type BookingOperationKind = (typeof bookingOperationKindValues)[number];
+
+/**
+ * The operation's own little state machine — deliberately NOT the gate
+ * state machine (attempts and bookings/operations are different
+ * machines). A cancellation has no "option" to present, so it runs the
+ * REVIEW-equivalent discipline on this record instead: `quoted`
+ * (provider terms fetched and presented — refund, penalty, deadline)
+ * → `confirmed` (the traveler's explicit act, policy-checked exactly
+ * like a gate confirmation) → `executed`. Nothing provider-side is
+ * confirmed before the `confirmed` state exists. Changes are the
+ * mirror image: their state machine IS a gate attempt (the change
+ * offer is an option), so a change writes its operation row at
+ * execution time as the audit record, linked to the attempt.
+ */
+export const bookingOperationStateValues = [
+  "quoted",
+  "confirmed",
+  "executed",
+  "failed",
+  "expired",
+] as const;
+export type BookingOperationState = (typeof bookingOperationStateValues)[number];
+
+export const bookingOperationsTable = pgTable(
+  "booking_operations",
+  {
+    id: serial("id").primaryKey(),
+    bookingId: integer("booking_id")
+      .notNull()
+      .references(() => bookingsTable.id, { onDelete: "cascade" }),
+    tripId: integer("trip_id")
+      .notNull()
+      .references(() => tripsTable.id, { onDelete: "cascade" }),
+    /** The gate attempt behind a change operation; null for cancels. */
+    attemptId: integer("attempt_id").references(() => bookingAttemptsTable.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").$type<BookingOperationKind>().notNull(),
+    state: text("state").$type<BookingOperationState>().notNull().default("quoted"),
+    /** Provider-side operation id (Duffel order cancellation / order change). */
+    providerOperationId: text("provider_operation_id"),
+    /** Cancellation: the refund the provider quoted/confirmed. */
+    refundAmountMinor: integer("refund_amount_minor"),
+    refundCurrency: text("refund_currency"),
+    /** Where the refund goes, in the provider's words ("original_form_of_payment", "airline_credits"…). */
+    refundTo: text("refund_to"),
+    /** Cancellation penalty (charged total − refund, same currency) or the change penalty. */
+    penaltyAmountMinor: integer("penalty_amount_minor"),
+    penaltyCurrency: text("penalty_currency"),
+    /** Change: the signed change total — positive = additional charge, negative = refund due. */
+    deltaAmountMinor: integer("delta_amount_minor"),
+    deltaCurrency: text("delta_currency"),
+    /** Change: the booking's total after the change. */
+    newTotalAmountMinor: integer("new_total_amount_minor"),
+    newTotalCurrency: text("new_total_currency"),
+    /** The plain-language terms exactly as presented before confirmation. */
+    termsText: text("terms_text"),
+    /**
+     * Audit detail that has no column: for a change, the projected
+     * legacy rows the change removed (their full content — the old
+     * state stays visible in the trip's history here, in the ledger
+     * layer, even though the rows leave the itinerary projection).
+     */
+    details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
+    /** Provider quote expiry (a stale cancellation quote can't be confirmed). */
+    expiresAt: timestamp("expires_at"),
+    confirmedByUserId: integer("confirmed_by_user_id").references(() => usersTable.id, {
+      onDelete: "set null",
+    }),
+    confirmedAt: timestamp("confirmed_at"),
+    executedAt: timestamp("executed_at"),
+    failureReason: text("failure_reason"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("booking_operations_booking_idx").on(t.bookingId),
+    index("booking_operations_trip_idx").on(t.tripId),
+  ],
+);
+
+export type BookingOperation = typeof bookingOperationsTable.$inferSelect;
