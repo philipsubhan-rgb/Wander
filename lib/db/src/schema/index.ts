@@ -22,3 +22,4 @@ export * from "./connectedAccounts";
 export * from "./fxRateSnapshots";
 export * from "./flightWatches";
 export * from "./extrasSuggestions";
+export * from "./bookingGate";
