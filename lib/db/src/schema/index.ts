@@ -21,3 +21,4 @@ export * from "./travelerContext";
 export * from "./connectedAccounts";
 export * from "./fxRateSnapshots";
 export * from "./flightWatches";
+export * from "./extrasSuggestions";
