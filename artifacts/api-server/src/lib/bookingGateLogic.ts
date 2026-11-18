@@ -209,6 +209,34 @@ export function describePriceDelta(
     : `${label}: the price went DOWN from ${fmt(presented)} to ${fmt(current)} (−${fmt(diffMoney)}) since it was shown. Review the new total before confirming.`;
 }
 
+/**
+ * Plain-language delta for a STAY quote vs the presented search price
+ * (E-3.2). A stays search price is an ESTIMATE — Duffel re-prices via
+ * quote before booking — so a delta here is the normal case, not an
+ * anomaly, and the copy says exactly that: the search figure was an
+ * estimate, the quote is the firm price, and nothing is booked until
+ * the traveler confirms the quoted total.
+ */
+export function describeStayQuoteDelta(presented: Money, quoted: Money, label: string): string {
+  const fmt = (m: Money) => formatMoney(m, "en-US");
+  const p = fmt(presented);
+  const c = fmt(quoted);
+  if (presented.currency !== quoted.currency) {
+    return (
+      `${label}: the search estimate was ${p}, but the firm quote is ${c} — ` +
+      `the currency changed as well as the amount. The search price was an estimate; ` +
+      `the quote is the price you'd actually pay. Nothing was booked — review the quoted total before confirming.`
+    );
+  }
+  const direction = quoted.amountMinor > presented.amountMinor ? "more" : "less";
+  return (
+    `${label}: the search estimate was ${p}; the firm quote is ${c} — ` +
+    `${fmt(money(Math.abs(quoted.amountMinor - presented.amountMinor), presented.currency))} ${direction} than the estimate. ` +
+    `Stay prices from search are estimates — the quote is the price you'd actually pay. ` +
+    `Nothing was booked — review the quoted total before confirming.`
+  );
+}
+
 // ─── Terms (plain language, from the option's own facts) ─────────────────────
 
 export function flightTerms(input: {

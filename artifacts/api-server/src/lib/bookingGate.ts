@@ -21,19 +21,23 @@
 import { and, eq } from "drizzle-orm";
 import {
   db,
+  accommodationsTable,
   bookingAttemptsTable,
   bookingAttemptTravelersTable,
+  bookingOperationsTable,
   bookingsTable,
   bookingTravelersTable,
   bookingSplitsTable,
   commissionRecordsTable,
   flightsTable,
   tripParticipantsTable,
+  usersTable,
   type Booking,
   type BookingAttempt,
   type BookingAttemptTraveler,
+  type BookingChangeContext,
 } from "@workspace/db";
-import { fromMajorDecimal, money, toLegacyPrice, type Money } from "@workspace/money";
+import { formatMoney, fromMajorDecimal, money, subtract, toLegacyPrice, type Money } from "@workspace/money";
 import {
   assertTransition,
   computeBookingSplits,
@@ -41,6 +45,7 @@ import {
   defaultVisibility,
   deriveWhyThisOption,
   describePriceDelta,
+  describeStayQuoteDelta,
   duffelRailFees,
   flightTerms,
   GateTransitionError,
@@ -51,18 +56,29 @@ import {
 import {
   DuffelError,
   duffelOrdersClientFromEnv,
+  mapChangeOfferToOption,
   mapDuffelOffer,
   mapOrderToFlightRows,
   type CreateOrderResult,
   type DuffelOffer,
+  type DuffelOrder,
+  type DuffelOrderChange,
+  type DuffelOrderChangeRequest,
   type DuffelOrdersClient,
   type DuffelPassengerInput,
 } from "./duffel";
-import type { WanderOption } from "./options";
+import {
+  duffelStaysClientFromEnv,
+  stayCancellationTermsFromTimeline,
+  type CreateStayBookingResult,
+  type DuffelStayQuote,
+  type DuffelStaysClient,
+} from "./duffelStays";
+import type { StayOption, StayRateBreakdown, WanderOption } from "./options";
 import { checkExecutionChannel, type RuleInput } from "./rulesEngine";
 import { listRules, ruleRowToInput } from "./travelerContext";
 import { readProfileFields, type ProfileFieldName } from "./travelerProfile";
-import { registerWatchForFlight } from "./watching";
+import { deregisterWatchForFlight, registerWatchForFlight } from "./watching";
 import { logger } from "./logger";
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -101,18 +117,32 @@ export interface RequoteInfo {
   /** Passenger ids from the raw provider offer — execution maps
    * covered travelers onto these, in order. */
   offerPassengerIds?: string[];
+  /** Refreshed change context (change attempts only): the provider
+   * may restate the resulting total when the offer is re-read. */
+  changeContext?: BookingChangeContext;
 }
 
 export type RequoteProvider = (option: WanderOption) => Promise<RequoteInfo>;
+
+/** Change re-verification: re-read the change request's offers. */
+export type ChangeRequoteProvider = (
+  option: WanderOption,
+  change: BookingChangeContext,
+) => Promise<RequoteInfo>;
 
 // ─── Deps (injectable; tests drive everything through these) ─────────────────
 
 export interface BookingGateDeps {
   /** undefined = from env; null = no rail configured. */
   ordersClient?: DuffelOrdersClient | null;
+  /** undefined = from env; null = no stays rail configured. */
+  staysClient?: DuffelStaysClient | null;
   requote?: RequoteProvider;
+  staysRequote?: RequoteProvider;
+  changeRequote?: ChangeRequoteProvider;
   readProfile?: typeof readProfileFields;
   registerWatch?: (flightId: number) => Promise<unknown>;
+  deregisterWatch?: (flightId: number) => Promise<unknown>;
   loadRules?: (userId: number) => Promise<RuleInput[]>;
   policy?: ConfirmationPolicy;
   now?: () => Date;
@@ -135,6 +165,12 @@ export interface CreateAttemptInput {
   whyHint?: string | null;
   fitReasons?: readonly string[];
   setSize?: number;
+  /**
+   * Change attempts only (E-3.4): the option is a provider change
+   * offer against an existing booking. Carried on the snapshot;
+   * execution runs the provider's change flow instead of a create.
+   */
+  change?: BookingChangeContext;
 }
 
 export interface BeginReviewResult {
@@ -170,26 +206,97 @@ const PASSENGER_FIELDS: readonly ProfileFieldName[] = [
   "phone",
 ];
 
+/** A stay guest as built from the vault (never from chat/tool args). */
+interface StayGuest {
+  userId: number;
+  givenName: string;
+  familyName: string;
+  bornOn: string;
+  phone: string | null;
+}
+
 // ─── The service ─────────────────────────────────────────────────────────────
 
 export class BookingGate {
   private readonly ordersClient: DuffelOrdersClient | null;
+  private readonly staysClient: DuffelStaysClient | null;
   private readonly requote: RequoteProvider;
+  private readonly staysRequote: RequoteProvider;
+  private readonly changeRequote: ChangeRequoteProvider;
   private readonly readProfile: typeof readProfileFields;
   private readonly registerWatch: (flightId: number) => Promise<unknown>;
+  private readonly deregisterWatch: (flightId: number) => Promise<unknown>;
   private readonly loadRules: (userId: number) => Promise<RuleInput[]>;
   private readonly policy: ConfirmationPolicy;
   private readonly now: () => Date;
 
   constructor(deps: BookingGateDeps = {}) {
     this.ordersClient = deps.ordersClient !== undefined ? deps.ordersClient : duffelOrdersClientFromEnv();
+    this.staysClient = deps.staysClient !== undefined ? deps.staysClient : duffelStaysClientFromEnv();
     this.requote = deps.requote ?? makeDuffelRequote(this.ordersClient);
+    this.staysRequote = deps.staysRequote ?? ((option) => this.defaultStaysRequote(option));
+    this.changeRequote = deps.changeRequote ?? makeDuffelChangeRequote(this.ordersClient);
     this.readProfile = deps.readProfile ?? readProfileFields;
     this.registerWatch = deps.registerWatch ?? (async (flightId) => registerWatchForFlight(flightId));
+    this.deregisterWatch =
+      deps.deregisterWatch ?? (async (flightId) => deregisterWatchForFlight(flightId));
     this.loadRules =
       deps.loadRules ?? (async (userId) => (await listRules(userId)).map(ruleRowToInput));
     this.policy = deps.policy ?? new ConservativeSelfOnlyPolicy();
     this.now = deps.now ?? (() => new Date());
+  }
+
+  /**
+   * Attempt-aware re-verification dispatch — ONE quote step per kind,
+   * never a parallel path (§5.2): a change attempt re-reads its change
+   * offers; a stay attempt creates the Duffel Stays quote (the
+   * estimate becomes firm); a flight attempt re-fetches the offer.
+   */
+  private async requoteForAttempt(attempt: BookingAttempt, option: WanderOption): Promise<RequoteInfo> {
+    const change = attempt.optionSnapshot.change;
+    if (change) return this.changeRequote(option, change);
+    if (option.kind === "stay") return this.staysRequote(option);
+    return this.requote(option);
+  }
+
+  /**
+   * The default stays re-verification: POST a quote for the option's
+   * rate. The quote total is FIRM (priceNature flips to "firm" and the
+   * quote id lands on the fresh option's summary, where execution
+   * picks it up). A quote equal to the estimate is "same" — the stay
+   * books after ONE confirmation; any difference is "changed" with
+   * honest estimate→quote copy (the normal case for stays, E-3.2).
+   */
+  private async defaultStaysRequote(option: WanderOption): Promise<RequoteInfo> {
+    if (option.kind !== "stay" || option.adapter !== "duffel") {
+      return {
+        outcome: "unverifiable",
+        reason: "Live re-verification isn't wired for this kind of option yet.",
+      };
+    }
+    if (!this.staysClient) {
+      return {
+        outcome: "unverifiable",
+        reason: "Duffel isn't configured (no DUFFEL_API_TOKEN), so the stay price can't be re-verified live.",
+      };
+    }
+    if (!option.summary.rateId) {
+      return {
+        outcome: "unverifiable",
+        reason:
+          "This stay option didn't carry a rate reference, so it can't be quoted or booked. Nothing was booked.",
+      };
+    }
+    let quote: DuffelStayQuote;
+    try {
+      quote = await this.staysClient.createQuote(option.summary.rateId);
+    } catch (err) {
+      return {
+        outcome: "unverifiable",
+        reason: `The live quote check failed (${err instanceof Error ? err.message : String(err)}). Nothing was booked.`,
+      };
+    }
+    return stayQuoteToRequoteInfo(quote, option, this.now().toISOString());
   }
 
   // ── Access (the extras/assertTripAccess idiom: super_admin bypasses
@@ -280,6 +387,7 @@ export class BookingGate {
           option: option as unknown as Record<string, unknown>,
           setSize: input.setSize,
           fitReasons: input.fitReasons ? [...input.fitReasons] : undefined,
+          change: input.change,
         },
         state: "presented",
         visibility: input.visibility ?? defaultVisibility(input.category),
@@ -336,7 +444,7 @@ export class BookingGate {
     attempt = await this.transition(attempt, "reverifying");
 
     const snapshotOption = attempt.optionSnapshot.option as unknown as WanderOption;
-    const info = await this.requote(snapshotOption);
+    const info = await this.requoteForAttempt(attempt, snapshotOption);
 
     if (info.outcome === "unverifiable") {
       attempt = await this.transition(attempt, "presented");
@@ -354,12 +462,22 @@ export class BookingGate {
 
     const fresh = info.option;
     const patch: Partial<BookingAttempt> = {
-      optionSnapshot: { ...attempt.optionSnapshot, option: fresh as unknown as Record<string, unknown> },
+      optionSnapshot: {
+        ...attempt.optionSnapshot,
+        option: fresh as unknown as Record<string, unknown>,
+        ...(info.changeContext ? { change: info.changeContext } : {}),
+      },
       reviewedAmountMinor: fresh.money.amountMinor,
       reviewedCurrency: fresh.money.currency,
       homeEquivalentMinor: fresh.homeEquivalent?.money.amountMinor ?? attempt.homeEquivalentMinor,
       homeCurrency: fresh.homeEquivalent?.money.currency ?? attempt.homeCurrency,
       fxSnapshotId: fresh.homeEquivalent?.fxSnapshotId ?? attempt.fxSnapshotId,
+      // A stay quote restates the cancellation position — the terms
+      // the traveler confirms are the QUOTE's terms, not the search's.
+      cancelTerms:
+        fresh.kind === "stay"
+          ? (fresh.summary.cancellationTerms ?? attempt.cancelTerms)
+          : attempt.cancelTerms,
     };
     if (info.outcome === "changed") {
       patch.reviewVersion = attempt.reviewVersion + 1;
@@ -440,8 +558,32 @@ export class BookingGate {
       confirmedByUserId: actor.userId,
       confirmedAt: this.now(),
     });
+    // Ledger lifecycle (E-3.4): confirming a CHANGE attempt moves its
+    // target booking to change_pending. The booking's own machine is
+    // separate from the attempt's — this is the one place they touch
+    // before execution. Only a confirmed booking can pend; anything
+    // else is left exactly as it is.
+    const changeCtx = attempt.optionSnapshot.change;
+    if (changeCtx) {
+      await db
+        .update(bookingsTable)
+        .set({ status: "change_pending", updatedAt: this.now() })
+        .where(
+          and(eq(bookingsTable.id, changeCtx.bookingId), eq(bookingsTable.status, "confirmed")),
+        );
+    }
     logger.info({ attemptId, userId: actor.userId }, "[BookingGate] attempt confirmed");
     return { confirmed: true, reason: decision.reason, attempt, coverage };
+  }
+
+  /** Undo the change_pending mark when a change attempt falls back
+   * (price moved at the execution boundary, option vanished): the
+   * booking returns to plain confirmed — it was never changed. */
+  private async restoreChangePending(bookingId: number): Promise<void> {
+    await db
+      .update(bookingsTable)
+      .set({ status: "confirmed", updatedAt: this.now() })
+      .where(and(eq(bookingsTable.id, bookingId), eq(bookingsTable.status, "change_pending")));
   }
 
   // ── CONFIRMED → EXECUTING → BOOKED | FAILED ───────────────────────────────
@@ -474,14 +616,24 @@ export class BookingGate {
     // from PRESENTED/REVIEW to execution.
     assertTransition(attempt.state, "executing");
 
-    if (attempt.kind !== "flight" || attempt.adapter !== "duffel") {
+    const changeCtx = attempt.optionSnapshot.change;
+    const supported =
+      attempt.adapter === "duffel" && (attempt.kind === "flight" || attempt.kind === "stay");
+    if (!supported) {
       return {
         executed: false,
         attempt,
         reason: `Execution for ${attempt.kind} options isn't wired to a booking rail yet — this attempt stays confirmed, nothing was booked.`,
       };
     }
-    if (!this.ordersClient) {
+    if (attempt.kind === "flight" && !this.ordersClient) {
+      return {
+        executed: false,
+        attempt,
+        reason: "Duffel isn't configured (no DUFFEL_API_TOKEN), so bookings can't be executed. Nothing was booked.",
+      };
+    }
+    if (attempt.kind === "stay" && !this.staysClient) {
       return {
         executed: false,
         attempt,
@@ -504,7 +656,7 @@ export class BookingGate {
     // total is never silently updated, and a changed option is a new
     // presentation — back to REVIEW, zero provider creates.
     const snapshotOption = attempt.optionSnapshot.option as unknown as WanderOption;
-    const info = await this.requote(snapshotOption);
+    const info = await this.requoteForAttempt(attempt, snapshotOption);
     if (info.outcome === "unverifiable") {
       return {
         executed: false,
@@ -513,19 +665,29 @@ export class BookingGate {
       };
     }
     if (info.outcome === "unavailable" || !info.option) {
-      const reason = info.reason ?? "That flight is no longer available.";
+      const reason =
+        info.reason ??
+        (attempt.kind === "stay"
+          ? "That stay is no longer available."
+          : "That flight is no longer available.");
       attempt = await this.transition(attempt, "failed", { failureReason: reason });
+      if (changeCtx) await this.restoreChangePending(changeCtx.bookingId);
       return { executed: false, attempt, reason };
     }
     if (info.outcome === "changed") {
       attempt = await this.transition(attempt, "review", {
-        optionSnapshot: { ...attempt.optionSnapshot, option: info.option as unknown as Record<string, unknown> },
+        optionSnapshot: {
+          ...attempt.optionSnapshot,
+          option: info.option as unknown as Record<string, unknown>,
+          ...(info.changeContext ? { change: info.changeContext } : {}),
+        },
         reviewedAmountMinor: info.option.money.amountMinor,
         reviewedCurrency: info.option.money.currency,
         reviewVersion: attempt.reviewVersion + 1,
         confirmedByUserId: null,
         confirmedAt: null,
       });
+      if (changeCtx) await this.restoreChangePending(changeCtx.bookingId);
       return {
         executed: false,
         attempt,
@@ -534,7 +696,42 @@ export class BookingGate {
       };
     }
 
-    attempt = await this.transition(attempt, "executing");
+    // The fresh option (for a stay: the firm quote, quote id included)
+    // is what execution acts on — persist it on the executing attempt.
+    attempt = await this.transition(attempt, "executing", {
+      optionSnapshot: {
+        ...attempt.optionSnapshot,
+        option: info.option as unknown as Record<string, unknown>,
+        ...(info.changeContext ? { change: info.changeContext } : {}),
+      },
+    });
+
+    // One state machine, three executions (§5.2/E-3.2/E-3.4): a change
+    // attempt runs the provider's change flow against the original
+    // booking; a stay books against its quote; a flight creates an
+    // order. No parallel paths exist.
+    if (changeCtx) return this.executeChangeAttempt(attempt, info);
+    if (attempt.kind === "stay") return this.executeStayAttempt(attempt, info);
+    return this.executeFlightAttempt(attempt, info);
+  }
+
+  // ── Flight execution (CONFIRMED → EXECUTING → BOOKED | FAILED) ────────────
+
+  private async executeFlightAttempt(
+    attempt: BookingAttempt,
+    info: RequoteInfo,
+  ): Promise<ExecuteResult> {
+    const attemptId = attempt.id;
+    const ordersClient = this.ordersClient;
+    if (!ordersClient) {
+      // Unreachable through executeAttempt (checked there); stated
+      // plainly rather than assumed.
+      return {
+        executed: false,
+        attempt,
+        reason: "Duffel isn't configured (no DUFFEL_API_TOKEN), so bookings can't be executed. Nothing was booked.",
+      };
+    }
 
     // The ledger row comes FIRST (status pending): it anchors the
     // vault access log's booking_id and makes a crash mid-execution
@@ -601,7 +798,7 @@ export class BookingGate {
     // "accepted; check state, don't re-send" (Duffel discipline).
     let createResult: CreateOrderResult;
     try {
-      createResult = await this.ordersClient.createOrder({
+      createResult = await ordersClient.createOrder({
         offerId: attempt.optionId,
         passengers,
       });
@@ -751,6 +948,582 @@ export class BookingGate {
       attempt: finalized.bookedAttempt,
       booking: finalized.booking,
     };
+  }
+
+  // ── Stay execution (the same machine; quote → book, E-3.2) ────────────────
+
+  private async executeStayAttempt(
+    attempt: BookingAttempt,
+    info: RequoteInfo,
+  ): Promise<ExecuteResult> {
+    const attemptId = attempt.id;
+    const staysClient = this.staysClient;
+    const option = info.option;
+    if (!staysClient || !option || option.kind !== "stay") {
+      // Unreachable through executeAttempt (checked there); stated
+      // plainly rather than assumed.
+      return {
+        executed: false,
+        attempt,
+        reason: "Duffel isn't configured (no DUFFEL_API_TOKEN), so bookings can't be executed. Nothing was booked.",
+      };
+    }
+    const summary = option.summary;
+
+    // The ledger row comes FIRST (status pending) — the same
+    // discipline as flights: it anchors the vault access log's
+    // booking_id and makes a crash mid-execution reconcilable.
+    const coverage = await this.loadCoverage(attemptId);
+    const reviewedTotal = money(
+      attempt.reviewedAmountMinor ?? attempt.presentedAmountMinor,
+      attempt.reviewedCurrency ?? attempt.presentedCurrency,
+    );
+    const [booking] = await db
+      .insert(bookingsTable)
+      .values({
+        attemptId: attempt.id,
+        tripId: attempt.tripId,
+        kind: "stay",
+        supplier: attempt.supplier,
+        status: "pending",
+        source: "api_rail",
+        chargeAmountMinor: reviewedTotal.amountMinor,
+        chargeCurrency: reviewedTotal.currency,
+        homeEquivalentMinor: attempt.homeEquivalentMinor,
+        homeCurrency: attempt.homeCurrency,
+        fxSnapshotId: attempt.fxSnapshotId,
+        merchantOfRecord: "duffel",
+        changeTerms: attempt.changeTerms,
+        cancelTerms: summary.cancellationTerms ?? attempt.cancelTerms,
+        whyThisOption: attempt.whyThisOption,
+        whyThisOptionText: attempt.whyThisOptionText,
+        rankingInputsHash: attempt.rankingInputsHash,
+        visibility: attempt.visibility,
+      })
+      .returning();
+    if (!booking) throw new Error("booking insert returned no row");
+    for (const covered of coverage) {
+      await db.insert(bookingTravelersTable).values({
+        bookingId: booking.id,
+        userId: covered.userId,
+        rosterEntryId: covered.rosterEntryId,
+        isPayer: covered.isPayer,
+      });
+    }
+
+    const failExecution = async (reason: string): Promise<ExecuteResult> => {
+      await db
+        .update(bookingsTable)
+        .set({ status: "failed", updatedAt: this.now() })
+        .where(eq(bookingsTable.id, booking.id));
+      const failed = await this.transition(attempt, "failed", { failureReason: reason, bookingId: booking.id });
+      logger.warn({ attemptId, bookingId: booking.id, reason }, "[BookingGate] stay execution failed");
+      return { executed: false, attempt: failed, booking: { ...booking, status: "failed" }, reason };
+    };
+
+    // The booking is created against the QUOTE from re-verification —
+    // never against the search estimate. No quote id, nothing firm to
+    // book: fail honestly, zero provider creates.
+    const quoteId = summary.quoteId;
+    if (!quoteId) {
+      return failExecution(
+        "The stay couldn't be quoted at booking time, so nothing was booked. Review the stay again so a firm quote can be issued first.",
+      );
+    }
+
+    // Guests: from the VAULT, per covered traveler, access-logged
+    // against this booking — identical discipline to flight passengers.
+    let guests: StayGuest[];
+    try {
+      guests = await this.buildStayGuests(coverage, booking.id);
+    } catch (err) {
+      if (err instanceof BookingRefused) return failExecution(err.reason);
+      throw err;
+    }
+
+    // Lead contact (the documented booking body requires an email and
+    // a phone number): the confirmer's account email + their vault
+    // phone. Neither is ever taken from chat text or tool arguments.
+    const lead = guests.find((g) => g.userId === attempt.confirmedByUserId) ?? guests[0];
+    if (!lead) {
+      return failExecution("No covered traveler could be the booking contact. Nothing was booked.");
+    }
+    if (!lead.phone) {
+      return failExecution(
+        "The property needs a contact phone number, and the lead traveler's profile doesn't have one yet. Nothing was booked.",
+      );
+    }
+    const [leadUser] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, lead.userId));
+    if (!leadUser?.email) {
+      return failExecution(
+        "The lead traveler has no email address on their account, which the property requires for the booking. Nothing was booked.",
+      );
+    }
+
+    // The create call — sent exactly once. 200/201/202 all mean
+    // "accepted; check state, don't re-send" (Duffel discipline).
+    let result: CreateStayBookingResult;
+    try {
+      result = await staysClient.createBooking({
+        quoteId,
+        guests: guests.map((g) => ({
+          givenName: g.givenName,
+          familyName: g.familyName,
+          bornOn: g.bornOn,
+        })),
+        email: leadUser.email,
+        phoneNumber: lead.phone,
+      });
+    } catch (err) {
+      const detail = err instanceof DuffelError ? err.message : err instanceof Error ? err.message : String(err);
+      return failExecution(`The booking didn't go through: ${detail} Nothing was charged or booked — you can pick another option and try again.`);
+    }
+
+    const stayBooking = result.booking;
+    const pendingConfirmation = result.status === 202;
+    const charged = parseOrderTotal(stayBooking);
+
+    const finalized = await db.transaction(async (tx) => {
+      const [acc] = await tx
+        .insert(accommodationsTable)
+        .values({
+          tripId: attempt.tripId,
+          name: summary.propertyName,
+          address: summary.addressLine ?? summary.areaLabel,
+          checkIn: summary.checkInDate,
+          checkOut: summary.checkOutDate,
+          type: stayAccommodationType(summary),
+          nightlyRate: summary.nightlyRate ? legacyAmountString(summary.nightlyRate) : null,
+          totalPrice: legacyAmountString(reviewedTotal),
+          currency: reviewedTotal.currency,
+          confirmationCode: stayBooking?.reference ?? null,
+          notes: stayNotes(summary),
+        })
+        .returning();
+
+      // Splits: equal shares in the charge currency, organizer first
+      // (the remainder lands on the first share — §5.4).
+      const orderedCoverage = orderCoverageForSplits(coverage, attempt.confirmedByUserId);
+      const shares = computeBookingSplits(reviewedTotal, orderedCoverage.length);
+      for (const [i, covered] of orderedCoverage.entries()) {
+        await tx.insert(bookingSplitsTable).values({
+          bookingId: booking.id,
+          userId: covered.userId,
+          rosterEntryId: covered.rosterEntryId,
+          shareAmountMinor: shares[i]?.amountMinor ?? 0,
+          shareCurrency: reviewedTotal.currency,
+        });
+      }
+
+      // Commission: Duffel Stays pays a profit share on completed
+      // stays (api-ecosystem-map: monthly, above a $25 threshold) —
+      // no per-booking amount or rate is stated anywhere in the
+      // payload, so the record is "expected" with NO amount rather
+      // than an invented figure (Story 7.2/7.4). The explanation is
+      // carried in costAttribution below.
+      await tx.insert(commissionRecordsTable).values({
+        bookingId: booking.id,
+        partnerProgram: "duffel_stays",
+        basis: null,
+        rateBps: null,
+        expectedAmountMinor: null,
+        expectedCurrency: null,
+        status: "expected",
+        noRailReason: null,
+      });
+
+      const [updatedBooking] = await tx
+        .update(bookingsTable)
+        .set({
+          status: pendingConfirmation ? "pending" : "confirmed",
+          confirmationCode: stayBooking?.reference ?? null,
+          providerOrderId: stayBooking?.id ?? null,
+          amountActuallyChargedMinor: charged?.amountMinor ?? null,
+          railProvider: null,
+          railOrderFeeMinor: null,
+          railPctFeeMinor: null,
+          railFeeCurrency: null,
+          processingFeeMinor: null,
+          costAttribution: {
+            commissionNote:
+              "Duffel Stays pays a profit share on completed stays, settled monthly above a $25 threshold; no per-booking commission amount or rate is stated by the provider, so the commission record carries no amount rather than an invented one.",
+            ...(charged && charged.amountMinor !== reviewedTotal.amountMinor
+              ? {
+                  chargeDiscrepancy:
+                    "The supplier reported a different charged total than the reviewed total; the reviewed total is what was authorized.",
+                }
+              : {}),
+          },
+          accommodationId: acc?.id ?? null,
+          projection: { accommodationIds: acc ? [acc.id] : [] },
+          updatedAt: this.now(),
+        })
+        .where(eq(bookingsTable.id, booking.id))
+        .returning();
+
+      const bookedAttempt = await this.transition(
+        { ...attempt, state: "executing" },
+        "booked",
+        { bookingId: booking.id },
+        tx,
+      );
+      return { booking: updatedBooking ?? booking, bookedAttempt };
+    });
+
+    logger.info(
+      { attemptId, bookingId: booking.id, pendingConfirmation },
+      "[BookingGate] stay booking executed",
+    );
+    return {
+      executed: true,
+      pendingConfirmation,
+      attempt: finalized.bookedAttempt,
+      booking: finalized.booking,
+    };
+  }
+
+  /** Guests for a stay booking, from the vault — the flight-passenger
+   * discipline, verbatim in spirit: legal name + DOB per traveler or
+   * the booking refuses before any provider call. */
+  private async buildStayGuests(
+    coverage: BookingAttemptTraveler[],
+    bookingId: number,
+  ): Promise<StayGuest[]> {
+    const guests: StayGuest[] = [];
+    for (const [i, covered] of coverage.entries()) {
+      if (!covered.userId) {
+        throw new BookingRefused(
+          `Traveler ${i + 1} hasn't set up their travel profile yet, so their booking details aren't available. Nothing was booked.`,
+        );
+      }
+      const values = await this.readProfile(
+        covered.userId,
+        PASSENGER_FIELDS,
+        { kind: "agent" },
+        "booking_execution",
+        bookingId,
+      );
+      const first = (values.legal_first_name as string | null | undefined) ?? null;
+      const last = (values.legal_last_name as string | null | undefined) ?? null;
+      const dob = (values.date_of_birth as string | null | undefined) ?? null;
+      if (!first || !last || !dob) {
+        const missing = [
+          !first || !last ? "legal name" : null,
+          !dob ? "date of birth" : null,
+        ].filter(Boolean);
+        throw new BookingRefused(
+          `Traveler ${i + 1}'s profile is missing their ${missing.join(" and ")}, which the property requires. Nothing was booked.`,
+        );
+      }
+      guests.push({
+        userId: covered.userId,
+        givenName: first,
+        familyName: last,
+        bornOn: dob,
+        phone: (values.phone as string | null | undefined) ?? null,
+      });
+    }
+    return guests;
+  }
+
+  // ── Change execution (the change offer IS the option, E-3.4) ──────────────
+
+  private async executeChangeAttempt(
+    attempt: BookingAttempt,
+    info: RequoteInfo,
+  ): Promise<ExecuteResult> {
+    const attemptId = attempt.id;
+    const ordersClient = this.ordersClient;
+    const changeCtx = attempt.optionSnapshot.change;
+    if (!ordersClient || !changeCtx) {
+      return {
+        executed: false,
+        attempt,
+        reason: "Duffel isn't configured (no DUFFEL_API_TOKEN), so changes can't be executed. Your original booking is unchanged.",
+      };
+    }
+    const [original] = await db
+      .select()
+      .from(bookingsTable)
+      .where(eq(bookingsTable.id, changeCtx.bookingId));
+    if (!original || !original.providerOrderId) {
+      const reason = "The booking this change applies to couldn't be found, so nothing was changed.";
+      const failed = await this.transition(attempt, "failed", { failureReason: reason });
+      return { executed: false, attempt: failed, reason };
+    }
+
+    const reviewedDelta = money(
+      attempt.reviewedAmountMinor ?? attempt.presentedAmountMinor,
+      attempt.reviewedCurrency ?? attempt.presentedCurrency,
+    );
+
+    const failChange = async (reason: string, detail?: Record<string, unknown>): Promise<ExecuteResult> => {
+      await db.insert(bookingOperationsTable).values({
+        bookingId: original.id,
+        tripId: attempt.tripId,
+        attemptId: attempt.id,
+        kind: "change",
+        state: "failed",
+        deltaAmountMinor: reviewedDelta.amountMinor,
+        deltaCurrency: reviewedDelta.currency,
+        newTotalAmountMinor: changeCtx.newTotalAmountMinor,
+        newTotalCurrency: changeCtx.newTotalCurrency,
+        penaltyAmountMinor: changeCtx.penaltyAmountMinor,
+        penaltyCurrency: changeCtx.penaltyCurrency,
+        termsText: attempt.changeTerms,
+        details: detail ?? {},
+        confirmedByUserId: attempt.confirmedByUserId,
+        confirmedAt: attempt.confirmedAt,
+        failureReason: reason,
+      });
+      await this.restoreChangePending(original.id);
+      const failed = await this.transition(attempt, "failed", { failureReason: reason });
+      logger.warn({ attemptId, bookingId: original.id, reason }, "[BookingGate] change execution failed");
+      return { executed: false, attempt: failed, reason };
+    };
+
+    // Step 1: create the PENDING change from the confirmed offer —
+    // sent exactly once. Nothing about the booking has changed yet.
+    let pending: DuffelOrderChange;
+    try {
+      pending = await ordersClient.createOrderChange(attempt.optionId);
+    } catch (err) {
+      const detail = err instanceof DuffelError ? err.message : err instanceof Error ? err.message : String(err);
+      return failChange(
+        `The change didn't go through: ${detail} Your original flights are unchanged — nothing was charged or changed.`,
+      );
+    }
+    if (!pending.id) {
+      return failChange("The provider didn't return a change to confirm, so nothing was changed. Your original flights are unchanged.");
+    }
+
+    // The pending change restates its own price. If it moved against
+    // the reviewed delta, do NOT confirm it — an unconfirmed pending
+    // change expires on its own and the original booking stands.
+    const pendingDelta = parseMoneyPair(pending.change_total_amount, pending.change_total_currency);
+    if (
+      pendingDelta &&
+      (pendingDelta.amountMinor !== reviewedDelta.amountMinor ||
+        pendingDelta.currency !== reviewedDelta.currency)
+    ) {
+      return failChange(
+        `The change price moved from ${formatMoney(reviewedDelta)} to ${formatMoney(pendingDelta)} before confirmation, so it was NOT confirmed — the pending change will expire on its own and your original flights are unchanged. Review the new price and confirm again if you'd like to go ahead.`,
+        { unconfirmedProviderChangeId: pending.id },
+      );
+    }
+    const delta = pendingDelta ?? reviewedDelta;
+
+    // Step 2: confirm — paying the change total from balance when it
+    // is positive. This is the executing act, sent exactly once.
+    let confirmedChange: DuffelOrderChange;
+    try {
+      confirmedChange = await ordersClient.confirmOrderChange(
+        pending.id,
+        delta.amountMinor > 0 ? delta : null,
+      );
+    } catch (err) {
+      const detail = err instanceof DuffelError ? err.message : err instanceof Error ? err.message : String(err);
+      return failChange(
+        `The change wasn't confirmed: ${detail} A pending change was created but left unconfirmed — it will expire on its own, and your original flights are unchanged.`,
+        { unconfirmedProviderChangeId: pending.id },
+      );
+    }
+    if (!confirmedChange.confirmed_at) {
+      return failChange(
+        "The provider didn't confirm the change, so your original flights are unchanged.",
+        { unconfirmedProviderChangeId: pending.id },
+      );
+    }
+
+    // Re-read the order for its new state (best-effort: the change IS
+    // confirmed provider-side either way; if the re-read fails the
+    // ledger still records the change with the offer's stated total
+    // and the stale projection is flagged in the operation details).
+    let order: DuffelOrder | null = null;
+    try {
+      order = await ordersClient.getOrder(original.providerOrderId);
+    } catch (err) {
+      logger.warn({ attemptId, bookingId: original.id, err }, "[BookingGate] post-change order re-read failed");
+    }
+    const rows = order ? mapOrderToFlightRows(order) : [];
+    const newTotal =
+      parseOrderTotal(order) ??
+      parseMoneyPair(confirmedChange.new_total_amount, confirmedChange.new_total_currency) ??
+      money(changeCtx.newTotalAmountMinor, changeCtx.newTotalCurrency);
+
+    // Watches: the old legs' watches deregister BEFORE re-projection
+    // (§6.1) — best-effort, like registration.
+    const projectedIds = (original.projection as { flightIds?: unknown } | null)?.flightIds;
+    const oldFlightIds: number[] = Array.isArray(projectedIds)
+      ? projectedIds.filter((id): id is number => typeof id === "number")
+      : original.flightId
+        ? [original.flightId]
+        : [];
+    for (const flightId of oldFlightIds) {
+      try {
+        await this.deregisterWatch(flightId);
+      } catch (err) {
+        logger.warn({ attemptId, flightId, err }, "[BookingGate] watch deregistration failed (best-effort)");
+      }
+    }
+
+    const finalized = await db.transaction(async (tx) => {
+      // Re-project the legacy flight rows from the changed order:
+      // update in place by position, insert extras, and copy any
+      // surplus rows into the operation record BEFORE deleting them —
+      // the old state stays visible in the trip's history (in the
+      // canonical layer) even though it leaves the itinerary.
+      const currentRows: Array<typeof flightsTable.$inferSelect> = [];
+      for (const flightId of oldFlightIds) {
+        const [row] = await tx
+          .select()
+          .from(flightsTable)
+          .where(eq(flightsTable.id, flightId));
+        if (row) currentRows.push(row);
+      }
+      const removedRows: unknown[] = [];
+      const newFlightIds: number[] = [];
+      for (const [i, row] of rows.entries()) {
+        const existing = currentRows[i];
+        const values = {
+          flightNumber: row.flightNumber,
+          airline: row.airline,
+          departureAirport: row.departureAirport,
+          arrivalAirport: row.arrivalAirport,
+          departureDatetime: row.departureDatetime,
+          arrivalDatetime: row.arrivalDatetime,
+          departureTimezone: row.departureTimezone,
+          arrivalTimezone: row.arrivalTimezone,
+          confirmationCode: order?.booking_reference ?? original.confirmationCode,
+          notes: row.notes,
+          direction: row.direction,
+          totalPrice: i === 0 ? legacyAmountString(newTotal) : null,
+          currency: newTotal.currency,
+          fareBrand: info.option?.kind === "flight" ? info.option.summary.fareClass : null,
+          refundable: info.option?.kind === "flight" ? (info.option.summary.refundable ?? null) : null,
+          changeable: info.option?.kind === "flight" ? (info.option.summary.changeable ?? null) : null,
+          passengerCount: existing?.passengerCount ?? null,
+        };
+        if (existing) {
+          await tx.update(flightsTable).set(values).where(eq(flightsTable.id, existing.id));
+          newFlightIds.push(existing.id);
+        } else {
+          const [inserted] = await tx
+            .insert(flightsTable)
+            .values({ tripId: attempt.tripId, ...values })
+            .returning();
+          if (inserted) newFlightIds.push(inserted.id);
+        }
+      }
+      for (const surplus of currentRows.slice(rows.length)) {
+        removedRows.push(surplus);
+        await tx.delete(flightsTable).where(eq(flightsTable.id, surplus.id));
+      }
+
+      const [operation] = await tx
+        .insert(bookingOperationsTable)
+        .values({
+          bookingId: original.id,
+          tripId: attempt.tripId,
+          attemptId: attempt.id,
+          kind: "change",
+          state: "executed",
+          providerOperationId: confirmedChange.id ?? pending.id,
+          deltaAmountMinor: delta.amountMinor,
+          deltaCurrency: delta.currency,
+          newTotalAmountMinor: newTotal.amountMinor,
+          newTotalCurrency: newTotal.currency,
+          penaltyAmountMinor: changeCtx.penaltyAmountMinor,
+          penaltyCurrency: changeCtx.penaltyCurrency,
+          termsText: attempt.changeTerms,
+          details: {
+            removedRows,
+            previousTotalAmountMinor: original.chargeAmountMinor,
+            previousTotalCurrency: original.chargeCurrency,
+            providerOrderId: original.providerOrderId,
+            ...(order ? {} : { orderReReadFailed: true }),
+          },
+          confirmedByUserId: attempt.confirmedByUserId,
+          confirmedAt: attempt.confirmedAt,
+          executedAt: this.now(),
+        })
+        .returning();
+
+      const priorChanges =
+        (original.costAttribution as { changes?: unknown[] } | null)?.changes ?? [];
+      const [updatedBooking] = await tx
+        .update(bookingsTable)
+        .set({
+          status: "changed",
+          chargeAmountMinor: newTotal.amountMinor,
+          chargeCurrency: newTotal.currency,
+          amountActuallyChargedMinor:
+            original.amountActuallyChargedMinor !== null &&
+            original.amountActuallyChargedMinor !== undefined
+              ? original.amountActuallyChargedMinor + delta.amountMinor
+              : null,
+          confirmationCode: order?.booking_reference ?? original.confirmationCode,
+          costAttribution: {
+            ...(original.costAttribution ?? {}),
+            changes: [
+              ...priorChanges,
+              {
+                operationId: operation?.id ?? null,
+                attemptId: attempt.id,
+                deltaAmountMinor: delta.amountMinor,
+                deltaCurrency: delta.currency,
+                at: this.now().toISOString(),
+              },
+            ],
+          },
+          flightId: newFlightIds[0] ?? null,
+          projection: { flightIds: newFlightIds },
+          updatedAt: this.now(),
+        })
+        .where(eq(bookingsTable.id, original.id))
+        .returning();
+
+      const bookedAttempt = await this.transition(
+        { ...attempt, state: "executing" },
+        "booked",
+        { bookingId: original.id },
+        tx,
+      );
+      return { booking: updatedBooking ?? original, flightIds: newFlightIds, bookedAttempt };
+    });
+
+    // Watching: register watches for the new legs — best-effort, the
+    // same tail as a fresh booking (§6.1).
+    let firstWatch: { ident?: string; alertId?: string } | null = null;
+    for (const flightId of finalized.flightIds) {
+      try {
+        const result = (await this.registerWatch(flightId)) as {
+          created?: boolean;
+          watch?: { ident?: string; alertId?: string | null };
+        } | null;
+        if (!firstWatch && result?.watch) {
+          firstWatch = { ident: result.watch.ident, alertId: result.watch.alertId ?? undefined };
+        }
+      } catch (err) {
+        logger.warn({ attemptId, flightId, err }, "[BookingGate] watch registration failed (best-effort)");
+      }
+    }
+    if (firstWatch) {
+      await db
+        .update(bookingsTable)
+        .set({
+          flightawareIdent: firstWatch.ident ?? null,
+          alertRegistrationId: firstWatch.alertId ?? null,
+          updatedAt: this.now(),
+        })
+        .where(eq(bookingsTable.id, original.id));
+    }
+
+    logger.info({ attemptId, bookingId: original.id }, "[BookingGate] flight change executed");
+    return { executed: true, attempt: finalized.bookedAttempt, booking: finalized.booking };
   }
 
   // ── Reads ─────────────────────────────────────────────────────────────────
@@ -920,6 +1693,192 @@ export function makeDuffelRequote(client: DuffelOrdersClient | null): RequotePro
       return { outcome: "changed", option: fresh, deltaText, offerPassengerIds };
     }
     return { outcome: "same", option: fresh, offerPassengerIds };
+  };
+}
+
+/** Parse a provider decimal amount pair; null unless both parse. */
+function parseMoneyPair(amount: string | undefined, currency: string | undefined): Money | null {
+  if (!amount || !currency) return null;
+  try {
+    return fromMajorDecimal(amount, currency);
+  } catch {
+    return null;
+  }
+}
+
+/** Parse a payload amount only when it is stated in `currency`. */
+function parseStatedMoney(
+  amount: string | undefined,
+  amountCurrency: string | undefined,
+  currency: string,
+): Money | null {
+  if (!amount || !amountCurrency || amountCurrency.toUpperCase() !== currency) return null;
+  return parseMoneyPair(amount, amountCurrency);
+}
+
+/**
+ * Map a Duffel Stays quote onto the presented option (E-3.2): the
+ * quote total is FIRM, the quote id lands on the summary (execution
+ * books against it), cancellation terms refresh from the quote's own
+ * timeline with the adapter's derivation, and the breakdown is
+ * rebuilt from quote-stated figures only (a complete split that sums,
+ * else base + combined remainder — the adapter's honesty rule).
+ */
+export function stayQuoteToRequoteInfo(
+  quote: DuffelStayQuote,
+  presented: StayOption,
+  pricedAt: string,
+): RequoteInfo {
+  const total = parseMoneyPair(quote.total_amount, quote.total_currency);
+  if (!quote.id || !total) {
+    return {
+      outcome: "unavailable",
+      reason: "That stay is no longer available in a form we can state exactly. Nothing was booked.",
+    };
+  }
+  const terms = stayCancellationTermsFromTimeline(
+    { cancellation_timeline: quote.cancellation_timeline },
+    total,
+  );
+  const fresh: StayOption = {
+    ...presented,
+    money: total,
+    homeEquivalent: null,
+    pricedAt,
+    priceNature: "firm",
+    summary: {
+      ...presented.summary,
+      quoteId: quote.id,
+      cancellationTerms: terms.terms ?? presented.summary.cancellationTerms,
+      freeCancellation: terms.free,
+      breakdown: quoteBreakdown(quote, total),
+    },
+  };
+  if (
+    total.amountMinor === presented.money.amountMinor &&
+    total.currency === presented.money.currency
+  ) {
+    return { outcome: "same", option: fresh };
+  }
+  return {
+    outcome: "changed",
+    option: fresh,
+    deltaText: describeStayQuoteDelta(presented.money, total, presented.summary.label),
+  };
+}
+
+function quoteBreakdown(quote: DuffelStayQuote, total: Money): StayRateBreakdown {
+  const base = parseStatedMoney(quote.base_amount, quote.base_currency, total.currency);
+  let tax = parseStatedMoney(quote.tax_amount, quote.tax_currency, total.currency);
+  let fee = parseStatedMoney(quote.fee_amount, quote.fee_currency, total.currency);
+  const fullSplit =
+    !!base && !!tax && !!fee &&
+    base.amountMinor + tax.amountMinor + fee.amountMinor === total.amountMinor;
+  if (!fullSplit) {
+    tax = null;
+    fee = null;
+  }
+  const remainder = base && !fullSplit ? subtract(total, base) : null;
+  const due = parseStatedMoney(
+    quote.due_at_accommodation_amount,
+    quote.due_at_accommodation_currency,
+    total.currency,
+  );
+  return {
+    base,
+    tax,
+    fee,
+    taxesAndFees: remainder && remainder.amountMinor > 0 ? remainder : null,
+    dueAtAccommodation: due && due.amountMinor > 0 ? due : null,
+  };
+}
+
+/** Legacy accommodations.type for a stay summary. */
+function stayAccommodationType(
+  summary: StayOption["summary"],
+): "hotel" | "airbnb" | "hostel" | "resort" | "other" {
+  if (summary.isWholeHome) return "airbnb";
+  if (summary.propertyType === "hostel") return "hostel";
+  if (summary.propertyType === "resort") return "resort";
+  return "hotel";
+}
+
+/** Projection notes for a stay: room, beds, board — display facts only. */
+function stayNotes(summary: StayOption["summary"]): string | null {
+  const parts = [
+    summary.roomName,
+    summary.beds,
+    summary.boardType ? `Board: ${summary.boardType}` : null,
+  ].filter((p): p is string => !!p);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/**
+ * The default change re-verification: re-read the change request and
+ * find the attempt's offer among its priced change offers. Gone or
+ * expired → unavailable (the original booking is untouched); a moved
+ * delta → changed, with the delta restated. The refreshed change
+ * context (resulting total, penalty) rides back on the result.
+ */
+export function makeDuffelChangeRequote(client: DuffelOrdersClient | null): ChangeRequoteProvider {
+  return async (option: WanderOption, change: BookingChangeContext): Promise<RequoteInfo> => {
+    if (!client) {
+      return {
+        outcome: "unverifiable",
+        reason: "Duffel isn't configured (no DUFFEL_API_TOKEN), so the change price can't be re-verified live.",
+      };
+    }
+    let request: DuffelOrderChangeRequest;
+    try {
+      request = await client.getOrderChangeRequest(change.orderChangeRequestId);
+    } catch (err) {
+      return {
+        outcome: "unverifiable",
+        reason: `The live change check failed (${err instanceof Error ? err.message : String(err)}). Nothing was changed.`,
+      };
+    }
+    const offer = (request.order_change_offers ?? []).find((o) => o.id === option.id);
+    if (!offer) {
+      return {
+        outcome: "unavailable",
+        reason: "That change is no longer available — the change offer expired or was withdrawn. Your original flights are unchanged.",
+      };
+    }
+    if (offer.expires_at && Date.parse(offer.expires_at) < Date.now()) {
+      return {
+        outcome: "unavailable",
+        reason: "That change offer has expired. Your original flights are unchanged — a fresh change request will price current options.",
+      };
+    }
+    const fresh = mapChangeOfferToOption(offer, offer.created_at ?? new Date().toISOString());
+    if (!fresh) {
+      return {
+        outcome: "unavailable",
+        reason: "That change is no longer available in a form we can state exactly. Your original flights are unchanged.",
+      };
+    }
+    const newTotal = parseMoneyPair(offer.new_total_amount, offer.new_total_currency);
+    const penalty = parseMoneyPair(offer.penalty_total_amount, offer.penalty_total_currency);
+    const changeContext: BookingChangeContext = {
+      ...change,
+      newTotalAmountMinor: newTotal?.amountMinor ?? change.newTotalAmountMinor,
+      newTotalCurrency: newTotal?.currency ?? change.newTotalCurrency,
+      penaltyAmountMinor: penalty ? penalty.amountMinor : change.penaltyAmountMinor,
+      penaltyCurrency: penalty ? penalty.currency : change.penaltyCurrency,
+    };
+    const presented = money(option.money.amountMinor, option.money.currency);
+    if (
+      fresh.money.amountMinor !== presented.amountMinor ||
+      fresh.money.currency !== presented.currency
+    ) {
+      return {
+        outcome: "changed",
+        option: fresh,
+        deltaText: describePriceDelta(presented, fresh.money, fresh.summary.label),
+        changeContext,
+      };
+    }
+    return { outcome: "same", option: fresh, changeContext };
   };
 }
 

@@ -642,6 +642,46 @@ export async function completeWatchesForFinishedTrips(
   return { completed };
 }
 
+/**
+ * Deregister ONE flight's watch (E-3.4/§6.1): a cancelled flight's
+ * watch must stop watching, and a changed flight's old legs are
+ * deregistered before the new legs register theirs. Mirrors the
+ * trip-completion idiom: the provider alert delete is attempted when
+ * an alert id and a client exist, its failure is logged (never a
+ * reason to keep the watch open), and the local row closes either
+ * way. No active watch → a plain no-op result, not an error.
+ */
+export async function deregisterWatchForFlight(
+  flightId: number,
+  deps: WatchingDeps = {},
+): Promise<{ deregistered: boolean; reason?: string }> {
+  const now = deps.now ?? new Date();
+  const client = resolveClient(deps);
+  const [watch] = await db
+    .select()
+    .from(flightWatchesTable)
+    .where(
+      and(eq(flightWatchesTable.flightId, flightId), eq(flightWatchesTable.state, "active")),
+    );
+  if (!watch) return { deregistered: false, reason: "no_active_watch" };
+  if (watch.alertId && client) {
+    try {
+      await client.deleteAlert(watch.alertId);
+    } catch (err) {
+      logger.error(
+        { err, watchId: watch.id, alertId: watch.alertId },
+        "[Watching] alert deregistration failed; closing watch locally",
+      );
+    }
+  }
+  await db
+    .update(flightWatchesTable)
+    .set({ state: "completed", updatedAt: now })
+    .where(eq(flightWatchesTable.id, watch.id));
+  logger.info({ watchId: watch.id, flightId }, "[Watching] watch deregistered");
+  return { deregistered: true };
+}
+
 // ─── Advisory state (dismissal is remembered, §6.2) ──────────────────────────
 
 export async function setAdvisoryState(
