@@ -191,10 +191,18 @@ export function isStyleComplete(data: IntakeData): boolean {
 /** A slot is settled when captured (complete) or explicitly skipped.
  *  A `needs_confirm` value (§2.4) is captured but NOT settled: the
  *  read-back must complete first — which also keeps REVIEW (and so
- *  materialization) unreachable while a shaky hearing stands. */
+ *  materialization) unreachable while a shaky hearing stands.
+ *
+ *  The needs_confirm check comes BEFORE the skip shortcut, on purpose:
+ *  a skip recorded against a pending read-back must not launder an
+ *  unconfirmed hearing into a settled slot. The skip stays on record
+ *  (it is not an error, and the conversation is never blocked — the
+ *  traveler can confirm or correct the hearing at any point); it takes
+ *  effect the moment the read-back completes and the provenance flips
+ *  to `stated`, while a correcting write clears it as usual. */
 export function isSlotSettled(data: IntakeData, slot: SlotName): boolean {
-  if (data.openItems.includes(slot)) return true;
   if (data[slot]?.provenance === "needs_confirm") return false;
+  if (data.openItems.includes(slot)) return true;
   switch (slot) {
     case "destination":
       return data.destination !== undefined;
@@ -448,6 +456,15 @@ export function applySlotConfirmation(data: IntakeData, slot: SlotName): IntakeD
  * Record an explicit skip: a whole slot ("not sure about dates yet") or a
  * sub-item (`party_email:<name>`, `style_budget`). A skip marks the item
  * open and lets the machine advance — it never blocks (Story 1.3).
+ *
+ * §2.4 interaction: skipping a slot that holds a `needs_confirm` value
+ * records the skip but does NOT settle the slot and does NOT discard
+ * the hearing — `isSlotSettled` ranks the pending read-back above the
+ * skip, so the unconfirmed value can never be consumed (least of all
+ * by materialization) while it stands. The traveler resolves it by
+ * confirming the read-back (the recorded skip then applies) or by
+ * correcting it with a fresh write (which clears the skip, as any
+ * write does).
  */
 export function applySkip(data: IntakeData, item: string): IntakeData {
   const key = item.trim();
@@ -542,6 +559,19 @@ export type MaterializationCheck =
  * trip with invented dates.
  */
 export function buildMaterializationPlan(data: IntakeData): MaterializationCheck {
+  // §2.4, enforced at the consumption site as well as in isSlotSettled:
+  // an unconfirmed hearing never reaches a materialized trip, however
+  // the machine state was arrived at.
+  for (const { slot } of SLOT_ORDER) {
+    if (data[slot]?.provenance === "needs_confirm") {
+      return {
+        ok: false,
+        reason:
+          `The ${slot} from your voice answer hasn't been confirmed yet — ` +
+          "it needs the read-back confirmation before a trip can be created from it.",
+      };
+    }
+  }
   if (deriveState(data, null) !== "REVIEW") {
     return { ok: false, reason: "Intake is not complete enough to review yet." };
   }

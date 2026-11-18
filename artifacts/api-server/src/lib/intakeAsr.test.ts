@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   applyAsrProvenance,
+  applySkip,
   applySlotConfirmation,
   applySlotWrite,
   buildMaterializationPlan,
@@ -144,6 +145,160 @@ describe("the read-back flow (pure machine)", () => {
   });
 });
 
+// ─── The skip path cannot bypass the read-back ─────────────────────────────
+//
+// QA finding on preview/completion-bundle: isSlotSettled checked the
+// skip list BEFORE the needs_confirm check, so intake_skip on a slot
+// holding an unconfirmed hearing settled it — and materialization then
+// consumed the unconfirmed value. The fix ranks the pending read-back
+// above the recorded skip, uniformly for every slot, and re-checks the
+// invariant at the materialization site itself.
+
+describe("skip vs read-back (pure machine)", () => {
+  const LOW = { channel: "voice", asrConfidence: 0.4 } as const;
+
+  /** Every slot settled except the one under test. */
+  function settledAround(underTest: IntakeData): IntakeData {
+    let data = underTest;
+    if (!data.destination) {
+      data = applySlotWrite(data, {
+        slot: "destination",
+        value: { kind: "place", text: "Scottsdale" },
+        provenance: "stated",
+      });
+    }
+    if (!data.party) {
+      data = applySlotWrite(data, { slot: "party", value: { solo: true, travelers: [] }, provenance: "asked" });
+    }
+    if (!data.dates) {
+      data = applySlotWrite(data, {
+        slot: "dates",
+        value: { startDate: "2027-03-10", endDate: "2027-03-14" },
+        provenance: "asked",
+      });
+    }
+    if (!data.style) {
+      data = applySlotWrite(data, { slot: "style", value: { text: "golf weekend" }, provenance: "asked" });
+    }
+    return data;
+  }
+
+  it("QA case 1: skipping a needs_confirm DESTINATION does not settle it and materialization refuses", () => {
+    let data = applySlotWrite(markIntent(emptyIntakeData()), {
+      slot: "destination",
+      value: { kind: "place", text: "Scottsdale" },
+      provenance: applyAsrProvenance("stated", LOW),
+    });
+    data = settledAround(data);
+    data = applySkip(data, "destination");
+    expect(isSlotSettled(data, "destination")).toBe(false);
+    expect(deriveState(data, null)).toBe("DESTINATION");
+    // The machine stays parked on the read-back — the hearing is kept,
+    // labeled, and still awaiting the traveler's word.
+    const ask = nextAsk(data, null);
+    expect(ask?.key).toBe("confirm:destination");
+    expect(ask?.question).toBe('I heard "Scottsdale" — is that right?');
+    const check = buildMaterializationPlan(data);
+    expect(check.ok).toBe(false);
+    if (!check.ok) expect(check.reason).toContain("hasn't been confirmed yet");
+  });
+
+  it("QA case 2: skipping needs_confirm DATES does not settle them and materialization refuses", () => {
+    let data = applySlotWrite(markIntent(emptyIntakeData()), {
+      slot: "dates",
+      value: { startDate: "2027-03-10", endDate: "2027-03-14" },
+      provenance: applyAsrProvenance("stated", LOW),
+    });
+    data = settledAround(data);
+    data = applySkip(data, "dates");
+    expect(isSlotSettled(data, "dates")).toBe(false);
+    expect(deriveState(data, null)).toBe("DATES");
+    expect(nextAsk(data, null)?.key).toBe("confirm:dates");
+    expect(buildMaterializationPlan(data).ok).toBe(false);
+  });
+
+  it("the guard is uniform: skipping a needs_confirm PARTY does not settle it", () => {
+    let data = applySlotWrite(markIntent(emptyIntakeData()), {
+      slot: "party",
+      value: { solo: false, travelers: [{ name: "Kurt", email: "kurt@example.com" }] },
+      provenance: applyAsrProvenance("stated", LOW),
+    });
+    data = settledAround(data);
+    data = applySkip(data, "party");
+    expect(isSlotSettled(data, "party")).toBe(false);
+    expect(buildMaterializationPlan(data).ok).toBe(false);
+  });
+
+  it("the guard is uniform: skipping a needs_confirm STYLE does not settle it", () => {
+    let data = applySlotWrite(markIntent(emptyIntakeData()), {
+      slot: "style",
+      value: { text: "golf weekend" },
+      provenance: applyAsrProvenance("stated", LOW),
+    });
+    data = settledAround(data);
+    data = applySkip(data, "style");
+    expect(isSlotSettled(data, "style")).toBe(false);
+    expect(buildMaterializationPlan(data).ok).toBe(false);
+  });
+
+  it("skip on a NORMAL slot behaves exactly as before: settled-as-open, value retained, machine advances", () => {
+    let data = applySlotWrite(markIntent(emptyIntakeData()), {
+      slot: "destination",
+      value: { kind: "place", text: "Scottsdale" },
+      provenance: "stated",
+    });
+    data = applySkip(data, "destination");
+    expect(data.openItems).toContain("destination");
+    expect(data.destination?.value.text).toBe("Scottsdale");
+    expect(isSlotSettled(data, "destination")).toBe(true);
+    expect(deriveState(data, null)).toBe("PARTY");
+  });
+
+  it("skip-then-confirm: the recorded skip does not block the read-back, and confirming settles the slot", () => {
+    let data = lowConfidenceDestination();
+    data = applySkip(data, "destination");
+    expect(isSlotSettled(data, "destination")).toBe(false);
+    data = applySlotConfirmation(data, "destination");
+    expect(data.destination?.provenance).toBe("stated");
+    expect(isSlotSettled(data, "destination")).toBe(true);
+    expect(deriveState(data, null)).toBe("PARTY");
+  });
+
+  it("confirm-then-skip still works: a settled slot can be skipped/reopened as before", () => {
+    let data = applySlotConfirmation(lowConfidenceDestination(), "destination");
+    expect(isSlotSettled(data, "destination")).toBe(true);
+    data = applySkip(data, "destination");
+    expect(data.openItems).toContain("destination");
+    expect(isSlotSettled(data, "destination")).toBe(true);
+    expect(deriveState(data, null)).toBe("PARTY");
+  });
+
+  it("a correction write after the skip replaces the hearing, clears the skip, and settles", () => {
+    let data = applySkip(lowConfidenceDestination(), "destination");
+    data = applySlotWrite(data, {
+      slot: "destination",
+      value: { kind: "place", text: "Sedona" },
+      provenance: "stated",
+    });
+    expect(data.destination?.value.text).toBe("Sedona");
+    expect(data.openItems).not.toContain("destination");
+    expect(isSlotSettled(data, "destination")).toBe(true);
+  });
+
+  it("a correction that is ALSO low-confidence re-arms the read-back on the new value (skip already cleared by the write)", () => {
+    let data = applySkip(lowConfidenceDestination(), "destination");
+    data = applySlotWrite(data, {
+      slot: "destination",
+      value: { kind: "place", text: "Sedona" },
+      provenance: applyAsrProvenance("stated", LOW),
+    });
+    expect(data.destination?.provenance).toBe("needs_confirm");
+    expect(data.openItems).not.toContain("destination");
+    expect(isSlotSettled(data, "destination")).toBe(false);
+    expect(nextAsk(data, null)?.question).toBe('I heard "Sedona" — is that right?');
+  });
+});
+
 // ─── Service level (the rule applied at the write seam) ─────────────────────
 
 const store = vi.hoisted(() => {
@@ -197,7 +352,7 @@ vi.mock("@workspace/db", () => ({
   tripsTable: store.table("trips"),
 }));
 
-import { applyIntakeSlotWrite, confirmIntakeSlot } from "./intake";
+import { applyIntakeSkip, applyIntakeSlotWrite, confirmIntakeSlot } from "./intake";
 
 function sessionRow(slots: Record<string, unknown> = { intentCaptured: true }) {
   return {
@@ -288,5 +443,33 @@ describe("Intake Service — §2.4 at the write seam", () => {
     });
     expect(view.slots.destination?.provenance).toBe("stated");
     expect(view.state).toBe("PARTY");
+  });
+
+  it("applyIntakeSkip against a pending read-back records the skip but the slot stays unsettled", async () => {
+    store.selectQueues["intake_sessions"] = [
+      [
+        sessionRow({
+          intentCaptured: true,
+          destination: { value: { kind: "place", text: "Scottsdale" }, provenance: "needs_confirm" },
+        }),
+      ],
+    ];
+    const view = await applyIntakeSkip(5, 42, "traveler", "destination");
+    // The skip is on record, the hearing is intact and labeled — and the
+    // machine is still parked on the read-back, not advanced past it.
+    expect(view.openItems).toContain("destination");
+    expect(view.slots.destination?.provenance).toBe("needs_confirm");
+    expect(view.state).toBe("DESTINATION");
+    expect(view.nextAsk?.key).toBe("confirm:destination");
+    // The persisted row agrees: state DESTINATION, provenance untouched.
+    const update = store.ops.find((o) => o.table === "intake_sessions" && o.op === "update");
+    const set = update?.set as {
+      state: string;
+      slots: { destination: { provenance: string } };
+      openItems: string[];
+    };
+    expect(set.state).toBe("DESTINATION");
+    expect(set.slots.destination.provenance).toBe("needs_confirm");
+    expect(set.openItems).toContain("destination");
   });
 });
