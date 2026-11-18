@@ -34,6 +34,7 @@ import {
   type NextAsk,
   type SlotWrite,
 } from "./intakeLogic";
+import { getSavedGroupWithMembers } from "./travelerContext";
 import { logger } from "./logger";
 
 export class IntakeAccessDenied extends Error {
@@ -232,6 +233,64 @@ export async function applyIntakeSkip(
   item: string,
 ): Promise<IntakeSessionView> {
   return applyEvent(sessionId, userId, role, (data) => applySkip(data, item));
+}
+
+export class IntakeGroupNotFound extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "IntakeGroupNotFound";
+  }
+}
+
+/**
+ * Context prefill for the PARTY state (Stories 6.3/6.5, §4.1): fill the
+ * party slot from one of the organizer's saved groups in ONE step. The
+ * slot lands with provenance `from_context` — this is the concrete
+ * mechanism behind "asks less over time": the party question is never
+ * asked, and the review summary marks the answer as coming from the
+ * traveler's profile, correctable in one utterance. Suggesting never
+ * auto-invites: outreach still requires the organizer's explicit
+ * send-invites action (Story 4.1).
+ */
+export async function applyIntakePartyFromGroup(
+  sessionId: number,
+  userId: number,
+  role: string,
+  groupId: number,
+): Promise<IntakeSessionView> {
+  const row = await loadSessionRow(sessionId);
+  if (role !== "super_admin" && row.userId !== userId) {
+    throw new IntakeAccessDenied(`Not your intake session ${sessionId}.`);
+  }
+  if (row.draftTripId !== null) {
+    throw new IntakeMaterializationError("This intake already produced a trip; the conversation continues on the trip.");
+  }
+  const group = await getSavedGroupWithMembers(row.userId, groupId);
+  if (!group) {
+    throw new IntakeGroupNotFound(`Saved group ${groupId} was not found among the traveler's groups.`);
+  }
+  if (group.members.length === 0) {
+    throw new IntakeGroupNotFound(`Saved group "${group.name}" has no members to fill the party with.`);
+  }
+  const updated = await persistData(
+    row,
+    applySlotWrite(rowToData(row), {
+      slot: "party",
+      value: {
+        solo: false,
+        travelers: group.members.map((m) => ({
+          name: m.name,
+          ...(m.email ? { email: m.email } : {}),
+        })),
+      },
+      provenance: "from_context",
+    }),
+  );
+  logger.info(
+    { userId: row.userId, intakeSessionId: sessionId, groupId, members: group.members.length },
+    "[Intake] party filled from saved group",
+  );
+  return rowToView(updated);
 }
 
 /**

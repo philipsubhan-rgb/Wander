@@ -22,6 +22,8 @@ import {
 } from "@workspace/db";
 import { buildTimelineEvents } from "./timeline";
 import type { IntakeSessionView } from "./intake";
+import { loadContextDigest, type ContextDigest } from "./travelerContext";
+import { describeRule } from "./rulesEngine";
 
 const SNAPSHOT_MAX_CHARS = 4000;
 
@@ -146,12 +148,16 @@ export interface PlannerSnapshot {
   homeCurrency: string | null;
   timezone: string | null;
   conversationLanguage: string | null;
+  /** Context layer digest (§4.3) — what Wander knows about the traveler. */
+  context: ContextDigest;
 }
 
 /**
  * The trip snapshot's mirror image: orients Marco on the TRAVELER and on
  * the intake machine's state when no trip exists yet. Same ~4000-char cap
- * discipline. Contains no vault data and no other traveler's data (§4.3).
+ * discipline. Contains no vault data and no other traveler's data (§4.3) —
+ * the context digest is the traveler's own context, companions, and
+ * groups (records THEY provided), never another traveler's profile.
  */
 export async function loadPlannerSnapshot(userId: number): Promise<PlannerSnapshot> {
   const [user] = await db
@@ -165,6 +171,7 @@ export async function loadPlannerSnapshot(userId: number): Promise<PlannerSnapsh
     })
     .from(usersTable)
     .where(eq(usersTable.id, userId));
+  const context = await loadContextDigest(userId);
   return {
     userId,
     userName: user?.name ?? "Traveler",
@@ -172,7 +179,54 @@ export async function loadPlannerSnapshot(userId: number): Promise<PlannerSnapsh
     homeCurrency: user?.homeCurrency ?? null,
     timezone: user?.timezone ?? null,
     conversationLanguage: user?.conversationLanguage ?? null,
+    context,
   };
+}
+
+/** Render the §4.3 context digest as snapshot lines. Empty when Wander
+ *  knows nothing yet — a new traveler is asked everything (Story 6.5). */
+function contextDigestLines(context: ContextDigest): string[] {
+  const lines: string[] = [];
+  if (context.homeBase) {
+    lines.push(
+      `Home base: ${context.homeBase.text}` +
+        (context.homeAirports.length > 0
+          ? ` — usually flies out of ${context.homeAirports.join(", ")}`
+          : ""),
+    );
+  } else if (context.homeAirports.length > 0) {
+    lines.push(`Home airports: ${context.homeAirports.join(", ")}`);
+  }
+  if (context.proposedHomeBase) {
+    lines.push(
+      `Learned, NOT confirmed (a proposal — never treat as the default): home base ${context.proposedHomeBase}`,
+    );
+  }
+  if (context.proposedHomeAirports.length > 0) {
+    lines.push(
+      `Learned, NOT confirmed: airports ${context.proposedHomeAirports.join(", ")}`,
+    );
+  }
+  if (context.hardRules.length > 0) {
+    lines.push(`Hard rules (never violate silently): ${context.hardRules.map(describeRule).join("; ")}`);
+  }
+  if (context.preferences.length > 0) {
+    lines.push(`Tastes: ${context.preferences.map(describeRule).join("; ")}`);
+  }
+  for (const g of context.groups) {
+    lines.push(
+      `Saved group "${g.name}" (group ${g.id}): ${g.members.map((m) => m.name).join(", ")}` +
+        " — at the party step, offer this group instead of asking for names; on a yes, call intake_set_party_from_group.",
+    );
+  }
+  if (context.destinationSuggestions.length > 0) {
+    lines.push(
+      `Destination ideas from their history: ${context.destinationSuggestions
+        .map((s) => `${s.text} (${s.reason})`)
+        .join("; ")} — offer these when narrowing a vague destination.`,
+    );
+  }
+  return lines;
 }
 
 export function buildPlannerSystemMessage(
@@ -187,12 +241,16 @@ export function buildPlannerSystemMessage(
     planner.conversationLanguage ? `conversation language ${planner.conversationLanguage}` : null,
   ].filter(Boolean);
 
+  const digestLines = contextDigestLines(planner.context);
   const body = [
     `Today is ${weekday(todayIso, "long")} (${todayIso}).`,
     `Traveler: ${planner.userName}${profileBits.length > 0 ? ` (${profileBits.join(", ")})` : ""}.`,
+    ...(digestLines.length > 0
+      ? ["", "What Wander already knows about this traveler (context layer):", ...digestLines.map((l) => `  ${l}`)]
+      : []),
     "",
     "You are running a PLANNER INTAKE conversation. No trip exists yet in this conversation, " +
-      "and trip tools are unavailable — use only the intake_* tools. You are a human-style travel " +
+      "and trip tools are unavailable — use only the intake_* and context_* tools. You are a human-style travel " +
       "planner, not a form: converse warmly, ask ONE question at a time, and confirm each answer " +
       "back in natural language as you go.",
     "",
@@ -211,6 +269,17 @@ export function buildPlannerSystemMessage(
     "- Corrections are slot writes: call the matching intake_set_* tool with the full corrected value. Never restart the intake.",
     "- If the traveler declines a question ('not sure yet'), call intake_skip for it and move on — never block.",
     "- At REVIEW, read back the intake_get_review summary, and call intake_confirm only after the traveler explicitly confirms.",
+    "",
+    "Context rules:",
+    "- When the traveler states a durable fact about themselves (where they live, their airports, a rule like " +
+      "'never Basic Economy', a taste, a regular companion), record it with the matching context_* tool so the " +
+      "next trip starts smarter. Do not re-ask for anything the context above already knows — state it as an " +
+      "assumption and accept correction.",
+    "- At the party step, if a saved group fits this trip, offer it by name; on a yes call " +
+      "intake_set_party_from_group instead of collecting names one by one. Suggesting a group never invites " +
+      "anyone — invites go out only on the organizer's later confirmation.",
+    "- Learned values marked NOT confirmed are proposals: mention them as something you noticed and ask, " +
+      "never treat them as the traveler's default until they confirm (context_confirm_learned).",
   ].join("\n");
 
   const content = (

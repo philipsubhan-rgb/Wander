@@ -16,11 +16,13 @@
 import { z } from "zod";
 import type { AgentToolResult, ToolContext, ToolDefinition } from "./agentTools";
 import {
+  applyIntakePartyFromGroup,
   applyIntakeSkip,
   applyIntakeSlotWrite,
   assertIntakeAccess,
   materializeIntake,
   IntakeAccessDenied,
+  IntakeGroupNotFound,
   IntakeMaterializationError,
   type IntakeSessionView,
 } from "./intake";
@@ -73,6 +75,7 @@ async function withSession(
     if (err instanceof IntakeValidationError) return toolErr(err.message);
     if (err instanceof IntakeAccessDenied) return toolErr(err.message);
     if (err instanceof IntakeMaterializationError) return toolErr(err.message);
+    if (err instanceof IntakeGroupNotFound) return toolErr(err.message);
     logger.error({ tool, userId: ctx.userId, intakeSessionId: ctx.intakeSessionId, err }, "[Agent] tool error");
     return toolErr(`Tool ${tool} failed: internal error.`);
   }
@@ -139,6 +142,33 @@ async function setParty(ctx: ToolContext, args: z.infer<typeof SetPartyInput>): 
       ? "Party recorded: solo trip."
       : `Party recorded: ${args.travelers.map((t) => t.name).join(", ")}.`;
     return toolOk(viewText(view, headline), view);
+  });
+}
+
+// ─── intake_set_party_from_group ─────────────────────────────────────────────
+
+const SetPartyFromGroupInput = z.object({
+  groupId: z
+    .number()
+    .int()
+    .positive()
+    .describe("The saved group id (from the planner snapshot or context_list_groups)"),
+});
+
+async function setPartyFromGroup(
+  ctx: ToolContext,
+  args: z.infer<typeof SetPartyFromGroupInput>,
+): Promise<AgentToolResult> {
+  return withSession("intake_set_party_from_group", ctx, async (sessionId) => {
+    const view = await applyIntakePartyFromGroup(sessionId, ctx.userId, ctx.role, args.groupId);
+    const names = view.slots.party?.value.travelers.map((t) => t.name).join(", ") ?? "";
+    return toolOk(
+      viewText(
+        view,
+        `Party filled from the saved group: ${names}. (From the traveler's profile — state it as an assumption and accept correction.)`,
+      ),
+      view,
+    );
   });
 }
 
@@ -325,6 +355,24 @@ export const INTAKE_TOOLS: ToolDefinition[] = [
     },
     input: SetPartyInput,
     run: setParty as ToolDefinition["run"],
+  },
+  {
+    name: "intake_set_party_from_group",
+    description:
+      "Fill the party from one of the traveler's saved groups (context layer, Story 6.3) in one step — " +
+      "use this when the traveler names a saved group ('the Munich guys') or accepts your offer of one. " +
+      "The slot is recorded with provenance 'from_context': state the party as an assumption from their " +
+      "profile and accept correction. Never call this speculatively — the traveler must name or accept the group.",
+    parameters: {
+      type: "object",
+      properties: {
+        groupId: { type: "integer", minimum: 1, description: "The saved group id" },
+      },
+      required: ["groupId"],
+      additionalProperties: false,
+    },
+    input: SetPartyFromGroupInput,
+    run: setPartyFromGroup as ToolDefinition["run"],
   },
   {
     name: "intake_set_dates",

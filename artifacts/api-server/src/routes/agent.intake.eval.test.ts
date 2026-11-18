@@ -82,6 +82,10 @@ vi.mock("@workspace/db", () => ({
   intakeSessionsTable: dbMock.fakeTable,
   tripRosterEntriesTable: dbMock.fakeTable,
   marcoMessagesTable: dbMock.fakeTable,
+  travelerContextTable: dbMock.fakeTable,
+  travelerRulesTable: dbMock.fakeTable,
+  travelerCompanionsTable: dbMock.fakeTable,
+  savedGroupsTable: dbMock.fakeTable,
   pool: { query: vi.fn(), end: vi.fn() },
 }));
 
@@ -161,7 +165,12 @@ const materializedRow = () =>
  *   1. loadIntakeSession (session row)
  *   2. assertIntakeAccess (session row again)
  *   3-4. markIntakeIntent select + update — ONLY when the session is OPENING
- *   then: persisted-history select (marco_messages), planner user select.
+ *   then: persisted-history select (marco_messages), planner user select,
+ *   and the planner snapshot v2 context digest (context layer §4.3):
+ *   traveler_context, traveler_rules, traveler_companions ×2 (digest +
+ *   saved-groups member resolution), saved_groups, past-trips select.
+ *   These fixtures carry NO context — the traveler is new, the digest is
+ *   empty, and the snapshot renders no context lines.
  */
 function enqueueIntakePreamble(row: () => Record<string, unknown>, opening: boolean) {
   enqueue([row()]); // 1 session load
@@ -172,6 +181,12 @@ function enqueueIntakePreamble(row: () => Record<string, unknown>, opening: bool
   }
   enqueue([]); // history: no persisted turns
   enqueue([userRow]); // planner snapshot user row
+  enqueue([]); // digest: traveler_context — none
+  enqueue([]); // digest: traveler_rules — none
+  enqueue([]); // digest: traveler_companions — none
+  enqueue([]); // digest: companions again (saved-group resolution)
+  enqueue([]); // digest: saved_groups — none
+  enqueue([]); // digest: past trips (destination suggestions) — none
 }
 
 /**
@@ -322,10 +337,11 @@ describe("intake rung 1 — conversational planner intake", () => {
     expect(snapshot.content).toContain("Planner intake context");
     expect(snapshot.content).toContain("Intake state: DESTINATION");
     expect(snapshot.content).toContain('"Ok, where are we going?"');
-    // Only intake tools are offered in intake scope.
+    // Intake scope offers the intake tools plus the context tools (the
+    // traveler can teach Wander mid-intake, §4) — never trip tools.
     const toolNames = modelRequests[0].tools.map((t) => t.function.name);
     expect(toolNames.length).toBeGreaterThan(0);
-    expect(toolNames.every((n) => n.startsWith("intake_"))).toBe(true);
+    expect(toolNames.every((n) => n.startsWith("intake_") || n.startsWith("context_"))).toBe(true);
   });
 
   it("2. destination stated in the intent is recorded and NOT re-asked", async () => {

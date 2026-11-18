@@ -55,6 +55,7 @@ import {
 } from "../lib/agentTools";
 import { AGENT_RESEARCH_TOOLS } from "../lib/agentResearch";
 import { INTAKE_TOOLS, getIntakeToolDefinition } from "../lib/agentIntakeTools";
+import { CONTEXT_TOOLS, getContextToolDefinition } from "../lib/agentContextTools";
 import {
   assertIntakeAccess,
   createIntakeSession,
@@ -495,7 +496,9 @@ async function callModelApiStream(
 // Tool-calling loop
 // ---------------------------------------------------------------------------
 
-const TOOL_DEFINITIONS = [...AGENT_TOOLS, ...AGENT_RESEARCH_TOOLS];
+// Context tools ride along in BOTH scopes (§4): what Wander knows about
+// the traveler — and what the traveler teaches it — is not trip-shaped.
+const TOOL_DEFINITIONS = [...AGENT_TOOLS, ...AGENT_RESEARCH_TOOLS, ...CONTEXT_TOOLS];
 
 /** Why the tool loop ended without a usable final answer. */
 export type StuckReason = "duplicate_tool_call" | "iteration_exhausted" | "no_final_text";
@@ -630,10 +633,13 @@ async function runAgentLoop(
   messages: ChatMessage[],
   opts?: RunAgentLoopOpts,
 ): Promise<{ reply: string; telemetry: LoopTelemetry }> {
-  // Scope decides the tool surface: intake conversations get ONLY the
-  // intake tools (no trip exists to read or write); trip conversations
-  // get the trip + research tools as before.
-  const toolDefs = scope.kind === "intake" ? INTAKE_TOOLS : TOOL_DEFINITIONS;
+  // Scope decides the tool surface: intake conversations get the intake
+  // tools (no trip exists to read or write); trip conversations get the
+  // trip + research tools as before. Both scopes also get the context
+  // tools — the traveler can teach Wander, and Wander can read what it
+  // knows, in any conversation (§4).
+  const toolDefs =
+    scope.kind === "intake" ? [...INTAKE_TOOLS, ...CONTEXT_TOOLS] : TOOL_DEFINITIONS;
   const tools = toolDefs.map((t) => ({
     type: "function" as const,
     function: { name: t.name, description: t.description, parameters: t.parameters },
@@ -819,8 +825,10 @@ async function runAgentLoop(
 
         const def =
           scope.kind === "intake"
-            ? getIntakeToolDefinition(name)
-            : (getToolDefinition(name) ?? AGENT_RESEARCH_TOOLS.find((t) => t.name === name));
+            ? (getIntakeToolDefinition(name) ?? getContextToolDefinition(name))
+            : (getToolDefinition(name) ??
+              AGENT_RESEARCH_TOOLS.find((t) => t.name === name) ??
+              getContextToolDefinition(name));
 
         let toolResult: { ok: boolean; text: string; data?: unknown };
         if (!accessOk) {
