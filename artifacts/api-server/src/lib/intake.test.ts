@@ -74,14 +74,20 @@ vi.mock("@workspace/db", () => ({
   tripRosterEntriesTable: store.table("trip_roster_entries"),
   tripsTable: store.table("trips"),
   usersTable: store.table("users"),
+  // Context-layer tables: applyIntakePartyFromGroup resolves saved
+  // groups through the Context/Profile service.
+  savedGroupsTable: store.table("saved_groups"),
+  travelerCompanionsTable: store.table("traveler_companions"),
 }));
 
 import {
   createIntakeSession,
   applyIntakeSlotWrite,
+  applyIntakePartyFromGroup,
   materializeIntake,
   recordIntakeTurnAsk,
   IntakeAccessDenied,
+  IntakeGroupNotFound,
   IntakeMaterializationError,
 } from "./intake.js";
 
@@ -241,5 +247,67 @@ describe("recordIntakeTurnAsk (§4.4 asks-less accounting)", () => {
     store.selectQueues["intake_sessions"] = [[fullSessionRow()]];
     await recordIntakeTurnAsk(5);
     expect(store.ops.filter((o) => o.op === "update")).toHaveLength(0);
+  });
+});
+
+describe("applyIntakePartyFromGroup — saved-group prefill (§3.4)", () => {
+  const kurt = { id: 1, userId: 42, name: "Kurt", email: "kurt@example.com", linkedUserId: null, createdAt: new Date(), updatedAt: new Date() };
+  const pradip = { id: 2, userId: 42, name: "Pradip", email: "pradip@example.com", linkedUserId: null, createdAt: new Date(), updatedAt: new Date() };
+  const groupRow = {
+    id: 7, userId: 42, name: "Munich guys", memberCompanionIds: [1, 2],
+    createdAt: new Date(), updatedAt: new Date(),
+  };
+  const sessionAtParty = sessionRow({
+    state: "PARTY",
+    slots: {
+      intentCaptured: true,
+      destination: { value: { kind: "place", text: "Munich" }, provenance: "stated" },
+    },
+  });
+
+  it("fills the party slot from the group with provenance from_context — no ask needed", async () => {
+    store.selectQueues["intake_sessions"] = [[sessionAtParty]];
+    store.selectQueues["saved_groups"] = [[groupRow]];
+    store.selectQueues["traveler_companions"] = [[kurt, pradip]];
+    const view = await applyIntakePartyFromGroup(5, CTX.userId, CTX.role, 7);
+    expect(view.state).toBe("DATES"); // party settled without a question
+    const update = store.ops.find((o) => o.op === "update" && o.table === "intake_sessions");
+    const slots = (update?.set as { slots: Record<string, unknown> }).slots;
+    expect(slots.party).toMatchObject({
+      provenance: "from_context",
+      value: {
+        solo: false,
+        travelers: [
+          { name: "Kurt", email: "kurt@example.com" },
+          { name: "Pradip", email: "pradip@example.com" },
+        ],
+      },
+    });
+    // And the ask accounting never moved: the slot was never asked.
+    expect(view.questionsAsked).toBe(0);
+  });
+
+  it("a group that isn't the traveler's surfaces as not-found, not someone else's party", async () => {
+    store.selectQueues["intake_sessions"] = [[sessionAtParty]];
+    store.selectQueues["saved_groups"] = [[]]; // owner-scoped lookup misses
+    await expect(applyIntakePartyFromGroup(5, CTX.userId, CTX.role, 999)).rejects.toBeInstanceOf(
+      IntakeGroupNotFound,
+    );
+    expect(store.ops.filter((o) => o.op === "update")).toHaveLength(0);
+  });
+
+  it("a non-owner is denied before any group is loaded", async () => {
+    store.selectQueues["intake_sessions"] = [[sessionRow({ userId: 99 })]];
+    await expect(applyIntakePartyFromGroup(5, CTX.userId, CTX.role, 7)).rejects.toBeInstanceOf(
+      IntakeAccessDenied,
+    );
+    expect(store.selectQueues["saved_groups"] ?? []).toHaveLength(0);
+  });
+
+  it("a materialized session refuses the fill", async () => {
+    store.selectQueues["intake_sessions"] = [[sessionRow({ draftTripId: 12 })]];
+    await expect(applyIntakePartyFromGroup(5, CTX.userId, CTX.role, 7)).rejects.toThrow(
+      "already produced a trip",
+    );
   });
 });
