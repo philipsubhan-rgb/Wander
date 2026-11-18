@@ -21,6 +21,8 @@ export const profileAccessPurposeValues = [
   "booking_execution",
   "derived_check",
   "agent_task",
+  /** Concierge-Call Service (§6.5): names read to prepare a call brief. */
+  "call_execution",
 ] as const;
 export type ProfileAccessPurpose = (typeof profileAccessPurposeValues)[number];
 

@@ -128,7 +128,8 @@ export type ProfilePurpose =
   | "owner_view"
   | "booking_execution"
   | "derived_check"
-  | "agent_task";
+  | "agent_task"
+  | "call_execution";
 
 export class ProfileValidationError extends Error {
   readonly problems: string[];
