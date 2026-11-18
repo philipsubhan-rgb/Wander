@@ -7,11 +7,15 @@
  *
  * What this route does:
  *   - GET  /agent/agents  — list selectable agents (auth required).
- *   - POST /agent/chat    — chat with tools. Body: { agentId?, tripId, messages }.
+ *   - POST /agent/chat    — chat with tools. Body: { agentId?, tripId, messages }
+ *     or, for a pre-trip planner intake (ADR-3), { agentId?, intakeSessionId, messages }.
  *     Auth is required; the trip must exist; the caller must be a trip
  *     participant (or super_admin). Trip data comes server-side: a lean
  *     snapshot is injected as a system message, and the model calls read-only
  *     trip tools + Google Places research tools through a bounded loop.
+ *     In intake scope there is no trip yet: a planner snapshot orients the
+ *     model on the traveler and the intake state machine, and only the
+ *     intake_* tools are offered.
  *
  * Mock fallback: when MUSE_SPARK_API_KEY is unset (or the mock-only "wander"
  * agent is selected), returns a labeled mock reply. The mock path requires
@@ -27,13 +31,21 @@ import {
   getAuthRole,
 } from "../middlewares/auth";
 import { logger } from "../lib/logger";
-import { loadTripSnapshot, buildSnapshotSystemMessage } from "../lib/agentSnapshot";
+import {
+  loadTripSnapshot,
+  buildSnapshotSystemMessage,
+  loadPlannerSnapshot,
+  buildPlannerSystemMessage,
+} from "../lib/agentSnapshot";
 import {
   loadMarcoHistory,
+  loadMarcoHistoryForScope,
   mergeHistories,
   persistMarcoTurn,
+  persistMarcoTurnForScope,
   MEMORY_CONTEXT_LIMIT,
   MEMORY_HISTORY_LIMIT,
+  type MarcoScope,
   type MemoryMessage,
 } from "../lib/marcoMemory";
 import {
@@ -42,6 +54,14 @@ import {
   type ToolContext,
 } from "../lib/agentTools";
 import { AGENT_RESEARCH_TOOLS } from "../lib/agentResearch";
+import { INTAKE_TOOLS, getIntakeToolDefinition } from "../lib/agentIntakeTools";
+import {
+  assertIntakeAccess,
+  createIntakeSession,
+  loadIntakeSession,
+  markIntakeIntent,
+  recordIntakeTurnAsk,
+} from "../lib/intake";
 
 // ---------------------------------------------------------------------------
 // Agent registry
@@ -162,18 +182,40 @@ interface ToolCall {
 
 interface ChatRequestBody {
   agentId?: string;
-  /** The trip under discussion. Required: all trip data is loaded server-side. */
+  /** The trip under discussion. Trip data is loaded server-side. */
   tripId?: number;
+  /**
+   * ADR-3: a pre-trip intake session instead of a trip. Exactly one of
+   * tripId / intakeSessionId must be present.
+   */
+  intakeSessionId?: number;
   messages?: ChatMessage[];
+}
+
+/** What a chat turn is scoped to: an existing trip, or an intake session. */
+export type ChatScope =
+  | { kind: "trip"; tripId: number }
+  | { kind: "intake"; intakeSessionId: number };
+
+function scopeLabel(scope: ChatScope): string {
+  return scope.kind === "trip" ? `trip ${scope.tripId}` : `intake session ${scope.intakeSessionId}`;
 }
 
 const MAX_MESSAGES = 30;
 const MAX_CONTENT_CHARS = 8000;
 
-function isValidBody(body: unknown): body is ChatRequestBody & { messages: ChatMessage[]; tripId: number } {
+function isValidBody(
+  body: unknown,
+): body is ChatRequestBody & { messages: ChatMessage[] } {
   if (typeof body !== "object" || body === null) return false;
   const b = body as Record<string, unknown>;
-  if (typeof b.tripId !== "number" || !Number.isInteger(b.tripId) || b.tripId <= 0) return false;
+  const hasTrip = typeof b.tripId === "number" && Number.isInteger(b.tripId) && (b.tripId as number) > 0;
+  const hasIntake =
+    typeof b.intakeSessionId === "number" &&
+    Number.isInteger(b.intakeSessionId) &&
+    (b.intakeSessionId as number) > 0;
+  // Exactly one scope: a trip conversation OR an intake conversation.
+  if (hasTrip === hasIntake) return false;
   return (
     Array.isArray(b.messages) &&
     b.messages.length > 0 &&
@@ -565,6 +607,14 @@ const TOOL_STATUS_TEXT: Record<string, string> = {
   search_restaurants: "Searching restaurants…",
   search_events: "Searching events…",
   search_activities: "Searching activities…",
+  intake_get_state: "Reviewing your trip plan so far…",
+  intake_set_destination: "Noting the destination…",
+  intake_set_party: "Noting who's going…",
+  intake_set_dates: "Noting the dates…",
+  intake_set_style: "Noting the trip style…",
+  intake_skip: "Moving on…",
+  intake_get_review: "Putting together your summary…",
+  intake_confirm: "Creating your trip…",
 };
 
 function statusForTools(toolCalls: ToolCall[]): string {
@@ -576,14 +626,20 @@ function statusForTools(toolCalls: ToolCall[]): string {
 async function runAgentLoop(
   agent: AgentDefinition,
   ctx: ToolContext,
-  tripId: number,
+  scope: ChatScope,
   messages: ChatMessage[],
   opts?: RunAgentLoopOpts,
 ): Promise<{ reply: string; telemetry: LoopTelemetry }> {
-  const tools = TOOL_DEFINITIONS.map((t) => ({
+  // Scope decides the tool surface: intake conversations get ONLY the
+  // intake tools (no trip exists to read or write); trip conversations
+  // get the trip + research tools as before.
+  const toolDefs = scope.kind === "intake" ? INTAKE_TOOLS : TOOL_DEFINITIONS;
+  const tools = toolDefs.map((t) => ({
     type: "function" as const,
     function: { name: t.name, description: t.description, parameters: t.parameters },
   }));
+  const tripId = scope.kind === "trip" ? scope.tripId : null;
+  const intakeSessionId = scope.kind === "intake" ? scope.intakeSessionId : null;
 
   const loopStart = Date.now();
   const telemetry: LoopTelemetry = {
@@ -611,6 +667,7 @@ async function runAgentLoop(
       {
         userId: ctx.userId,
         tripId,
+        intakeSessionId,
         totalMs: telemetry.totalMs,
         iterations: telemetry.iterations,
         modelCallMs: telemetry.modelCallMs,
@@ -702,7 +759,7 @@ async function runAgentLoop(
     }
     if (repeatedSig) {
       logger.warn(
-        { signature: repeatedSig, userId: ctx.userId, tripId, iteration: i + 1 },
+        { signature: repeatedSig, userId: ctx.userId, tripId, intakeSessionId, iteration: i + 1 },
         "[Agent] stuck loop detected: repeated tool call — forcing final answer",
       );
       telemetry.stuckReason = "duplicate_tool_call";
@@ -719,17 +776,27 @@ async function runAgentLoop(
     // usableFinalText — it is not a completed answer.
 
     // One access check per iteration covers the whole batch (same user, same
-    // trip); re-asserting the identical check inside every concurrent tool
+    // scope); re-asserting the identical check inside every concurrent tool
     // call was N redundant DB queries for an N-tool batch. Each trip tool
     // still asserts its own tripId arg as defense in depth.
     let accessOk = true;
     let accessErrorText = "Trip access check failed: internal error.";
     try {
-      await assertTripAccess(ctx.userId, ctx.role, tripId);
+      if (scope.kind === "trip") {
+        await assertTripAccess(ctx.userId, ctx.role, scope.tripId);
+      } else {
+        await assertIntakeAccess(ctx.userId, ctx.role, scope.intakeSessionId);
+        accessErrorText = "Intake access check failed: internal error.";
+      }
     } catch (err) {
       accessOk = false;
-      if (err instanceof Error && err.name === "TripAccessDenied") accessErrorText = err.message;
-      logger.error({ userId: ctx.userId, tripId, err }, "[Agent] iteration access check failed");
+      if (
+        err instanceof Error &&
+        (err.name === "TripAccessDenied" || err.name === "IntakeAccessDenied")
+      ) {
+        accessErrorText = err.message;
+      }
+      logger.error({ userId: ctx.userId, tripId, intakeSessionId, err }, "[Agent] iteration access check failed");
     }
 
     // Performance: execute this iteration's tool calls concurrently, then
@@ -739,7 +806,7 @@ async function runAgentLoop(
         const name = call.function?.name ?? "";
         const toolStart = Date.now();
         logger.info(
-          { tool: name, userId: ctx.userId, tripId, iteration: i + 1 },
+          { tool: name, userId: ctx.userId, tripId, intakeSessionId, iteration: i + 1 },
           "[Agent] tool call",
         );
 
@@ -750,7 +817,10 @@ async function runAgentLoop(
           // fall through to the zod validation below, which will reject it
         }
 
-        const def = getToolDefinition(name) ?? AGENT_RESEARCH_TOOLS.find((t) => t.name === name);
+        const def =
+          scope.kind === "intake"
+            ? getIntakeToolDefinition(name)
+            : (getToolDefinition(name) ?? AGENT_RESEARCH_TOOLS.find((t) => t.name === name));
 
         let toolResult: { ok: boolean; text: string; data?: unknown };
         if (!accessOk) {
@@ -766,12 +836,14 @@ async function runAgentLoop(
               toolResult = await def.run(ctx, parsed.data as never);
             } catch (err) {
               // Tool failures go back to the model as error results — never a 500.
-              logger.error({ tool: name, userId: ctx.userId, tripId, err }, "[Agent] tool error");
+              logger.error({ tool: name, userId: ctx.userId, tripId, intakeSessionId, err }, "[Agent] tool error");
               toolResult = {
                 ok: false,
-                text: err instanceof Error && err.name === "TripAccessDenied"
-                  ? err.message
-                  : `Tool ${name} failed: internal error.`,
+                text:
+                  err instanceof Error &&
+                  (err.name === "TripAccessDenied" || err.name === "IntakeAccessDenied")
+                    ? err.message
+                    : `Tool ${name} failed: internal error.`,
               };
             }
           }
@@ -781,7 +853,7 @@ async function runAgentLoop(
         telemetry.toolMs[name] = (telemetry.toolMs[name] ?? 0) + toolElapsedMs;
         telemetry.toolCallsExecuted += 1;
         logger.info(
-          { tool: name, userId: ctx.userId, tripId, outcome: toolResult.ok ? "ok" : "error", toolMs: toolElapsedMs },
+          { tool: name, userId: ctx.userId, tripId, intakeSessionId, outcome: toolResult.ok ? "ok" : "error", toolMs: toolElapsedMs },
           "[Agent] tool result",
         );
         return { call, toolResult };
@@ -843,25 +915,25 @@ async function runAgentLoop(
         if (isUsableFinalText(final.content)) {
           usableFinalText = final.content;
           logger.info(
-            { userId: ctx.userId, tripId, attempt, stuckReason: telemetry.stuckReason },
+            { userId: ctx.userId, tripId, intakeSessionId, attempt, stuckReason: telemetry.stuckReason },
             "[Agent] safety net produced a final answer",
           );
         } else {
           logger.warn(
-            { userId: ctx.userId, tripId, attempt, stuckReason: telemetry.stuckReason },
+            { userId: ctx.userId, tripId, intakeSessionId, attempt, stuckReason: telemetry.stuckReason },
             "[Agent] safety-net attempt returned empty/unusable content — retrying",
           );
         }
       } catch (err) {
         logger.error(
-          { userId: ctx.userId, tripId, attempt, stuckReason: telemetry.stuckReason, err },
+          { userId: ctx.userId, tripId, intakeSessionId, attempt, stuckReason: telemetry.stuckReason, err },
           "[Agent] safety-net attempt failed",
         );
       }
     }
     if (!usableFinalText) {
       logger.error(
-        { userId: ctx.userId, tripId, stuckReason: telemetry.stuckReason },
+        { userId: ctx.userId, tripId, intakeSessionId, stuckReason: telemetry.stuckReason },
         "[Agent] safety net exhausted — returning looping fallback",
       );
     }
@@ -874,11 +946,11 @@ async function runAgentLoop(
 // Mock fallback — runs with no credentials, auth still required.
 // ---------------------------------------------------------------------------
 
-function mockReply(agent: AgentDefinition, tripId: number, messages: ChatMessage[]): string {
+function mockReply(agent: AgentDefinition, scope: ChatScope, messages: ChatMessage[]): string {
   const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content;
   return (
     `[mock ${agent.name} — no MUSE_SPARK_API_KEY set] ` +
-    `You said: "${(lastUser ?? "").slice(0, 120)}" (trip ${tripId}). ` +
+    `You said: "${(lastUser ?? "").slice(0, 120)}" (${scopeLabel(scope)}). ` +
     `Set MUSE_SPARK_API_KEY from dev.meta.ai to get live model responses.`
   );
 }
@@ -901,17 +973,52 @@ router.get("/agent/agents", requireAuth, (_req: Request, res: Response) => {
  * caller on this trip, oldest first. Powers cross-session memory in the UI:
  * the chat seeds its message list from here on load. Auth + trip membership
  * required, same as the chat endpoints.
+ *
+ * ADR-3 variant: ?intakeSessionId=N returns the intake conversation's
+ * turns instead (owner or super_admin only).
  */
 router.get("/agent/history", requireAuth, async (req: Request, res: Response) => {
-  const tripId = Number(req.query.tripId);
-  if (!Number.isInteger(tripId) || tripId <= 0) {
-    res.status(400).json({ error: "Invalid tripId: expected a positive integer query param" });
-    return;
-  }
   const userId = getAuthUserId(req, res);
   const role = getAuthRole(req, res) ?? "";
   if (!userId) {
     res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const intakeSessionId = Number(req.query.intakeSessionId);
+  if (req.query.intakeSessionId !== undefined) {
+    if (!Number.isInteger(intakeSessionId) || intakeSessionId <= 0) {
+      res.status(400).json({ error: "Invalid intakeSessionId: expected a positive integer query param" });
+      return;
+    }
+    const session = await loadIntakeSession(intakeSessionId);
+    if (!session) {
+      res.status(404).json({ error: `Intake session ${intakeSessionId} not found` });
+      return;
+    }
+    try {
+      await assertIntakeAccess(userId, role, intakeSessionId);
+    } catch {
+      res.status(403).json({ error: `Intake access required for session ${intakeSessionId}` });
+      return;
+    }
+    try {
+      const messages = await loadMarcoHistoryForScope(
+        { intakeSessionId },
+        userId,
+        MEMORY_HISTORY_LIMIT,
+      );
+      res.json({ intakeSessionId, messages });
+    } catch (err) {
+      logger.error({ intakeSessionId, userId, err }, "[Agent] intake history fetch failed");
+      res.status(500).json({ error: "Failed to load conversation history" });
+    }
+    return;
+  }
+
+  const tripId = Number(req.query.tripId);
+  if (!Number.isInteger(tripId) || tripId <= 0) {
+    res.status(400).json({ error: "Invalid tripId: expected a positive integer query param" });
     return;
   }
   const [trip] = await db.select({ id: tripsTable.id }).from(tripsTable).where(eq(tripsTable.id, tripId));
@@ -934,13 +1041,61 @@ router.get("/agent/history", requireAuth, async (req: Request, res: Response) =>
   }
 });
 
+/**
+ * POST /agent/intake-sessions — start a planner intake (ADR-3). The
+ * client creates a session, then chats against it via /agent/chat with
+ * { intakeSessionId } until intake_confirm materializes the draft trip.
+ */
+router.post("/agent/intake-sessions", requireAuth, async (req: Request, res: Response) => {
+  const userId = getAuthUserId(req, res);
+  if (!userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  const rawChannel = (req.body as { channel?: unknown })?.channel;
+  const channel = rawChannel === "voice" ? "voice" : "text";
+  try {
+    const view = await createIntakeSession(userId, channel);
+    res.status(201).json(view);
+  } catch (err) {
+    logger.error({ userId, err }, "[Agent] intake session create failed");
+    res.status(500).json({ error: "Failed to create intake session" });
+  }
+});
+
+/** GET /agent/intake-sessions/:id — the session's machine state (owner or super_admin). */
+router.get("/agent/intake-sessions/:id", requireAuth, async (req: Request, res: Response) => {
+  const userId = getAuthUserId(req, res);
+  const role = getAuthRole(req, res) ?? "";
+  if (!userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid intake session id" });
+    return;
+  }
+  const session = await loadIntakeSession(id);
+  if (!session) {
+    res.status(404).json({ error: `Intake session ${id} not found` });
+    return;
+  }
+  try {
+    const view = await assertIntakeAccess(userId, role, id);
+    res.json(view);
+  } catch {
+    res.status(403).json({ error: `Intake access required for session ${id}` });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Shared chat preamble (used by /agent/chat and /agent/chat/stream)
 // ---------------------------------------------------------------------------
 
 interface ParsedChatBody {
   agent: AgentDefinition;
-  tripId: number;
+  scope: ChatScope;
   rawMessages: ChatMessage[];
 }
 
@@ -952,13 +1107,18 @@ function parseChatBody(req: Request, res: Response): ParsedChatBody | null {
   if (!isValidBody(req.body)) {
     res.status(400).json({
       error:
-        "Invalid body: expected { agentId?, tripId: <positive int>, messages: [{role, content}] } with at least one message",
+        "Invalid body: expected { agentId?, tripId: <positive int>, messages: [{role, content}] } " +
+        "or { agentId?, intakeSessionId: <positive int>, messages: [{role, content}] } with at least one message",
     });
     return null;
   }
+  const scope: ChatScope =
+    req.body.tripId !== undefined
+      ? { kind: "trip", tripId: req.body.tripId }
+      : { kind: "intake", intakeSessionId: req.body.intakeSessionId as number };
   return {
     agent: getAgent(req.body.agentId),
-    tripId: req.body.tripId,
+    scope,
     rawMessages: req.body.messages,
   };
 }
@@ -975,9 +1135,16 @@ interface ChatContext extends ParsedChatBody {
 }
 
 /**
- * Auth + trip existence + membership + snapshot load, shared by both chat
+ * Auth + scope existence + membership + snapshot load, shared by both chat
  * endpoints. Sends the HTTP error and returns null on failure. Must run
  * BEFORE any SSE headers are committed on the streaming endpoint.
+ *
+ * Trip scope: 404 if the trip doesn't exist, 403 if the caller isn't a
+ * participant; the trip snapshot orients the model.
+ * Intake scope (ADR-3): 404 if the session doesn't exist, 403 if the
+ * caller isn't its owner; the first turn records the planning intent
+ * (OPENING → DESTINATION); the planner snapshot orients the model on the
+ * traveler and the machine state.
  */
 async function loadChatContext(
   req: Request,
@@ -991,17 +1158,55 @@ async function loadChatContext(
     return null;
   }
 
-  // 404 if the trip doesn't exist, 403 if the caller isn't a participant.
-  const [trip] = await db.select({ id: tripsTable.id }).from(tripsTable).where(eq(tripsTable.id, parsed.tripId));
-  if (!trip) {
-    res.status(404).json({ error: `Trip ${parsed.tripId} not found` });
-    return null;
-  }
-  try {
-    await assertTripAccess(userId, role, parsed.tripId);
-  } catch {
-    res.status(403).json({ error: `Trip access required for trip ${parsed.tripId}` });
-    return null;
+  // Scope-specific access + the two scope-specific loads (history,
+  // snapshot), resolved before the shared merge below. Trip-scope DB call
+  // order is unchanged: trip row → participant check → history → snapshot.
+  let loadHistory: () => Promise<MemoryMessage[]>;
+  let loadSnapshotMessage: () => Promise<{ role: "system"; content: string }>;
+
+  if (parsed.scope.kind === "trip") {
+    const tripId = parsed.scope.tripId;
+    const [trip] = await db.select({ id: tripsTable.id }).from(tripsTable).where(eq(tripsTable.id, tripId));
+    if (!trip) {
+      res.status(404).json({ error: `Trip ${tripId} not found` });
+      return null;
+    }
+    try {
+      await assertTripAccess(userId, role, tripId);
+    } catch {
+      res.status(403).json({ error: `Trip access required for trip ${tripId}` });
+      return null;
+    }
+    loadHistory = () => loadMarcoHistory(tripId, userId, MEMORY_CONTEXT_LIMIT);
+    loadSnapshotMessage = async () =>
+      buildSnapshotSystemMessage(await loadTripSnapshot(tripId));
+  } else {
+    const sessionId = parsed.scope.intakeSessionId;
+    let view = await loadIntakeSession(sessionId);
+    if (!view) {
+      res.status(404).json({ error: `Intake session ${sessionId} not found` });
+      return null;
+    }
+    try {
+      await assertIntakeAccess(userId, role, sessionId);
+    } catch {
+      res.status(403).json({ error: `Intake access required for session ${sessionId}` });
+      return null;
+    }
+    // The opening user message IS the intent (§2.2): arriving here in
+    // OPENING means the traveler just said they want to plan a trip.
+    if (view.state === "OPENING") {
+      try {
+        view = await markIntakeIntent(sessionId);
+      } catch (err) {
+        logger.warn({ intakeSessionId: sessionId, userId, err }, "[Agent] intake intent mark failed — continuing");
+      }
+    }
+    const sessionView = view;
+    loadHistory = () =>
+      loadMarcoHistoryForScope({ intakeSessionId: sessionId }, userId, MEMORY_CONTEXT_LIMIT);
+    loadSnapshotMessage = async () =>
+      buildPlannerSystemMessage(await loadPlannerSnapshot(userId), sessionView);
   }
 
   // Keep only the tail of the conversation and cap message sizes to bound the
@@ -1022,20 +1227,19 @@ async function loadChatContext(
     }));
   let persisted: MemoryMessage[] = [];
   try {
-    persisted = await loadMarcoHistory(parsed.tripId, userId, MEMORY_CONTEXT_LIMIT);
+    persisted = await loadHistory();
   } catch (err) {
     // Memory is best-effort: a history read failure must not break the chat.
-    logger.warn({ tripId: parsed.tripId, userId, err }, "[Agent] history load failed — continuing without memory");
+    logger.warn({ scope: scopeLabel(parsed.scope), userId, err }, "[Agent] history load failed — continuing without memory");
   }
   const { history, fresh } = mergeHistories(persisted, clientHistory, MAX_MESSAGES);
 
   let snapshotMessage: { role: "system"; content: string };
   try {
-    const snapshot = await loadTripSnapshot(parsed.tripId);
-    snapshotMessage = buildSnapshotSystemMessage(snapshot);
+    snapshotMessage = await loadSnapshotMessage();
   } catch (err) {
-    logger.error({ tripId: parsed.tripId, userId, err }, "[Agent] snapshot load failed");
-    res.status(500).json({ error: "Failed to load trip context" });
+    logger.error({ scope: scopeLabel(parsed.scope), userId, err }, "[Agent] snapshot load failed");
+    res.status(500).json({ error: "Failed to load conversation context" });
     return null;
   }
 
@@ -1064,6 +1268,54 @@ async function rememberTurn(
   }
 }
 
+/**
+ * Intake-scope turn finalization (ADR-3): persist the turn, then advance
+ * the §4.4 asks-less accounting. If the session materialized during this
+ * turn, materializeIntake already re-keyed the earlier intake history to
+ * the new trip — so the fresh turn is persisted under TRIP scope and the
+ * conversation continues there seamlessly. Returns the post-turn machine
+ * state for the response payload; null fields on any failure (memory and
+ * accounting are best-effort, the chat already succeeded).
+ */
+async function finishIntakeTurn(
+  sessionId: number,
+  userId: number,
+  freshMessages: MemoryMessage[],
+  reply: string,
+): Promise<{ state: string | null; tripId: number | null }> {
+  let tripId: number | null = null;
+  try {
+    const view = await loadIntakeSession(sessionId);
+    tripId = view?.draftTripId ?? null;
+    const scope: MarcoScope = tripId !== null ? { tripId } : { intakeSessionId: sessionId };
+    await persistMarcoTurnForScope(scope, userId, [
+      ...freshMessages,
+      { role: "assistant", content: reply },
+    ]);
+  } catch (err) {
+    logger.warn({ intakeSessionId: sessionId, userId, err }, "[Agent] intake turn persist failed — chat unaffected");
+  }
+  let state: string | null = null;
+  try {
+    await recordIntakeTurnAsk(sessionId);
+    const view = await loadIntakeSession(sessionId);
+    state = view?.state ?? null;
+    tripId = view?.draftTripId ?? tripId;
+  } catch (err) {
+    logger.warn({ intakeSessionId: sessionId, userId, err }, "[Agent] intake ask accounting failed — chat unaffected");
+  }
+  return { state, tripId };
+}
+
+/** The ToolContext for a chat turn: session identity rides along in intake scope. */
+function toolContextFor(ctx: ChatContext): ToolContext {
+  return {
+    userId: ctx.userId,
+    role: ctx.role,
+    ...(ctx.scope.kind === "intake" ? { intakeSessionId: ctx.scope.intakeSessionId } : {}),
+  };
+}
+
 /** Chat with the selected agent. Auth + trip membership required. */
 router.post("/agent/chat", requireAuth, async (req: Request, res: Response) => {
   const parsed = parseChatBody(req, res);
@@ -1075,8 +1327,9 @@ router.post("/agent/chat", requireAuth, async (req: Request, res: Response) => {
   if (parsed.agent.id === "wander" || !process.env.MUSE_SPARK_API_KEY) {
     res.json({
       agentId: parsed.agent.id,
-      reply: mockReply(parsed.agent, parsed.tripId, parsed.rawMessages),
+      reply: mockReply(parsed.agent, parsed.scope, parsed.rawMessages),
       mock: true,
+      ...(parsed.scope.kind === "intake" ? { intakeSessionId: parsed.scope.intakeSessionId } : {}),
     });
     return;
   }
@@ -1087,15 +1340,32 @@ router.post("/agent/chat", requireAuth, async (req: Request, res: Response) => {
   try {
     const { reply } = await runAgentLoop(
       ctx.agent,
-      { userId: ctx.userId, role: ctx.role },
-      ctx.tripId,
+      toolContextFor(ctx),
+      ctx.scope,
       ctx.messages,
     );
-    await rememberTurn(ctx.tripId, ctx.userId, ctx.freshMessages, reply);
-    res.json({ agentId: ctx.agent.id, reply, mock: false });
+    if (ctx.scope.kind === "trip") {
+      await rememberTurn(ctx.scope.tripId, ctx.userId, ctx.freshMessages, reply);
+      res.json({ agentId: ctx.agent.id, reply, mock: false });
+    } else {
+      const fin = await finishIntakeTurn(
+        ctx.scope.intakeSessionId,
+        ctx.userId,
+        ctx.freshMessages,
+        reply,
+      );
+      res.json({
+        agentId: ctx.agent.id,
+        reply,
+        mock: false,
+        intakeSessionId: ctx.scope.intakeSessionId,
+        intakeState: fin.state,
+        ...(fin.tripId !== null ? { tripId: fin.tripId } : {}),
+      });
+    }
   } catch (err) {
     // 502: our server is fine, the upstream model call failed.
-    logger.error({ err, userId: ctx.userId, tripId: ctx.tripId }, "[Agent] chat failed");
+    logger.error({ err, userId: ctx.userId, scope: scopeLabel(ctx.scope) }, "[Agent] chat failed");
     res.status(502).json({
       error: "Agent request failed",
       detail: err instanceof Error ? err.message : String(err),
@@ -1133,9 +1403,14 @@ router.post("/agent/chat/stream", requireAuth, async (req: Request, res: Respons
   // /agent/chat: auth required, no trip access check, no DB access.
   if (parsed.agent.id === "wander" || !process.env.MUSE_SPARK_API_KEY) {
     res.writeHead(200, sseHeaders);
-    const reply = mockReply(parsed.agent, parsed.tripId, parsed.rawMessages);
+    const reply = mockReply(parsed.agent, parsed.scope, parsed.rawMessages);
     send("token", { delta: reply });
-    send("done", { agentId: parsed.agent.id, reply, mock: true });
+    send("done", {
+      agentId: parsed.agent.id,
+      reply,
+      mock: true,
+      ...(parsed.scope.kind === "intake" ? { intakeSessionId: parsed.scope.intakeSessionId } : {}),
+    });
     res.end();
     return;
   }
@@ -1163,17 +1438,34 @@ router.post("/agent/chat/stream", requireAuth, async (req: Request, res: Respons
   try {
     const { reply } = await runAgentLoop(
       ctx.agent,
-      { userId: ctx.userId, role: ctx.role },
-      ctx.tripId,
+      toolContextFor(ctx),
+      ctx.scope,
       ctx.messages,
       { events, signal: disconnect.signal },
     );
-    await rememberTurn(ctx.tripId, ctx.userId, ctx.freshMessages, reply);
-    // Authoritative final text — the client replaces the streamed
-    // accumulation with this, covering any delta lost in transit.
-    send("done", { agentId: ctx.agent.id, reply, mock: false });
+    if (ctx.scope.kind === "trip") {
+      await rememberTurn(ctx.scope.tripId, ctx.userId, ctx.freshMessages, reply);
+      // Authoritative final text — the client replaces the streamed
+      // accumulation with this, covering any delta lost in transit.
+      send("done", { agentId: ctx.agent.id, reply, mock: false });
+    } else {
+      const fin = await finishIntakeTurn(
+        ctx.scope.intakeSessionId,
+        ctx.userId,
+        ctx.freshMessages,
+        reply,
+      );
+      send("done", {
+        agentId: ctx.agent.id,
+        reply,
+        mock: false,
+        intakeSessionId: ctx.scope.intakeSessionId,
+        intakeState: fin.state,
+        ...(fin.tripId !== null ? { tripId: fin.tripId } : {}),
+      });
+    }
   } catch (err) {
-    logger.error({ err, userId: ctx.userId, tripId: ctx.tripId }, "[Agent] chat stream failed");
+    logger.error({ err, userId: ctx.userId, scope: scopeLabel(ctx.scope) }, "[Agent] chat stream failed");
     if (!disconnect.signal.aborted) {
       // 502 equivalent: our server is fine, the upstream model call failed.
       send("error", {
