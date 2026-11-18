@@ -669,16 +669,57 @@ export interface SubmitProfileResult {
   /** Non-fatal flags for the traveler (e.g. "passport_expired"). */
   warnings: string[];
   userId: number;
+  tripId: number;
+  /**
+   * True when THIS submission created the traveler's trip_participants
+   * row (the §3.2 claim). The caller (route) fires the expense-split
+   * recalculation hook on a true — exactly as participant add does today.
+   */
+  participantCreated: boolean;
+}
+
+/**
+ * The claim seam (§3.2): once a roster entry is linked to a user, that
+ * user becomes a real participant of the trip — the roster entry remains
+ * as the status record, and a `trip_participants` row now exists for
+ * access, expenses, and splits. Idempotent: an existing participant row
+ * (added directly, or created by an earlier claim) is left untouched and
+ * reported as not-created, so a re-claim never duplicates the row and
+ * never re-fires the split recalculation.
+ */
+export async function ensureTripParticipant(
+  tripId: number,
+  userId: number,
+): Promise<boolean> {
+  const [existing] = await db
+    .select()
+    .from(tripParticipantsTable)
+    .where(
+      and(
+        eq(tripParticipantsTable.tripId, tripId),
+        eq(tripParticipantsTable.userId, userId),
+      ),
+    );
+  if (existing) return false;
+  await db.insert(tripParticipantsTable).values({
+    tripId,
+    userId,
+    isTripAdmin: false,
+  });
+  logger.info({ tripId, userId }, "[Outreach] claimed traveler added as trip participant");
+  return true;
 }
 
 /**
  * The submission flow (Story 4.3/5.1), now backed by the vault:
  * validate token → resolve/create the traveler's user record → write
  * the fields into the vault via the Context/Profile service → link the
- * roster entry → recompute missingFields from real profile state →
- * advance status (ready when nothing required is missing, else
- * setting_up) → consume the token. The token is consumed LAST, so a
- * validation failure leaves the traveler a working link to retry with.
+ * roster entry → create the trip_participants row (the §3.2 claim —
+ * the route fires the split recalculation when a row was created) →
+ * recompute missingFields from real profile state → advance status
+ * (ready when nothing required is missing, else setting_up) → consume
+ * the token. The token is consumed LAST, so a validation failure
+ * leaves the traveler a working link to retry with.
  */
 export async function submitTravelerProfile(
   rawToken: string,
@@ -728,6 +769,12 @@ export async function submitTravelerProfile(
     ...(entry.invitedEmail === null && entryEmail ? { invitedEmail: entryEmail } : {}),
   });
 
+  // The claim (§3.2): a linked traveler is a trip participant. The
+  // roster entry stays as the status record; the participant row is
+  // what access checks, expenses, and splits read. Idempotent — a
+  // re-submit after an earlier claim creates nothing new.
+  const participantCreated = await ensureTripParticipant(entry.tripId, userId);
+
   // Change propagation covers this traveler's OTHER in-flight trips;
   // this entry is then recomputed directly so its post-submit state is
   // exact regardless of trip dates.
@@ -749,7 +796,14 @@ export async function submitTravelerProfile(
     { entryId: entry.id, tripId: entry.tripId, userId, status, missingCount: missing.length },
     "[Outreach] traveler profile submitted",
   );
-  return { status, missingFields: missing, warnings, userId };
+  return {
+    status,
+    missingFields: missing,
+    warnings,
+    userId,
+    tripId: entry.tripId,
+    participantCreated,
+  };
 }
 
 /** Decline from the setup flow (Story 4.3): consumes the token, stops chasing. */

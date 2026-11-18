@@ -38,6 +38,7 @@ import {
   type TravelerProfileSubmission,
 } from "../lib/outreach.js";
 import { ProfileValidationError } from "../lib/travelerProfile.js";
+import { recalcExpenseSplitsForTrip } from "./expenses";
 
 const router: IRouter = Router();
 
@@ -191,6 +192,12 @@ router.post("/traveler-setup/:token/submit", async (req: Request, res: Response)
       token,
       (req.body ?? {}) as TravelerProfileSubmission,
     );
+    // §3.2: a claim that created a participant row fires the same
+    // expense-split recalculation as a direct participant add (trips.ts).
+    // A re-claim creates no row and fires nothing.
+    if (result.participantCreated) {
+      await recalcExpenseSplitsForTrip(result.tripId);
+    }
     res.json({
       status: result.status,
       missingFields: result.missingFields,
