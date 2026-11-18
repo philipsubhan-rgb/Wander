@@ -99,6 +99,7 @@ import {
   applyChaseReminder,
   beginTravelerSetup,
   declineInvite,
+  ensureTripParticipant,
   getRosterStatus,
   getShareLink,
   issueInviteToken,
@@ -581,6 +582,68 @@ describe("traveler setup seam", () => {
     queue("traveler_invite_tokens", []);
     await expect(beginTravelerSetup("bogus", NOW)).rejects.toBeInstanceOf(InviteTokenError);
     expect(store.ops.filter((o) => o.op !== "select")).toHaveLength(0);
+  });
+
+  // ── Claim → participant (§3.2) ──────────────────────────────────────────
+  // A successful submit IS the claim: the entry links to a user, and the
+  // user becomes a trip participant. The route fires the split recalc
+  // only when participantCreated is true (see routes/outreach.claim.test.ts).
+
+  it("claim: a first submit creates the trip_participants row for the claimed traveler", async () => {
+    queueNewUserSubmit();
+    queue("trip_participants", []); // ensure: not a participant yet
+    const result = await submitTravelerProfile(
+      "raw-token",
+      { passportNumber: "XUK1234567", dateOfBirth: "1990-04-12" },
+      NOW,
+    );
+    expect(result.participantCreated).toBe(true);
+    expect(result.tripId).toBe(7);
+    const participantRows = inserts("trip_participants");
+    expect(participantRows).toHaveLength(1);
+    expect(participantRows[0]).toMatchObject({ tripId: 7, userId: 77, isTripAdmin: false });
+  });
+
+  it("claim: a submit whose traveler is ALREADY a participant creates no row", async () => {
+    queueNewUserSubmit();
+    queue("trip_participants", [{ tripId: 7, userId: 77, isTripAdmin: false }]); // already there
+    const result = await submitTravelerProfile(
+      "raw-token",
+      { passportNumber: "XUK1234567", dateOfBirth: "1990-04-12" },
+      NOW,
+    );
+    expect(result.participantCreated).toBe(false);
+    expect(inserts("trip_participants")).toHaveLength(0);
+  });
+
+  it("re-claim: an already-linked entry re-submitting (fresh token) does not duplicate the participant", async () => {
+    // The entry was claimed before: userId is set, the participant row
+    // exists. A fresh invite token lets the traveler update details —
+    // the claim must not duplicate the participant row.
+    queue("traveler_invite_tokens", [tokenRow]);
+    queue("trip_roster_entries", [entryRow({ userId: 77, status: "ready" })]);
+    queue("traveler_profiles", [storedProfileRow]); // upsert: profile exists → update
+    queue("trip_participants", [{ tripId: 7, userId: 77, isTripAdmin: false }]); // ensure: exists
+    queue("trip_roster_entries", []); // propagation: nothing else in-flight
+    queue("traveler_profiles", [storedProfileRow]); // recompute load
+
+    const result = await submitTravelerProfile(
+      "raw-token",
+      { passportNumber: "XUK1234567" },
+      NOW,
+    );
+    expect(result.userId).toBe(77);
+    expect(result.participantCreated).toBe(false);
+    expect(inserts("trip_participants")).toHaveLength(0);
+    expect(inserts("users")).toHaveLength(0);
+  });
+
+  it("ensureTripParticipant: true exactly once — first call creates, second finds the row", async () => {
+    queue("trip_participants", []); // first: nobody there
+    await expect(ensureTripParticipant(7, 77)).resolves.toBe(true);
+    queue("trip_participants", [{ tripId: 7, userId: 77, isTripAdmin: false }]); // now there
+    await expect(ensureTripParticipant(7, 77)).resolves.toBe(false);
+    expect(inserts("trip_participants")).toHaveLength(1);
   });
 });
 
