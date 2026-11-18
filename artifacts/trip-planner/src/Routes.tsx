@@ -9,6 +9,9 @@ import AdminUsers from '@/pages/admin-users';
 import TripDetail from '@/pages/trip-detail';
 import TripGuide from '@/pages/trip-guide';
 import SettingsPage from '@/pages/settings';
+import TravelerSetupPage from '@/pages/traveler-setup';
+import PlanTripPage from '@/pages/plan';
+import TravelerProfilePage from '@/pages/profile';
 
 export default function Routes() {
   return (
@@ -16,7 +19,12 @@ export default function Routes() {
       <Route path="/login" component={Login} />
       <Route path="/forgot-password" component={ForgotPassword} />
       <Route path="/reset-password" component={ResetPassword} />
-      
+
+      {/* Public: the invitee setup flow — the token is the credential,
+          no account wall (Story 4.3). Emailed links use ?token=. */}
+      <Route path="/traveler-setup" component={TravelerSetupPage} />
+      <Route path="/traveler-setup/:token" component={TravelerSetupPage} />
+
       <Route path="/">
         <Redirect to="/trips" />
       </Route>
@@ -62,6 +70,22 @@ export default function Routes() {
       <Route path="/settings">
         <ProtectedRoute>
           <SettingsPage />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/plan">
+        <ProtectedRoute>
+          <AppShell>
+            <PlanTripPage />
+          </AppShell>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/profile">
+        <ProtectedRoute>
+          <AppShell>
+            <TravelerProfilePage />
+          </AppShell>
         </ProtectedRoute>
       </Route>
 

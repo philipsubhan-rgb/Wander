@@ -1,7 +1,7 @@
 import { useListTrips, useCreateTrip, getListTripsQueryKey } from '@workspace/api-client-react';
 import { useAuth } from '@/hooks/use-auth';
 import { Link } from 'wouter';
-import { Plus, Calendar, MapPin, Plane } from 'lucide-react';
+import { Plus, Calendar, MapPin, Plane, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { format, parseISO } from 'date-fns';
 import {
@@ -66,6 +66,13 @@ export default function TripsDashboard() {
         </div>
 
         {isAuthenticated && (
+          <div className="flex flex-wrap items-center gap-3">
+          <Button asChild size="lg" className="rounded-full shadow-sm hover-elevate">
+            <Link href="/plan">
+              <Sparkles className="h-5 w-5 mr-2" />
+              Plan a trip with Marco
+            </Link>
+          </Button>
           <Dialog open={isNewTripOpen} onOpenChange={setIsNewTripOpen}>
             <DialogTrigger asChild>
               <Button size="lg" className="rounded-full shadow-sm hover-elevate">
@@ -83,6 +90,7 @@ export default function TripsDashboard() {
               <NewTripForm onSuccess={() => setIsNewTripOpen(false)} />
             </DialogContent>
           </Dialog>
+          </div>
         )}
       </div>
 
@@ -97,10 +105,18 @@ export default function TripsDashboard() {
               Start planning your first adventure by creating a new trip.
             </p>
           </div>
-          <Button onClick={() => setIsNewTripOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Create First Trip
-          </Button>
+          <div className="flex flex-wrap justify-center gap-3">
+            <Button asChild>
+              <Link href="/plan">
+                <Sparkles className="h-4 w-4 mr-2" />
+                Plan it with Marco
+              </Link>
+            </Button>
+            <Button variant="outline" onClick={() => setIsNewTripOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Create First Trip
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="space-y-12">

@@ -28,6 +28,12 @@ interface Message {
 interface AgentChatProps {
   /** Scope agent selection to a trip (per-trip choice from settings). */
   tripId?: string | number;
+  /**
+   * Intake scope (ADR-3): chat against a planner intake session instead
+   * of a trip. The server accepts tripId XOR intakeSessionId; when this
+   * is set it wins and no tripId is sent.
+   */
+  intakeSessionId?: number;
   /** Override the agent; defaults to the picker's localStorage selection. */
   agentId?: string;
   /**
@@ -43,19 +49,33 @@ interface AgentChatProps {
   bare?: boolean;
   /** Called when the conversation transitions between empty and non-empty. */
   onEmptyChange?: (isEmpty: boolean) => void;
+  /** Called after each completed send attempt (success or failure). */
+  onTurnComplete?: () => void;
+}
+
+/** The scope fields a chat body carries: exactly one of the two. */
+interface ChatScope {
+  tripId?: string | number;
+  intakeSessionId?: number;
+}
+
+function scopeBody(scope: ChatScope): Record<string, unknown> {
+  if (scope.intakeSessionId != null) return { intakeSessionId: scope.intakeSessionId };
+  if (scope.tripId != null) return { tripId: scope.tripId };
+  return {};
 }
 
 /** Resolve the non-streaming endpoint (fallback if the SSE stream fails). */
 async function postChat(
   agentId: string,
   messages: Message[],
-  tripId?: string | number,
+  scope: ChatScope,
 ): Promise<string> {
   const res = await fetch("/api/agent/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include", // session cookie, like the rest of Wander's API
-    body: JSON.stringify({ agentId, messages, tripId }),
+    body: JSON.stringify({ agentId, messages, ...scopeBody(scope) }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -85,14 +105,14 @@ interface StreamHandlers {
 async function streamChat(
   agentId: string,
   messages: Message[],
-  tripId: string | number | undefined,
+  scope: ChatScope,
   handlers: StreamHandlers,
 ): Promise<string> {
   const res = await fetch("/api/agent/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ agentId, messages, tripId }),
+    body: JSON.stringify({ agentId, messages, ...scopeBody(scope) }),
   });
   if (!res.ok) {
     // Auth/validation failures still come back as JSON (before SSE headers).
@@ -182,7 +202,7 @@ function AssistantBubble({ content }: { content: string }) {
   );
 }
 
-export default function AgentChat({ tripId, agentId, initialMessage, onInitialMessageConsumed, bare, onEmptyChange }: AgentChatProps) {
+export default function AgentChat({ tripId, intakeSessionId, agentId, initialMessage, onInitialMessageConsumed, bare, onEmptyChange, onTurnComplete }: AgentChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -205,11 +225,19 @@ export default function AgentChat({ tripId, agentId, initialMessage, onInitialMe
   // Conversation memory: seed the message list from the persisted log so
   // Marco remembers earlier sessions. Only fills an empty list — never
   // clobbers a live conversation (e.g. a seeded initialMessage in flight).
+  // Intake scope reads the intake conversation's history the same way
+  // (GET /agent/history?intakeSessionId=N, ADR-3).
   const historySeededRef = useRef(false);
+  const scopeKey =
+    intakeSessionId != null ? `intake:${intakeSessionId}` : tripId != null ? `trip:${tripId}` : null;
   useEffect(() => {
-    if (tripId == null || historySeededRef.current) return;
+    if (scopeKey == null || historySeededRef.current) return;
     historySeededRef.current = true;
-    fetch(`/api/agent/history?tripId=${encodeURIComponent(String(tripId))}`, {
+    const historyUrl =
+      intakeSessionId != null
+        ? `/api/agent/history?intakeSessionId=${encodeURIComponent(String(intakeSessionId))}`
+        : `/api/agent/history?tripId=${encodeURIComponent(String(tripId))}`;
+    fetch(historyUrl, {
       credentials: "include",
     })
       .then((r) => (r.ok ? r.json() : null))
@@ -225,7 +253,7 @@ export default function AgentChat({ tripId, agentId, initialMessage, onInitialMe
         // History is a nice-to-have: an empty chat still works.
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tripId]);
+  }, [scopeKey]);
 
   // Keep the newest message visible by scrolling the chat's own message
   // list — never the page. (scrollIntoView would yank the whole window.)
@@ -268,7 +296,7 @@ export default function AgentChat({ tripId, agentId, initialMessage, onInitialMe
         prev.map((m, i) => (i === assistantIndex ? { ...m, content } : m)),
       );
     try {
-      const reply = await streamChat(resolvedAgentId, next, tripId, {
+      const reply = await streamChat(resolvedAgentId, next, { tripId, intakeSessionId }, {
         onToken: (delta) =>
           setMessages((prev) =>
             prev.map((m, i) =>
@@ -284,7 +312,7 @@ export default function AgentChat({ tripId, agentId, initialMessage, onInitialMe
       // The stream failed: fall back to the non-streaming endpoint once,
       // then surface the error. Drop the empty reserved bubble on failure.
       try {
-        const reply = await postChat(resolvedAgentId, next, tripId);
+        const reply = await postChat(resolvedAgentId, next, { tripId, intakeSessionId });
         patchAssistant(reply);
       } catch (fallbackErr) {
         setMessages((prev) => prev.filter((_, i) => i !== assistantIndex));
@@ -294,6 +322,7 @@ export default function AgentChat({ tripId, agentId, initialMessage, onInitialMe
       setStreamingId(null);
       setStatusText(null);
       setSending(false);
+      onTurnComplete?.();
     }
   }
 
@@ -315,8 +344,9 @@ export default function AgentChat({ tripId, agentId, initialMessage, onInitialMe
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
         {messages.length === 0 && (
           <p className="text-sm text-muted-foreground">
-            Ask about your trip — schedule changes, what's next, or help
-            re-planning a day.
+            {intakeSessionId != null
+              ? "Tell Marco where you'd like to go — he'll ask a few questions and build the trip with you."
+              : "Ask about your trip — schedule changes, what's next, or help re-planning a day."}
           </p>
         )}
         {messages.map((m, i) =>

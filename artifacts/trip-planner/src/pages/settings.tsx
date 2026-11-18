@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Mail, RefreshCw, Trash2, Check, X, Inbox, CalendarDays } from "lucide-react";
+import { Loader2, Mail, RefreshCw, Trash2, Check, X, Inbox, CalendarDays, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 interface ConnectedAccount {
@@ -416,6 +416,23 @@ export default function SettingsPage() {
       <AppShell>
         <div className="max-w-3xl mx-auto p-4 md:p-6 space-y-6">
           <h1 className="text-2xl font-bold">Settings</h1>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5" /> Your traveler profile
+              </CardTitle>
+              <CardDescription>
+                Your private travel details — passport, date of birth, emergency
+                contact — live in your own profile. Only you can see them; trip
+                organizers see only whether they're complete.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild variant="outline">
+                <a href="/profile">Open my traveler profile</a>
+              </Button>
+            </CardContent>
+          </Card>
           <AccountsSection />
           <ProposalsSection />
         </div>

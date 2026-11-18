@@ -19,12 +19,23 @@ import { AGENT_OPTIONS } from "@/components/AgentPicker";
 const MARCO_ICON = "/marco-icon.webp";
 
 interface MarcoBarProps {
-  tripId: number;
+  /** Trip scope — the bar chats about this trip. */
+  tripId?: number;
+  /**
+   * Intake scope — the bar runs a planner intake session instead of a
+   * trip conversation (used by the "Plan a trip" page). Mutually
+   * exclusive with tripId; AgentChat sends exactly one scope.
+   */
+  intakeSessionId?: number;
+  /** Start with the chat panel already expanded (intake entry page). */
+  defaultOpen?: boolean;
+  /** Forwarded to AgentChat — fires after each completed turn. */
+  onTurnComplete?: () => void;
 }
 
-export default function MarcoBar({ tripId }: MarcoBarProps) {
-  const [open, setOpen] = useState(false);
-  const [hasOpened, setHasOpened] = useState(false);
+export default function MarcoBar({ tripId, intakeSessionId, defaultOpen, onTurnComplete }: MarcoBarProps) {
+  const [open, setOpen] = useState(defaultOpen ?? false);
+  const [hasOpened, setHasOpened] = useState(defaultOpen ?? false);
   const [seed, setSeed] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   // Compact panel while the conversation is empty; full height once it isn't.
@@ -58,7 +69,11 @@ export default function MarcoBar({ tripId }: MarcoBarProps) {
           <Input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder={`Ask ${agentName} anything about this trip…`}
+            placeholder={
+              intakeSessionId != null
+                ? `Tell ${agentName} where you want to go…`
+                : `Ask ${agentName} anything about this trip…`
+            }
             className="flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
           />
           <Button
@@ -81,7 +96,11 @@ export default function MarcoBar({ tripId }: MarcoBarProps) {
         >
           <span className="flex items-center gap-2 text-sm">
             <img src={MARCO_ICON} alt="Marco" className="h-5 w-5 rounded-full object-cover" />
-            <span className="font-medium">Continue chatting with {agentName}</span>
+            <span className="font-medium">
+              {intakeSessionId != null
+                ? `Continue planning with ${agentName}`
+                : `Continue chatting with ${agentName}`}
+            </span>
           </span>
           <ChevronDown className="h-4 w-4 text-muted-foreground" />
         </button>
@@ -116,10 +135,12 @@ export default function MarcoBar({ tripId }: MarcoBarProps) {
             <AgentChat
               bare
               tripId={tripId}
+              intakeSessionId={intakeSessionId}
               agentId={agentId}
               initialMessage={seed}
               onInitialMessageConsumed={() => setSeed(null)}
               onEmptyChange={setChatEmpty}
+              onTurnComplete={onTurnComplete}
             />
           </div>
         </div>
