@@ -20,6 +20,7 @@ import integrationsRouter from "./integrations";
 import outreachRouter from "./outreach";
 import profilesRouter from "./profiles";
 import watchingRouter from "./watching";
+import voiceRouter from "./voice";
 
 const router: IRouter = Router();
 
@@ -44,5 +45,6 @@ router.use(integrationsRouter);
 router.use(outreachRouter);
 router.use(profilesRouter);
 router.use(watchingRouter);
+router.use(voiceRouter);
 
 export default router;
