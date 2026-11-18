@@ -2,6 +2,9 @@ import { pgTable, serial, text, timestamp, integer, jsonb, boolean, index, uniqu
 import { tripsTable } from "./trips";
 import { usersTable } from "./users";
 import { reservationsTable } from "./reservations";
+import { flightsTable } from "./flights";
+import { accommodationsTable } from "./accommodations";
+import { carRentalsTable } from "./carRentals";
 
 /**
  * Connected email accounts for reservation ingestion. A user can connect
@@ -61,20 +64,34 @@ export const reservationProposalsTable = pgTable("reservation_proposals", {
 
 export type ReservationProposal = typeof reservationProposalsTable.$inferSelect;
 
+/** The itinerary item kinds calendar write-back covers (§6/§9 extension). */
+export const calendarItemTypeValues = ["reservation", "flight", "accommodation", "car_rental"] as const;
+export type CalendarItemType = (typeof calendarItemTypeValues)[number];
+
 /**
- * Links between Wander reservations and the Google Calendar events created
- * for them by write-back. One link per (account, reservation): each traveler
- * with write-back enabled gets their own event on their own "Wander"
- * calendar. Storing the Google event ID + a hash of the last-pushed payload
- * makes sync idempotent — re-accepting or re-syncing updates the existing
- * event instead of creating a duplicate, and deleting the reservation
- * deletes its events.
+ * Links between Wander itinerary items and the Google Calendar events
+ * created for them by write-back. One link per (account, item): each
+ * traveler with write-back enabled gets their own event on their own
+ * "Wander" calendar. Storing the Google event ID + a hash of the
+ * last-pushed payload makes sync idempotent — re-accepting or
+ * re-syncing updates the existing event instead of creating a
+ * duplicate, and deleting the item deletes its events.
+ *
+ * Originally reservation-only (migration 0005); migration 0016 widened
+ * the table to every itinerary item kind. Exactly one of the four item
+ * FK columns is set per row, matching `item_type` (enforced by a CHECK
+ * in the migration; the sync layer only ever writes one). The legacy
+ * `reservation_id` column stays for reservation links.
  */
 export const calendarEventLinksTable = pgTable("calendar_event_links", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   accountId: integer("account_id").notNull().references(() => connectedAccountsTable.id, { onDelete: "cascade" }),
-  reservationId: integer("reservation_id").notNull().references(() => reservationsTable.id, { onDelete: "cascade" }),
+  itemType: text("item_type").$type<CalendarItemType>().notNull().default("reservation"),
+  reservationId: integer("reservation_id").references(() => reservationsTable.id, { onDelete: "cascade" }),
+  flightId: integer("flight_id").references(() => flightsTable.id, { onDelete: "cascade" }),
+  accommodationId: integer("accommodation_id").references(() => accommodationsTable.id, { onDelete: "cascade" }),
+  carRentalId: integer("car_rental_id").references(() => carRentalsTable.id, { onDelete: "cascade" }),
   googleCalendarId: text("google_calendar_id").notNull(),
   googleEventId: text("google_event_id").notNull(),
   lastSyncedHash: text("last_synced_hash").notNull(),
@@ -82,7 +99,13 @@ export const calendarEventLinksTable = pgTable("calendar_event_links", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("calendar_event_links_account_reservation_idx").on(t.accountId, t.reservationId),
+  uniqueIndex("calendar_event_links_account_flight_idx").on(t.accountId, t.flightId),
+  uniqueIndex("calendar_event_links_account_accommodation_idx").on(t.accountId, t.accommodationId),
+  uniqueIndex("calendar_event_links_account_car_rental_idx").on(t.accountId, t.carRentalId),
   index("calendar_event_links_reservation_idx").on(t.reservationId),
+  index("calendar_event_links_flight_idx").on(t.flightId),
+  index("calendar_event_links_accommodation_idx").on(t.accommodationId),
+  index("calendar_event_links_car_rental_idx").on(t.carRentalId),
   index("calendar_event_links_user_idx").on(t.userId),
 ]);
 
