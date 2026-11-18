@@ -287,6 +287,18 @@ const ConfirmInput = z.object({});
 async function confirm(ctx: ToolContext): Promise<AgentToolResult> {
   return withSession("intake_confirm", ctx, async (sessionId) => {
     const { tripId, view } = await materializeIntake(sessionId, ctx.userId, ctx.role);
+    // Extras pass (§7 / TC-8): a freshly materialized trip whose
+    // character matches a pack (golf, family…) gets its suggestions
+    // unprompted. Best-effort and deferred to a macrotask — the pass
+    // is a side effect of materialization, never part of this
+    // response, and it must not interleave with the request's own
+    // reads (the route reads the session snapshot after this tool
+    // returns). Idempotent, so a late or repeated run is harmless.
+    setTimeout(() => {
+      void import("./extras.js")
+        .then((m) => m.runExtrasPassBestEffort(tripId, "intake_materialization"))
+        .catch(() => undefined);
+    }, 0);
     return toolOk(
       `Trip created: draft trip ${tripId} is set up and this conversation now continues on that trip. ` +
         `Tell the traveler the trip is created and what happens next (planning continues here).`,

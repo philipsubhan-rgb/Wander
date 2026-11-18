@@ -11,6 +11,16 @@ import {
 } from "@workspace/api-zod";
 import { requireTripParticipant } from "../middlewares/auth";
 
+// Extras pass hook (§7): lazy-loaded like the calendar-sync hook in
+// reservations.ts — the pass is best-effort (a failure never fails
+// the stay add). A stay landing can unlock pack items (a home stay
+// unlocks grocery pre-stocking; any stay unlocks the crib check).
+let extrasPromise: Promise<typeof import("../lib/extras.js") | null> | null = null;
+async function extras() {
+  extrasPromise ??= import("../lib/extras.js").catch(() => null);
+  return extrasPromise;
+}
+
 const router: IRouter = Router();
 
 // Normalise nullable columns to explicit nulls for the API response shape.
@@ -41,6 +51,8 @@ router.post("/trips/:tripId/accommodations", requireTripParticipant(), async (re
   const parsed = CreateAccommodationBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [item] = await db.insert(accommodationsTable).values({ ...parsed.data, tripId: params.data.tripId }).returning();
+  const ex = await extras();
+  if (ex) await ex.runExtrasPassBestEffort(params.data.tripId, "stay_added");
   res.status(201).json(toAccommodationResponse(item));
 });
 

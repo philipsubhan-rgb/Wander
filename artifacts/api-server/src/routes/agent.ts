@@ -57,6 +57,7 @@ import { AGENT_RESEARCH_TOOLS } from "../lib/agentResearch";
 import { INTAKE_TOOLS, getIntakeToolDefinition } from "../lib/agentIntakeTools";
 import { CONTEXT_TOOLS, getContextToolDefinition } from "../lib/agentContextTools";
 import { OPTIONS_TOOLS, getOptionsToolDefinition } from "../lib/agentOptionsTools";
+import { EXTRAS_TOOLS, getExtrasToolDefinition } from "../lib/agentExtrasTools";
 import {
   assertIntakeAccess,
   createIntakeSession,
@@ -502,7 +503,7 @@ async function callModelApiStream(
 // Options tools ride along too (§5.1): pricing a leg the traveler is
 // talking about is not trip-shaped either — intake prices the trip it
 // is forming; a trip conversation prices its changes.
-const TOOL_DEFINITIONS = [...AGENT_TOOLS, ...AGENT_RESEARCH_TOOLS, ...CONTEXT_TOOLS, ...OPTIONS_TOOLS];
+const TOOL_DEFINITIONS = [...AGENT_TOOLS, ...AGENT_RESEARCH_TOOLS, ...CONTEXT_TOOLS, ...OPTIONS_TOOLS, ...EXTRAS_TOOLS];
 
 /** Why the tool loop ended without a usable final answer. */
 export type StuckReason = "duplicate_tool_call" | "iteration_exhausted" | "no_final_text";
@@ -645,7 +646,7 @@ async function runAgentLoop(
   // knows, in any conversation (§4) — and the options tools, so a leg
   // can be priced in either conversation (§5.1).
   const toolDefs =
-    scope.kind === "intake" ? [...INTAKE_TOOLS, ...CONTEXT_TOOLS, ...OPTIONS_TOOLS] : TOOL_DEFINITIONS;
+    scope.kind === "intake" ? [...INTAKE_TOOLS, ...CONTEXT_TOOLS, ...OPTIONS_TOOLS, ...EXTRAS_TOOLS] : TOOL_DEFINITIONS;
   const tools = toolDefs.map((t) => ({
     type: "function" as const,
     function: { name: t.name, description: t.description, parameters: t.parameters },
@@ -833,11 +834,13 @@ async function runAgentLoop(
           scope.kind === "intake"
             ? (getIntakeToolDefinition(name) ??
               getContextToolDefinition(name) ??
-              getOptionsToolDefinition(name))
+              getOptionsToolDefinition(name) ??
+              getExtrasToolDefinition(name))
             : (getToolDefinition(name) ??
               AGENT_RESEARCH_TOOLS.find((t) => t.name === name) ??
               getContextToolDefinition(name) ??
-              getOptionsToolDefinition(name));
+              getOptionsToolDefinition(name) ??
+              getExtrasToolDefinition(name));
 
         let toolResult: { ok: boolean; text: string; data?: unknown };
         if (!accessOk) {

@@ -11,6 +11,15 @@ import {
 } from "@workspace/api-zod";
 import { requireTripParticipant } from "../middlewares/auth";
 
+// Extras pass hook (§7): lazy-loaded like the calendar-sync hook in
+// reservations.ts — keeps this router's import graph light, and the
+// pass is best-effort (a failure never fails the flight add).
+let extrasPromise: Promise<typeof import("../lib/extras.js") | null> | null = null;
+async function extras() {
+  extrasPromise ??= import("../lib/extras.js").catch(() => null);
+  return extrasPromise;
+}
+
 const router: IRouter = Router();
 
 // Normalise nullable columns to explicit nulls for the API response shape.
@@ -43,6 +52,10 @@ router.post("/trips/:tripId/flights", requireTripParticipant(), async (req, res)
   const parsed = CreateFlightBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [flight] = await db.insert(flightsTable).values({ ...parsed.data, tripId: params.data.tripId }).returning();
+  // The golf rule (§7): extras like club shipping must surface BEFORE
+  // flights finalize — a flight landing on the trip fires the pass.
+  const ex = await extras();
+  if (ex) await ex.runExtrasPassBestEffort(params.data.tripId, "flight_added");
   res.status(201).json(toFlightResponse(flight));
 });
 
