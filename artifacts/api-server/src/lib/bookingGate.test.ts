@@ -316,6 +316,14 @@ function makeGate(overrides: {
     createOrder: vi.fn<CreateOrderFn>(
       overrides.createOrderImpl ?? (async () => ({ status: 201, order: ORDER })),
     ),
+    // Servicing methods (E-3.4) are not exercised by this suite.
+    getOrder: vi.fn(async (): Promise<never> => { throw new Error("not used in this suite"); }),
+    createOrderCancellation: vi.fn(async (): Promise<never> => { throw new Error("not used in this suite"); }),
+    confirmOrderCancellation: vi.fn(async (): Promise<never> => { throw new Error("not used in this suite"); }),
+    createOrderChangeRequest: vi.fn(async (): Promise<never> => { throw new Error("not used in this suite"); }),
+    getOrderChangeRequest: vi.fn(async (): Promise<never> => { throw new Error("not used in this suite"); }),
+    createOrderChange: vi.fn(async (): Promise<never> => { throw new Error("not used in this suite"); }),
+    confirmOrderChange: vi.fn(async (): Promise<never> => { throw new Error("not used in this suite"); }),
   };
   const gate = new BookingGate({
     ordersClient,

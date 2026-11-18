@@ -20,7 +20,7 @@
  * 200/201/202 all mean "check state, don't re-send".
  */
 
-import { fromMajorDecimal } from "@workspace/money";
+import { fromMajorDecimal, toMajorString, type Money } from "@workspace/money";
 import type {
   FlightOption,
   FlightSearchContext,
@@ -86,6 +86,8 @@ export interface DuffelSegment {
 }
 
 export interface DuffelOfferSlice {
+  /** Order slices carry an id — it is the handle a change request removes. */
+  id?: string;
   origin?: DuffelPlace;
   destination?: DuffelPlace;
   duration?: string;
@@ -405,6 +407,16 @@ export interface DuffelOrder {
   passengers?: DuffelOrderPassenger[];
   slices?: DuffelOfferSlice[];
   conditions?: DuffelOffer["conditions"];
+  /**
+   * Servicing actions the airline supports for this order via the API
+   * ("cancel", "change"). Absence means the API can't do it for this
+   * order — the change/cancel flows check this BEFORE quoting anything
+   * (Duffel's documented servicing discipline).
+   */
+  available_actions?: string[];
+  cancelled_at?: string | null;
+  /** The confirmed cancellation, once one exists. */
+  cancellation?: DuffelOrderCancellation | null;
 }
 
 /** One passenger as the order payload needs them. Values come from the
@@ -434,11 +446,168 @@ export interface CreateOrderResult {
   order: DuffelOrder | null;
 }
 
+// ─── Servicing: change & cancel (E-3.4, Duffel's documented flows) ───────────
+//
+// Cancellation is a two-step quote-then-confirm: POST
+// /air/order_cancellations creates an UNCONFIRMED cancellation quote
+// (refund amount, refund destination, expiry); POST
+// /air/order_cancellations/{id}/actions/confirm executes it. Only the
+// most recent quote for an order can be confirmed — a stale one errors
+// (order_cancellation_stale). Cancellation is only possible when the
+// order's available_actions includes "cancel".
+//
+// Changes are a four-step flow: POST /air/order_change_requests
+// (slices to remove by id + search criteria for slices to add) → GET
+// the request to read its order_change_offers (each prices the change:
+// change_total is the signed delta — positive charges more, negative
+// refunds — plus new_total and the airline penalty) → POST
+// /air/order_changes creates a PENDING change from one offer → POST
+// /air/order_changes/{id}/actions/confirm executes it, paying the
+// change total from balance when it is positive. Only possible when
+// available_actions includes "change". Creates are sent exactly once,
+// like every create in this client.
+
+/** An order cancellation — first a quote (confirmed_at null), then confirmed. */
+export interface DuffelOrderCancellation {
+  id?: string;
+  order_id?: string;
+  /** Positive amount flowing BACK to the traveler, in refund_currency. */
+  refund_amount?: string;
+  refund_currency?: string;
+  /** "original_form_of_payment" | "airline_credits" | … (provider's words). */
+  refund_to?: string;
+  /** The quote dies at this instant; a stale quote cannot be confirmed. */
+  expires_at?: string;
+  confirmed_at?: string | null;
+  created_at?: string;
+}
+
+/** Search criteria for one slice to ADD in a change request. */
+export interface DuffelChangeSliceAdd {
+  origin: string;
+  destination: string;
+  /** YYYY-MM-DD. */
+  departureDate: string;
+  cabinClass?: "economy" | "premium_economy" | "business" | "first";
+}
+
+export interface DuffelOrderChangeRequest {
+  id?: string;
+  order_id?: string;
+  slices?: {
+    add?: Array<{ origin?: string; destination?: string; departure_date?: string; cabin_class?: string }>;
+    remove?: Array<{ slice_id?: string }>;
+  };
+  /** Populated on the GET (the create response only echoes criteria). */
+  order_change_offers?: DuffelOrderChangeOffer[];
+}
+
+/** One priced way to perform the requested change. */
+export interface DuffelOrderChangeOffer {
+  id?: string;
+  order_id?: string;
+  slices?: { add?: DuffelOfferSlice[]; remove?: DuffelOfferSlice[] };
+  /** Signed delta vs the current order total (negative = refund due). */
+  change_total_amount?: string;
+  change_total_currency?: string;
+  /** The order's total after this change. */
+  new_total_amount?: string;
+  new_total_currency?: string;
+  /** The airline's change penalty, already included in change_total. */
+  penalty_total_amount?: string;
+  penalty_total_currency?: string;
+  expires_at?: string;
+  created_at?: string;
+}
+
+/** A pending (then confirmed) order change, created from one change offer. */
+export interface DuffelOrderChange {
+  id?: string;
+  order_id?: string;
+  change_total_amount?: string;
+  change_total_currency?: string;
+  new_total_amount?: string;
+  new_total_currency?: string;
+  penalty_total_amount?: string;
+  penalty_total_currency?: string;
+  /** Where a negative change total is refunded to. */
+  refund_to?: string;
+  confirmed_at?: string | null;
+  expires_at?: string;
+}
+
 export interface DuffelOrdersClient {
   /** Re-fetch an offer — the quote step AND the gate's re-verification read. */
   getOffer(offerId: string): Promise<DuffelOffer>;
   /** Create an order from a confirmed offer. Sent exactly once, ever. */
   createOrder(input: { offerId: string; passengers: DuffelPassengerInput[] }): Promise<CreateOrderResult>;
+  /** Fetch the booked order (available_actions, slice ids, totals). */
+  getOrder(orderId: string): Promise<DuffelOrder>;
+  /** Create an UNCONFIRMED cancellation quote. Terms first; nothing is cancelled by this call. */
+  createOrderCancellation(orderId: string): Promise<DuffelOrderCancellation>;
+  /** Confirm a cancellation quote — the executing step, sent exactly once per quote. */
+  confirmOrderCancellation(cancellationId: string): Promise<DuffelOrderCancellation>;
+  /** Create a change request (remove slices by id, add slices by criteria). */
+  createOrderChangeRequest(input: {
+    orderId: string;
+    removeSliceIds: string[];
+    addSlices: DuffelChangeSliceAdd[];
+  }): Promise<DuffelOrderChangeRequest>;
+  /** Read a change request WITH its priced change offers. */
+  getOrderChangeRequest(requestId: string): Promise<DuffelOrderChangeRequest>;
+  /** Create a PENDING order change from one change offer. Sent exactly once. */
+  createOrderChange(changeOfferId: string): Promise<DuffelOrderChange>;
+  /** Confirm a pending order change, paying the change total when positive. */
+  confirmOrderChange(changeId: string, payment: Money | null): Promise<DuffelOrderChange>;
+}
+
+/** The documented create-cancellation body (an unconfirmed quote). */
+export function buildCreateOrderCancellationBody(orderId: string): Record<string, unknown> {
+  return { data: { order_id: orderId } };
+}
+
+/** The documented create-change-request body. */
+export function buildCreateOrderChangeRequestBody(input: {
+  orderId: string;
+  removeSliceIds: string[];
+  addSlices: DuffelChangeSliceAdd[];
+}): Record<string, unknown> {
+  return {
+    data: {
+      order_id: input.orderId,
+      slices: {
+        remove: input.removeSliceIds.map((slice_id) => ({ slice_id })),
+        add: input.addSlices.map((s) => ({
+          origin: s.origin,
+          destination: s.destination,
+          departure_date: s.departureDate,
+          ...(s.cabinClass ? { cabin_class: s.cabinClass } : {}),
+        })),
+      },
+    },
+  };
+}
+
+/** The documented create-order-change body (creates a PENDING change). */
+export function buildCreateOrderChangeBody(changeOfferId: string): Record<string, unknown> {
+  return { data: { selected_order_change_offer: changeOfferId } };
+}
+
+/**
+ * The documented confirm-order-change body. Payment (from balance) is
+ * included only when the change total is positive — a zero/refund
+ * change has nothing to pay. [Live-verification item: whether Duffel
+ * requires a zero-amount payment object for a zero change total; the
+ * documented guide shows payment as the thing you supply "to confirm",
+ * with the amount matching change_total_amount.]
+ */
+export function buildConfirmOrderChangeBody(payment: Money | null): Record<string, unknown> {
+  if (!payment || payment.amountMinor <= 0) return { data: {} };
+  return {
+    data: {
+      payment: { type: "balance", amount: toMajorString(payment), currency: payment.currency },
+    },
+  };
 }
 
 /** The documented create-order body. */
@@ -540,6 +709,153 @@ export function createDuffelOrdersClient(opts: {
       }
       throw duffelErrorFrom(status, parsed);
     },
+    async getOrder(orderId: string): Promise<DuffelOrder> {
+      const { status, parsed } = await duffelFetch(
+        fetchFn, opts.token, baseUrl, `/air/orders/${encodeURIComponent(orderId)}`, { method: "GET" },
+      );
+      if (status < 200 || status >= 300) throw duffelErrorFrom(status, parsed);
+      const data = (parsed as { data?: DuffelOrder })?.data;
+      if (!data) throw new DuffelError("Duffel order response carried no data.", status);
+      return data;
+    },
+    async createOrderCancellation(orderId: string): Promise<DuffelOrderCancellation> {
+      // A quote, not an execution — but still a create: sent once.
+      const { status, parsed } = await duffelFetch(
+        fetchFn, opts.token, baseUrl, "/air/order_cancellations", {
+          method: "POST",
+          body: JSON.stringify(buildCreateOrderCancellationBody(orderId)),
+        },
+      );
+      if (status < 200 || status >= 300) throw duffelErrorFrom(status, parsed);
+      const data = (parsed as { data?: DuffelOrderCancellation })?.data;
+      if (!data) throw new DuffelError("Duffel cancellation response carried no data.", status);
+      return data;
+    },
+    async confirmOrderCancellation(cancellationId: string): Promise<DuffelOrderCancellation> {
+      const { status, parsed } = await duffelFetch(
+        fetchFn, opts.token, baseUrl,
+        `/air/order_cancellations/${encodeURIComponent(cancellationId)}/actions/confirm`,
+        { method: "POST", body: JSON.stringify({ data: {} }) },
+      );
+      if (status < 200 || status >= 300) throw duffelErrorFrom(status, parsed);
+      const data = (parsed as { data?: DuffelOrderCancellation })?.data;
+      if (!data) throw new DuffelError("Duffel cancellation confirmation carried no data.", status);
+      return data;
+    },
+    async createOrderChangeRequest(input: {
+      orderId: string;
+      removeSliceIds: string[];
+      addSlices: DuffelChangeSliceAdd[];
+    }): Promise<DuffelOrderChangeRequest> {
+      const { status, parsed } = await duffelFetch(
+        fetchFn, opts.token, baseUrl, "/air/order_change_requests", {
+          method: "POST",
+          body: JSON.stringify(buildCreateOrderChangeRequestBody(input)),
+        },
+      );
+      if (status < 200 || status >= 300) throw duffelErrorFrom(status, parsed);
+      const data = (parsed as { data?: DuffelOrderChangeRequest })?.data;
+      if (!data) throw new DuffelError("Duffel change-request response carried no data.", status);
+      return data;
+    },
+    async getOrderChangeRequest(requestId: string): Promise<DuffelOrderChangeRequest> {
+      const { status, parsed } = await duffelFetch(
+        fetchFn, opts.token, baseUrl,
+        `/air/order_change_requests/${encodeURIComponent(requestId)}`,
+        { method: "GET" },
+      );
+      if (status < 200 || status >= 300) throw duffelErrorFrom(status, parsed);
+      const data = (parsed as { data?: DuffelOrderChangeRequest })?.data;
+      if (!data) throw new DuffelError("Duffel change-request response carried no data.", status);
+      return data;
+    },
+    async createOrderChange(changeOfferId: string): Promise<DuffelOrderChange> {
+      // Creates a PENDING change — sent exactly once, like every create.
+      const { status, parsed } = await duffelFetch(
+        fetchFn, opts.token, baseUrl, "/air/order_changes", {
+          method: "POST",
+          body: JSON.stringify(buildCreateOrderChangeBody(changeOfferId)),
+        },
+      );
+      if (status < 200 || status >= 300) throw duffelErrorFrom(status, parsed);
+      const data = (parsed as { data?: DuffelOrderChange })?.data;
+      if (!data) throw new DuffelError("Duffel order-change response carried no data.", status);
+      return data;
+    },
+    async confirmOrderChange(changeId: string, payment: Money | null): Promise<DuffelOrderChange> {
+      const { status, parsed } = await duffelFetch(
+        fetchFn, opts.token, baseUrl,
+        `/air/order_changes/${encodeURIComponent(changeId)}/actions/confirm`,
+        { method: "POST", body: JSON.stringify(buildConfirmOrderChangeBody(payment)) },
+      );
+      if (status < 200 || status >= 300) throw duffelErrorFrom(status, parsed);
+      const data = (parsed as { data?: DuffelOrderChange })?.data;
+      if (!data) throw new DuffelError("Duffel order-change confirmation carried no data.", status);
+      return data;
+    },
+  };
+}
+
+/**
+ * Map one order-change offer to the gate's option shape: the option
+ * describes the NEW slices (what the traveler ends up flying), and its
+ * money is the CHANGE TOTAL — the signed delta that confirming this
+ * change will actually charge (positive) or refund (negative). The
+ * resulting order total rides the attempt snapshot's change context,
+ * not the option money. Returns null when the offer cannot be stated
+ * exactly (no id, unparseable delta, no mappable new slices).
+ */
+export function mapChangeOfferToOption(
+  offer: DuffelOrderChangeOffer,
+  pricedAt: string,
+): FlightOption | null {
+  if (!offer.id || !offer.change_total_amount || !offer.change_total_currency) return null;
+  let delta: Money;
+  try {
+    delta = fromMajorDecimal(offer.change_total_amount, offer.change_total_currency);
+  } catch {
+    return null;
+  }
+  const addSlices = offer.slices?.add ?? [];
+  const slices = addSlices.map(mapSlice).filter((s): s is FlightSliceSummary => s !== null);
+  if (slices.length === 0) return null;
+  const firstSegment = addSlices[0]?.segments?.[0];
+  const firstPassenger = firstSegment?.passengers?.[0];
+  const fareClass = normalizeFareClass(firstPassenger?.cabin_class_marketing_name);
+  const carrier = firstSegment?.marketing_carrier?.name ?? "Unknown carrier";
+  const carrierCode = firstSegment?.marketing_carrier?.iata_code ?? null;
+  const firstFlight = slices[0].flightNumbers[0];
+  const label = [firstFlight, fareClass].filter(Boolean).join(" ") ||
+    `${carrier} ${slices[0].origin}→${slices[0].destination}`;
+  return {
+    id: offer.id,
+    kind: "flight",
+    adapter: "duffel",
+    supplier: carrier,
+    summary: {
+      carrier,
+      carrierCode,
+      slices,
+      totalDurationMinutes: slices.every((s) => s.durationMinutes !== null)
+        ? slices.reduce((acc, s) => acc + (s.durationMinutes ?? 0), 0)
+        : null,
+      totalStops: slices.reduce((acc, s) => acc + s.stops, 0),
+      fareClass,
+      cabinClass: firstPassenger?.cabin_class ?? null,
+      // A change offer is itself the change mechanism; whether the NEW
+      // fare can be changed/refunded again isn't stated on the offer.
+      changeable: undefined,
+      refundable: undefined,
+      connectionAirports: slices.flatMap((s) => s.layovers.map((l) => l.airport)),
+      label,
+    },
+    money: delta,
+    homeEquivalent: null,
+    pricedAt,
+    priceNature: "firm",
+    fulfillment: "api_rail",
+    ruleViolations: [],
+    partner: null,
   };
 }
 
