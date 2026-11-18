@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { startBriefingScheduler } from "./lib/briefingScheduler";
+import { startOutreachScheduler } from "./lib/outreachScheduler";
 import { pool } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
@@ -42,6 +43,10 @@ app.listen(port, (err) => {
   // Start the 15-minute daily-briefing scheduler (no immediate tick on boot).
   startBriefingScheduler();
   logger.info("Daily briefing scheduler started");
+
+  // Start the hourly outreach chase scheduler (no immediate tick on boot).
+  startOutreachScheduler();
+  logger.info("Outreach chase scheduler started");
 
   // Do not block the HTTP startup probe on a database connection. Production
   // databases can take time to become reachable while an autoscale instance is

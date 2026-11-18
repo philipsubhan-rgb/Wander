@@ -496,7 +496,10 @@ export async function setChasePaused(
   await updateEntry(entryId, {
     chaseState: next as unknown as Record<string, unknown>,
   });
-  return projectRosterEntryForOrganizer({ ...entry, chaseState: next });
+  return projectRosterEntryForOrganizer({
+    ...entry,
+    chaseState: next as unknown as Record<string, unknown>,
+  });
 }
 
 // ---------------------------------------------------------------------------
