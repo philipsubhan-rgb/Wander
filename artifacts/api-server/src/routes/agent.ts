@@ -56,6 +56,7 @@ import {
 import { AGENT_RESEARCH_TOOLS } from "../lib/agentResearch";
 import { INTAKE_TOOLS, getIntakeToolDefinition } from "../lib/agentIntakeTools";
 import { CONTEXT_TOOLS, getContextToolDefinition } from "../lib/agentContextTools";
+import { OPTIONS_TOOLS, getOptionsToolDefinition } from "../lib/agentOptionsTools";
 import {
   assertIntakeAccess,
   createIntakeSession,
@@ -498,7 +499,10 @@ async function callModelApiStream(
 
 // Context tools ride along in BOTH scopes (§4): what Wander knows about
 // the traveler — and what the traveler teaches it — is not trip-shaped.
-const TOOL_DEFINITIONS = [...AGENT_TOOLS, ...AGENT_RESEARCH_TOOLS, ...CONTEXT_TOOLS];
+// Options tools ride along too (§5.1): pricing a leg the traveler is
+// talking about is not trip-shaped either — intake prices the trip it
+// is forming; a trip conversation prices its changes.
+const TOOL_DEFINITIONS = [...AGENT_TOOLS, ...AGENT_RESEARCH_TOOLS, ...CONTEXT_TOOLS, ...OPTIONS_TOOLS];
 
 /** Why the tool loop ended without a usable final answer. */
 export type StuckReason = "duplicate_tool_call" | "iteration_exhausted" | "no_final_text";
@@ -618,6 +622,7 @@ const TOOL_STATUS_TEXT: Record<string, string> = {
   intake_skip: "Moving on…",
   intake_get_review: "Putting together your summary…",
   intake_confirm: "Creating your trip…",
+  options_search_flights: "Searching live flight prices…",
 };
 
 function statusForTools(toolCalls: ToolCall[]): string {
@@ -637,9 +642,10 @@ async function runAgentLoop(
   // tools (no trip exists to read or write); trip conversations get the
   // trip + research tools as before. Both scopes also get the context
   // tools — the traveler can teach Wander, and Wander can read what it
-  // knows, in any conversation (§4).
+  // knows, in any conversation (§4) — and the options tools, so a leg
+  // can be priced in either conversation (§5.1).
   const toolDefs =
-    scope.kind === "intake" ? [...INTAKE_TOOLS, ...CONTEXT_TOOLS] : TOOL_DEFINITIONS;
+    scope.kind === "intake" ? [...INTAKE_TOOLS, ...CONTEXT_TOOLS, ...OPTIONS_TOOLS] : TOOL_DEFINITIONS;
   const tools = toolDefs.map((t) => ({
     type: "function" as const,
     function: { name: t.name, description: t.description, parameters: t.parameters },
@@ -825,10 +831,13 @@ async function runAgentLoop(
 
         const def =
           scope.kind === "intake"
-            ? (getIntakeToolDefinition(name) ?? getContextToolDefinition(name))
+            ? (getIntakeToolDefinition(name) ??
+              getContextToolDefinition(name) ??
+              getOptionsToolDefinition(name))
             : (getToolDefinition(name) ??
               AGENT_RESEARCH_TOOLS.find((t) => t.name === name) ??
-              getContextToolDefinition(name));
+              getContextToolDefinition(name) ??
+              getOptionsToolDefinition(name));
 
         let toolResult: { ok: boolean; text: string; data?: unknown };
         if (!accessOk) {

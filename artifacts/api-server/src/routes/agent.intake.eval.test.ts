@@ -338,10 +338,15 @@ describe("intake rung 1 — conversational planner intake", () => {
     expect(snapshot.content).toContain("Intake state: DESTINATION");
     expect(snapshot.content).toContain('"Ok, where are we going?"');
     // Intake scope offers the intake tools plus the context tools (the
-    // traveler can teach Wander mid-intake, §4) — never trip tools.
+    // traveler can teach Wander mid-intake, §4) and the options tools
+    // (a leg can be priced mid-intake, §5.1) — never trip tools.
     const toolNames = modelRequests[0].tools.map((t) => t.function.name);
     expect(toolNames.length).toBeGreaterThan(0);
-    expect(toolNames.every((n) => n.startsWith("intake_") || n.startsWith("context_"))).toBe(true);
+    expect(
+      toolNames.every(
+        (n) => n.startsWith("intake_") || n.startsWith("context_") || n.startsWith("options_"),
+      ),
+    ).toBe(true);
   });
 
   it("2. destination stated in the intent is recorded and NOT re-asked", async () => {
