@@ -184,6 +184,83 @@ describe("detectChanges (materiality)", () => {
     expect(afterDeparture.map((c) => c.kind)).not.toContain("schedule_change");
   });
 
+  it("accumulates sub-threshold schedule steps against the booked baseline", () => {
+    // Step 1: +10m vs booked — below the 15m threshold, stays quiet.
+    const step1 = snap({
+      scheduledOut: "2026-09-23T21:10:00Z",
+      scheduledIn: "2026-09-24T05:20:00Z",
+      estimatedIn: "2026-09-24T05:20:00Z",
+    });
+    expect(
+      detectChanges({ prev: snap(), next: step1, flight: FLIGHT, thresholds: THRESHOLDS, now: NOW }),
+    ).toHaveLength(0);
+
+    // Step 2: another +10m. Step-over-step that is again only 10m — but
+    // the cumulative shift vs booked is 20m, and that is what fires.
+    // (Regression: measuring vs the previous snapshot let this creep
+    // past the threshold forever.)
+    const step2 = snap({
+      scheduledOut: "2026-09-23T21:20:00Z",
+      scheduledIn: "2026-09-24T05:30:00Z",
+      estimatedIn: "2026-09-24T05:30:00Z",
+    });
+    const changes = detectChanges({
+      prev: step1,
+      next: step2,
+      flight: FLIGHT,
+      thresholds: THRESHOLDS,
+      now: NOW,
+    });
+    expect(changes.map((c) => c.kind)).toEqual(["schedule_change"]);
+    expect(changes[0].situation.metric).toBe(20);
+    expect(changes[0].summary).toContain("20m later");
+
+    // Step 3: +15m more — cumulative 35m vs booked, and the worsening
+    // gate sees real growth over the 20m situation.
+    const step3 = snap({
+      scheduledOut: "2026-09-23T21:35:00Z",
+      scheduledIn: "2026-09-24T05:45:00Z",
+      estimatedIn: "2026-09-24T05:45:00Z",
+    });
+    const changes3 = detectChanges({
+      prev: step2,
+      next: step3,
+      flight: FLIGHT,
+      thresholds: THRESHOLDS,
+      now: NOW,
+    });
+    expect(changes3.map((c) => c.kind)).toEqual(["schedule_change"]);
+    expect(changes3[0].situation.metric).toBe(35);
+    expect(isWorseThan("schedule_change", changes[0].situation, changes3[0].situation)).toBe(true);
+
+    // Re-detecting the SAME cumulative situation is not worse — the
+    // gate suppresses it, so a repeat delivery cannot double-fire.
+    const again = detectChanges({
+      prev: step1,
+      next: step2,
+      flight: FLIGHT,
+      thresholds: THRESHOLDS,
+      now: NOW,
+    });
+    expect(isWorseThan("schedule_change", changes[0].situation, again[0].situation)).toBe(false);
+  });
+
+  it("single-step: a 30m move from a real previous snapshot fires at metric 30, as before", () => {
+    const changes = detectChanges({
+      prev: snap({ gateOrigin: "C121" }), // a real prev whose schedule still equals booked
+      next: snap({
+        scheduledOut: "2026-09-23T21:30:00Z",
+        scheduledIn: "2026-09-24T05:40:00Z",
+        estimatedIn: "2026-09-24T05:40:00Z",
+      }),
+      flight: FLIGHT,
+      thresholds: THRESHOLDS,
+      now: NOW,
+    });
+    expect(changes.map((c) => c.kind)).toEqual(["schedule_change"]);
+    expect(changes[0].situation.metric).toBe(30);
+  });
+
   it("flags a gate change inside 24h of departure, not days out, and not a first assignment", () => {
     const dayOf = detectChanges({
       prev: snap(),

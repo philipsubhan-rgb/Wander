@@ -395,6 +395,55 @@ describe("ingestFlightStatus", () => {
     expect(advisoryInserts()).toHaveLength(0);
   });
 
+  it("fires once when stepped schedule moves cross the threshold cumulatively, and never again on repeat delivery", async () => {
+    // The watch's last snapshot is step 1: schedule already +10m vs
+    // booked (quietly absorbed). Step 2 moves it another +10m — the
+    // cumulative shift vs booked is 20m and must fire, even though the
+    // step itself is sub-threshold.
+    const step1 = baselineSnap({
+      scheduledOut: "2026-09-23T21:10:00Z",
+      scheduledIn: "2026-09-24T05:20:00Z",
+      estimatedIn: "2026-09-24T05:20:00Z",
+    });
+    const step2 = baselineSnap({
+      scheduledOut: "2026-09-23T21:20:00Z",
+      scheduledIn: "2026-09-24T05:30:00Z",
+      estimatedIn: "2026-09-24T05:30:00Z",
+      observedAt: "2026-09-20T13:00:00Z",
+    });
+    queueSelects("flights", [[flightRow()], [flightRow()], [flightRow()]]); // ingest load + timeline + walk load
+    queueSelects("trips", [[tripRow()]]);
+    queueSelects("trip_participants", [[]]);
+    queueSelects("advisories", [[]]); // no prior advisory for the kind
+    queueSelects("accommodations", [[]]);
+    queueSelects("activities", [[]]);
+    queueSelects("itinerary_days", [[]]);
+    queueSelects("car_rentals", [[]]);
+    queueSelects("reservations", [[]]);
+    store.insertReturns["advisories"] = [
+      advisoryRow({
+        kind: "schedule_change",
+        situation: { signature: "schedule-shift:20/20", metric: 20 },
+      }),
+    ];
+    const watch = watchRow({ lastStatusSnapshot: step1 });
+    const fired = await ingestFlightStatus(watch, step2);
+    expect(fired.outcome).toBe("advisory");
+    const inserts = advisoryInserts();
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].kind).toBe("schedule_change");
+    expect((inserts[0].situation as { metric: number }).metric).toBe(20);
+
+    // The same step-2 snapshot delivered again (the watch now holds it
+    // as its last snapshot): a duplicate — no second advisory, no email.
+    store.ops.length = 0;
+    const watchAfter = watchRow({ lastStatusSnapshot: step2 });
+    const repeated = await ingestFlightStatus(watchAfter, { ...step2, observedAt: "2026-09-20T14:00:00Z" });
+    expect(repeated.outcome).toBe("duplicate");
+    expect(advisoryInserts()).toHaveLength(0);
+    expect(mailer.calls).toHaveLength(0);
+  });
+
   it("suppresses a smaller delay after dismissal, and re-fires when the delay worsens", async () => {
     // Dismissed advisory already fired at 45m; a 40m update must not re-fire.
     queueSelects("flights", [[flightRow()]]);

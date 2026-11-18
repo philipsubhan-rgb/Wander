@@ -199,8 +199,9 @@ export interface WatchFlightContext {
   route: string;
   originTimezone: string | null;
   destinationTimezone: string | null;
-  /** The booked (legacy row) scheduled instants — the baseline a
-   * schedule change is measured against before any snapshot exists. */
+  /** The booked (legacy row) scheduled instants — THE baseline every
+   * schedule change is measured against (cumulative shift vs booked),
+   * for the first snapshot and every later one alike. */
   bookedDepartureMs: number;
   bookedArrivalMs: number;
 }
@@ -283,13 +284,20 @@ export function detectChanges(input: {
     });
   }
 
-  // Schedule change — the SCHEDULED times themselves moved vs the
-  // previous snapshot (or, for the first snapshot, vs what was booked).
+  // Schedule change — the SCHEDULED times themselves moved vs what was
+  // BOOKED (the legacy row's scheduled instants), never vs the previous
+  // snapshot. Measuring against the booked baseline — the same anchor
+  // arrival-delay detection uses — means a large shift delivered in
+  // sub-threshold steps still fires once the CUMULATIVE shift crosses
+  // the threshold; step-over-step measurement would let a 10m + 10m
+  // creep slip past a 15m threshold forever. The snapshot still
+  // advances on every delivery (dedupe and the worsening gate keep a
+  // repeat delivery of the same cumulative shift from re-firing).
   // Pre-departure only: once the flight has left, a moved schedule is
   // history, not news.
   if (!next.actualOut) {
-    const baseOut = prev ? ms(prev.scheduledOut) : flight.bookedDepartureMs;
-    const baseIn = prev ? ms(prev.scheduledIn) : flight.bookedArrivalMs;
+    const baseOut = flight.bookedDepartureMs;
+    const baseIn = flight.bookedArrivalMs;
     const outShift = diffMinutes(ms(next.scheduledOut), baseOut);
     const inShift = diffMinutes(ms(next.scheduledIn), baseIn);
     const metric = Math.max(Math.abs(outShift ?? 0), Math.abs(inShift ?? 0));
