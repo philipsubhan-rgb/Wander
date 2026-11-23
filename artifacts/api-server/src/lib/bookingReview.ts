@@ -236,31 +236,40 @@ export async function buildBookingReviewProjection(
   const names = await resolveNames(coverage, [attempt.confirmedByUserId]);
 
   // Home equivalent: only the snapshot-backed figure the attempt
-  // already carries, with the snapshot itself as the FX stamp.
+  // already carries, with the snapshot itself as the FX stamp. The
+  // equivalent is shown ONLY when its snapshot row resolves — an
+  // unstamped figure is never projected. Suppressing on a null id too
+  // is safe because no legitimate no-conversion path exists:
+  // attachHomeEquivalents (lib/options.ts) never attaches an
+  // equivalent to a same-currency option (the price already IS home),
+  // and HomeEquivalent.fxSnapshotId is a required field the gate
+  // copies atomically with the amount at both write sites (present +
+  // re-verify). A stored equivalent with a null or dangling snapshot
+  // id is therefore an inconsistent state, not an honest figure.
   let homeEquivalent: BookingReviewProjection["homeEquivalent"] = null;
-  if (attempt.homeEquivalentMinor !== null && attempt.homeCurrency) {
-    let fx: BookingReviewFxStamp | null = null;
-    if (attempt.fxSnapshotId !== null) {
-      const [snapshot] = await db
-        .select()
-        .from(fxRateSnapshotsTable)
-        .where(eq(fxRateSnapshotsTable.id, attempt.fxSnapshotId));
-      if (snapshot) {
-        fx = {
+  if (
+    attempt.homeEquivalentMinor !== null &&
+    attempt.homeCurrency &&
+    attempt.fxSnapshotId !== null
+  ) {
+    const [snapshot] = await db
+      .select()
+      .from(fxRateSnapshotsTable)
+      .where(eq(fxRateSnapshotsTable.id, attempt.fxSnapshotId));
+    if (snapshot) {
+      homeEquivalent = {
+        amountMinor: attempt.homeEquivalentMinor,
+        currency: attempt.homeCurrency,
+        fx: {
           snapshotId: snapshot.id,
           baseCurrency: snapshot.baseCurrency,
           quoteCurrency: snapshot.quoteCurrency,
           rate: String(snapshot.rate),
           asOf: snapshot.asOf.toISOString(),
           source: snapshot.source,
-        };
-      }
+        },
+      };
     }
-    homeEquivalent = {
-      amountMinor: attempt.homeEquivalentMinor,
-      currency: attempt.homeCurrency,
-      fx,
-    };
   }
 
   const terms: string[] = [];

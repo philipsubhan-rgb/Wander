@@ -350,6 +350,32 @@ describe("GET /trips/:tripId/booking-attempts/:attemptId/review", () => {
     expect(body.review.homeEquivalent).toBeNull();
   });
 
+  it("suppresses the equivalent when its FX snapshot row is missing (dangling fxSnapshotId)", async () => {
+    enqueue([participantRow]);
+    enqueueAttemptView(attemptRow(), [coverageSelf()]); // fxSnapshotId: 5, equivalent present
+    enqueue([{ id: 42, name: "Phil" }]); // users (names)
+    enqueue([]); // fx_rate_snapshots: the referenced row is gone
+
+    const res = await fetch(`${baseUrl}/trips/7/booking-attempts/42/review`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { review: BookingReviewProjection };
+    // An unstamped figure is never projected — the equivalent goes away whole.
+    expect(body.review.homeEquivalent).toBeNull();
+    // The charge-currency total is unaffected.
+    expect(body.review.total).toEqual({ amountMinor: 61200, currency: "USD" });
+  });
+
+  it("suppresses an equivalent stored with NO snapshot id — no legitimate no-conversion path exists", async () => {
+    enqueue([participantRow]);
+    enqueueAttemptView(attemptRow({ fxSnapshotId: null }), [coverageSelf()]);
+    enqueueProjectionReads(false); // names only — no FX read is even attempted
+
+    const res = await fetch(`${baseUrl}/trips/7/booking-attempts/42/review`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { review: BookingReviewProjection };
+    expect(body.review.homeEquivalent).toBeNull();
+  });
+
   it("refuses a non-participant with the trip routes' 403 shape", async () => {
     currentSession = { userId: 99, role: "traveler" };
     enqueue([]); // requireTripParticipant: no participant row
