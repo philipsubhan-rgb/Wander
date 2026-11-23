@@ -17,7 +17,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { toast } from 'sonner';
-import AgentPicker from '@/components/AgentPicker';
 import { Users, Trash2, Shield, TriangleAlert, Search, UserCheck, AlertCircle, Crown, Copy, Check, KeyRound, Camera, RefreshCw, ImageOff, Newspaper } from 'lucide-react';
 
 const tripSchema = z.object({
@@ -903,11 +902,26 @@ export function TripSettings({ trip }: { trip: any }) {
           </Form>
         </div>
 
-        {/* AI travel agent selection (per trip) */}
+        {/* Marco is this trip's travel agent (Decision 7 — the legacy
+            agent picker is retired; there is nothing to switch). */}
         <div className="space-y-3">
           <h3 className="font-semibold text-base">AI Travel Agent</h3>
           <div className="bg-card border rounded-xl p-6 shadow-sm">
-            <AgentPicker tripId={trip.id} />
+            <div className="flex items-start gap-3">
+              <img
+                src="/marco-icon.webp"
+                alt=""
+                className="h-10 w-10 shrink-0 rounded-full object-cover"
+              />
+              <div>
+                <p className="text-sm font-medium">Marco</p>
+                <p className="text-xs text-muted-foreground">
+                  Marco is this trip's travel agent — planning, changes, and
+                  questions all happen with him, right here in the trip.
+                  There's no other agent to switch to.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
