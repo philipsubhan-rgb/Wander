@@ -38,6 +38,21 @@ export interface FlightPricingSummary {
   hasPricing: boolean;
 }
 
+/** Display fraction digits for a currency (JPY 0, USD 2, BHD 3…). */
+function currencyFractionDigits(currency?: string | null): number {
+  if (!currency) return 2;
+  try {
+    return (
+      new Intl.NumberFormat("en", {
+        style: "currency",
+        currency,
+      }).resolvedOptions().maximumFractionDigits ?? 2
+    );
+  } catch {
+    return 2;
+  }
+}
+
 function parseAmount(amount: string | number | null | undefined): number | null {
   if (amount === null || amount === undefined || amount === "") return null;
   const n = typeof amount === "number" ? amount : Number(amount);
@@ -51,7 +66,16 @@ export function summarizeFlightPricing(flight: FlightPricingInput): FlightPricin
   let perPerson: string | null = null;
   const rawTotal = parseAmount(flight.totalPrice);
   if (rawTotal !== null && pax !== null && pax > 1) {
-    perPerson = formatMoney(rawTotal / pax, flight.currency);
+    const split = rawTotal / pax;
+    perPerson = formatMoney(split, flight.currency);
+    // A split that doesn't multiply back to the exact total at the
+    // currency's display precision is a derived convenience figure —
+    // mark it approximate so it never reads as exact (QA nit, Nov 22).
+    const digits = currencyFractionDigits(flight.currency);
+    const rounded = Number(split.toFixed(digits));
+    if (Math.abs(rounded * pax - rawTotal) > 1e-9) {
+      perPerson = `≈ ${perPerson}`;
+    }
   }
 
   const terms: string[] = [];

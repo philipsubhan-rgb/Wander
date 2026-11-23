@@ -24,6 +24,17 @@ describe("summarizeFlightPricing", () => {
     expect(s.hasPricing).toBe(true);
   });
 
+  it("marks a non-divisible per-person split as approximate", () => {
+    const s = summarizeFlightPricing({ totalPrice: "100.00", currency: "USD", passengerCount: 3 });
+    expect(s.total).toBe("$100.00");
+    expect(s.perPerson).toBe("≈ $33.33");
+  });
+
+  it("marks a zero-decimal split approximate when it cannot be exact", () => {
+    const s = summarizeFlightPricing({ totalPrice: "10001", currency: "JPY", passengerCount: 3 });
+    expect(s.perPerson).toBe("≈ ¥3,334");
+  });
+
   it("uses the flight's currency", () => {
     const s = summarizeFlightPricing({ totalPrice: "450.00", currency: "EUR" });
     expect(s.total).toBe("€450.00");
