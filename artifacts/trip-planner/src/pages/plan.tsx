@@ -3,11 +3,18 @@
  *
  * No blank form: the page creates a planner intake session
  * (POST /api/agent/intake-sessions) and opens Marco in intake scope.
- * The traveler says where they want to go; Marco asks the rest, one
- * question at a time. When intake confirms and materializes the draft,
- * the session view reports a draftTripId — the page then swaps the bar
- * to trip scope (the conversation was re-keyed to the trip server-side)
- * so planning continues seamlessly on the real trip.
+ * Marco speaks first (design Decision 2): the session view's nextAsk
+ * question — for a fresh session, "Ok, where are we going?" — renders
+ * as his opening message before the traveler types anything.
+ *
+ * Resume: /plan?session=<id> reopens an existing session (the
+ * dashboard's "Continue planning" cards link here) — the session is
+ * loaded, never recreated, and its conversation history fills in.
+ *
+ * When intake confirms and materializes the draft, the session view
+ * reports a draftTripId — the page then swaps the bar to trip scope
+ * (the conversation was re-keyed to the trip server-side) so planning
+ * continues seamlessly on the real trip.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -21,13 +28,25 @@ interface IntakeSessionView {
   id: number;
   state: string;
   draftTripId: number | null;
+  nextAsk: { key: string; slot: string; question: string } | null;
+}
+
+/** The ?session=<id> resume target, if the URL carries a valid one. */
+function resumeSessionIdFromUrl(): number | null {
+  const raw = new URLSearchParams(window.location.search).get("session");
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 export default function PlanTripPage() {
   const [session, setSession] = useState<IntakeSessionView | null>(null);
   const [createFailed, setCreateFailed] = useState(false);
+  const [resumeFailed, setResumeFailed] = useState(false);
   const [materializedTripId, setMaterializedTripId] = useState<number | null>(null);
   const creatingRef = useRef(false);
+  const loadingRef = useRef(false);
+  const [resumeId] = useState<number | null>(() => resumeSessionIdFromUrl());
 
   const createSession = useCallback(async () => {
     if (creatingRef.current) return;
@@ -44,7 +63,32 @@ export default function PlanTripPage() {
     }
   }, []);
 
+  const loadSession = useCallback(async (id: number) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    try {
+      const view = await apiFetch<IntakeSessionView>(`/api/agent/intake-sessions/${id}`);
+      setSession(view);
+      if (view.draftTripId) setMaterializedTripId(view.draftTripId);
+    } catch {
+      setResumeFailed(true);
+    } finally {
+      loadingRef.current = false;
+    }
+  }, []);
+
   useEffect(() => {
+    if (resumeId != null) {
+      void loadSession(resumeId);
+    } else {
+      void createSession();
+    }
+  }, [resumeId, loadSession, createSession]);
+
+  const startFreshAfterFailedResume = useCallback(() => {
+    setResumeFailed(false);
+    // Drop the dead ?session= so a reload starts clean too.
+    window.history.replaceState(null, "", "/plan");
     void createSession();
   }, [createSession]);
 
@@ -54,6 +98,7 @@ export default function PlanTripPage() {
     if (!session || materializedTripId) return;
     try {
       const view = await apiFetch<IntakeSessionView>(`/api/agent/intake-sessions/${session.id}`);
+      setSession(view);
       if (view.draftTripId) setMaterializedTripId(view.draftTripId);
     } catch {
       // A failed refresh just means we check again after the next turn.
@@ -67,8 +112,9 @@ export default function PlanTripPage() {
           <Sparkles className="h-7 w-7 text-primary" /> Plan a trip
         </h1>
         <p className="text-lg text-muted-foreground">
-          No forms, no blank itinerary. Tell Marco where you want to go — he'll ask
-          who's coming, when, and what kind of trip, and build it as you talk.
+          No forms, no blank itinerary — Marco runs this conversation. He'll ask
+          where you're headed, who's coming, and when, then build the trip as
+          you talk.
         </p>
       </div>
 
@@ -89,6 +135,19 @@ export default function PlanTripPage() {
             </Button>
           </div>
           <MarcoBar key={`trip-${materializedTripId}`} tripId={materializedTripId} defaultOpen />
+        </div>
+      ) : resumeFailed ? (
+        <div className="space-y-3 rounded-xl border bg-card p-6 text-center">
+          <p className="flex items-center justify-center gap-2 font-medium">
+            <AlertTriangle className="h-5 w-5 text-amber-500" /> That planning session couldn't be reopened
+          </p>
+          <p className="text-sm text-muted-foreground">
+            It may already have become a trip, or it belongs to a different
+            account. Start a fresh plan and Marco will take it from there.
+          </p>
+          <Button className="min-h-[44px]" onClick={startFreshAfterFailedResume}>
+            Start a new plan
+          </Button>
         </div>
       ) : createFailed ? (
         <div className="space-y-3 rounded-xl border bg-card p-6 text-center">
@@ -112,6 +171,7 @@ export default function PlanTripPage() {
           intakeSessionId={session.id}
           defaultOpen
           onTurnComplete={refreshSession}
+          openingMessage={session.nextAsk?.question ?? null}
         />
       )}
     </div>
