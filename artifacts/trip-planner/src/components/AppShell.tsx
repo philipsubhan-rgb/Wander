@@ -140,7 +140,7 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <div className="min-h-screen bg-background flex flex-col md:flex-row">
       {/* Mobile Header */}
-      <div className="md:hidden flex items-center justify-between p-4 border-b bg-card">
+      <div className="md:hidden flex items-center justify-between p-4 pt-safe border-b bg-card">
         <div className="flex items-center gap-2 text-primary">
           <PlaneTakeoff className="h-6 w-6" />
           <span className="font-serif font-bold text-lg">Wander</span>
@@ -205,21 +205,21 @@ export function AppShell({ children }: AppShellProps) {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 w-full overflow-y-auto bg-background/50">
+      <main className="flex-1 w-full overflow-y-auto bg-background/50 pb-20 md:pb-0">
         {children}
       </main>
       
       {/* Mobile Bottom Nav */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 border-t bg-card flex items-center justify-around p-2 pb-safe z-50">
+      <div className="md:hidden fixed bottom-0 left-0 right-0 border-t bg-card/95 backdrop-blur flex items-stretch justify-around px-2 pt-1 pb-safe z-50">
         {navItems.map((item) => {
           const isActive = location === item.href || (location.startsWith(item.href + '/') && item.href !== '/');
           return (
             <Link key={item.name} href={item.href} className={cn(
-              "flex flex-col items-center gap-1 p-2 min-w-[64px]",
+              "flex-1 flex flex-col items-center justify-center gap-1 py-2 min-h-[60px] text-[11px] font-medium",
               isActive ? "text-primary" : "text-muted-foreground"
             )}>
               <item.icon className="h-5 w-5" />
-              <span className="text-[10px] font-medium">{item.name}</span>
+              <span className="leading-none">{item.name}</span>
             </Link>
           );
         })}

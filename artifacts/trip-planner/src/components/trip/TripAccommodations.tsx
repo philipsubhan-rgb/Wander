@@ -252,14 +252,14 @@ function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tr
                 )}
               </DialogContent>
             </Dialog>
-            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              <Button variant="secondary" size="icon" onClick={() => setCardDialog('edit')} className="h-8 w-8 bg-white/90 hover:bg-white text-foreground shadow">
+            <div className="absolute top-2 right-2 flex gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+              <Button variant="secondary" size="icon" onClick={() => setCardDialog('edit')} className="h-11 w-11 md:h-8 md:w-8 bg-white/90 hover:bg-white text-foreground shadow">
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
-              <Button variant="secondary" size="icon" onClick={() => setCardDialog('image')} className="h-8 w-8 bg-white/90 hover:bg-white text-foreground shadow" title="Change image">
+              <Button variant="secondary" size="icon" onClick={() => setCardDialog('image')} className="h-11 w-11 md:h-8 md:w-8 bg-white/90 hover:bg-white text-foreground shadow" title="Change image">
                 <Camera className="h-3.5 w-3.5" />
               </Button>
-              <Button variant="secondary" size="icon" onClick={handleDelete} className="h-8 w-8 bg-white/90 hover:bg-white text-destructive hover:text-destructive shadow">
+              <Button variant="secondary" size="icon" onClick={handleDelete} className="h-11 w-11 md:h-8 md:w-8 bg-white/90 hover:bg-white text-destructive hover:text-destructive shadow">
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>

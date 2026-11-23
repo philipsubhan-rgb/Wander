@@ -175,6 +175,24 @@
   }
 }
 
+/* Hide scrollbars while keeping scrollability (tab rails, carousels). */
+@utility scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* iPhone home-indicator / notch safe areas. */
+@utility pb-safe {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+@utility pt-safe {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+
 /* The guide is designed as a calm editorial document on screen and on paper. */
 .wander-guide-marker {
   background: transparent;
