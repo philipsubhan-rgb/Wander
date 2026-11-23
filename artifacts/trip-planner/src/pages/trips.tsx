@@ -20,6 +20,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Input } from '@/components/ui/input';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import ContinuePlanning from '@/components/ContinuePlanning';
 
 const tripSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -59,40 +60,57 @@ export default function TripsDashboard() {
 
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-10">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl md:text-4xl font-serif font-bold text-foreground">Your Journeys</h1>
-          <p className="text-muted-foreground mt-2 text-lg">Where to next?</p>
+      {/* Marco-first hero (Decision 1): the planner is the front door.
+          The trips below are what he has built with you — storage,
+          not the headline. The blank form survives only as the demoted
+          "Create manually" path. */}
+      <div className="rounded-2xl border bg-card p-6 md:p-8 shadow-sm space-y-4">
+        <div className="flex items-start gap-4">
+          <img
+            src="/marco-icon.webp"
+            alt=""
+            className="h-14 w-14 shrink-0 rounded-full object-cover"
+          />
+          <div className="space-y-1">
+            <h1 className="text-3xl md:text-4xl font-serif font-bold text-foreground">Where to next?</h1>
+            <p className="text-muted-foreground text-lg">
+              Tell Marco where you're dreaming of — he'll ask the right
+              questions and build the trip with you.
+            </p>
+          </div>
         </div>
 
         {isAuthenticated && (
-          <div className="flex flex-wrap items-center gap-3">
-          <Button asChild size="lg" className="rounded-full shadow-sm hover-elevate">
-            <Link href="/plan">
-              <Sparkles className="h-5 w-5 mr-2" />
-              Plan a trip with Marco
-            </Link>
-          </Button>
-          <Dialog open={isNewTripOpen} onOpenChange={setIsNewTripOpen}>
-            <DialogTrigger asChild>
-              <Button size="lg" className="rounded-full shadow-sm hover-elevate">
-                <Plus className="h-5 w-5 mr-2" />
-                New Trip
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Plan a New Trip</DialogTitle>
-                <DialogDescription>
-                  Enter the basic details to start planning. You can add more info later.
-                </DialogDescription>
-              </DialogHeader>
-              <NewTripForm onSuccess={() => setIsNewTripOpen(false)} />
-            </DialogContent>
-          </Dialog>
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <Button asChild size="lg" className="rounded-full shadow-sm hover-elevate">
+              <Link href="/plan">
+                <Sparkles className="h-5 w-5 mr-2" />
+                Plan a trip with Marco
+              </Link>
+            </Button>
+            <Dialog open={isNewTripOpen} onOpenChange={setIsNewTripOpen}>
+              <DialogTrigger asChild>
+                <Button variant="ghost" className="rounded-full text-muted-foreground">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create manually
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create a trip manually</DialogTitle>
+                  <DialogDescription>
+                    Enter the basic details yourself — or close this and let
+                    Marco plan it with you in conversation.
+                  </DialogDescription>
+                </DialogHeader>
+                <NewTripForm onSuccess={() => setIsNewTripOpen(false)} />
+              </DialogContent>
+            </Dialog>
           </div>
         )}
       </div>
+
+      <ContinuePlanning />
 
       {trips?.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center space-y-6 bg-card rounded-2xl border shadow-sm">
@@ -102,7 +120,8 @@ export default function TripsDashboard() {
           <div className="space-y-2 max-w-md">
             <h3 className="text-2xl font-serif font-semibold">No trips planned yet</h3>
             <p className="text-muted-foreground">
-              Start planning your first adventure by creating a new trip.
+              Tell Marco where you're dreaming of and he'll build your first
+              trip with you — or create one manually.
             </p>
           </div>
           <div className="flex flex-wrap justify-center gap-3">
@@ -114,12 +133,16 @@ export default function TripsDashboard() {
             </Button>
             <Button variant="outline" onClick={() => setIsNewTripOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />
-              Create First Trip
+              Create manually
             </Button>
           </div>
         </div>
       ) : (
         <div className="space-y-12">
+          <h2 className="text-2xl font-serif font-medium flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-primary" />
+            Your journeys
+          </h2>
           {activeTrips.length > 0 && (
             <section className="space-y-6">
               <h2 className="text-2xl font-serif font-medium flex items-center gap-2">
