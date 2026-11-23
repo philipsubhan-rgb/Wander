@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AGENT_OPTIONS, getSelectedAgentId } from "./AgentPicker";
+import MarcoAvatar from "./MarcoAvatar";
 
 interface Message {
   role: "user" | "assistant";
@@ -51,6 +52,16 @@ interface AgentChatProps {
   onEmptyChange?: (isEmpty: boolean) => void;
   /** Called after each completed send attempt (success or failure). */
   onTurnComplete?: () => void;
+  /**
+   * Marco speaks first (design Decision 2): an opening line rendered as
+   * Marco's first message while the conversation is still empty — on the
+   * intake page this is the session view's actual nextAsk question
+   * ("Ok, where are we going?"), supplied by the parent from server
+   * state. It is a view-layer prologue only: it is never added to the
+   * message list, never sent to the server, and disappears the moment a
+   * real message exists (so it can never duplicate a persisted reply).
+   */
+  openingMessage?: string | null;
 }
 
 /** The scope fields a chat body carries: exactly one of the two. */
@@ -184,6 +195,24 @@ async function streamChat(
   return fullReply;
 }
 
+/**
+ * One assistant message with Marco's identity on it (design Decision 7):
+ * avatar + name above the bubble, so a traveler always knows who is
+ * talking. Used for real messages, the opening prologue, and the
+ * thinking indicator alike.
+ */
+function AssistantMessage({ name, children }: { name: string; children: React.ReactNode }) {
+  return (
+    <div className="mr-auto max-w-[80%]">
+      <div className="mb-1 flex items-center gap-1.5 pl-0.5">
+        <MarcoAvatar className="h-5 w-5" />
+        <span className="text-xs font-medium text-muted-foreground">{name}</span>
+      </div>
+      <div className="rounded-lg bg-muted px-3 py-2">{children}</div>
+    </div>
+  );
+}
+
 function AssistantBubble({ content }: { content: string }) {
   return (
     <div className="prose prose-sm max-w-none break-words text-sm dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-headings:mb-1 prose-headings:mt-3 prose-a:text-primary prose-a:underline prose-code:rounded prose-code:bg-background/60 prose-code:px-1 prose-code:py-0.5 prose-code:before:content-none prose-code:after:content-none">
@@ -202,7 +231,7 @@ function AssistantBubble({ content }: { content: string }) {
   );
 }
 
-export default function AgentChat({ tripId, intakeSessionId, agentId, initialMessage, onInitialMessageConsumed, bare, onEmptyChange, onTurnComplete }: AgentChatProps) {
+export default function AgentChat({ tripId, intakeSessionId, agentId, initialMessage, onInitialMessageConsumed, bare, onEmptyChange, onTurnComplete, openingMessage }: AgentChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -228,10 +257,18 @@ export default function AgentChat({ tripId, intakeSessionId, agentId, initialMes
   // Intake scope reads the intake conversation's history the same way
   // (GET /agent/history?intakeSessionId=N, ADR-3).
   const historySeededRef = useRef(false);
+  // True once the history read has settled (or there is no history to
+  // read) — the opening prologue waits for this so a resumed session's
+  // real history is never preceded by a "first message" that isn't.
+  const [historySettled, setHistorySettled] = useState(false);
   const scopeKey =
     intakeSessionId != null ? `intake:${intakeSessionId}` : tripId != null ? `trip:${tripId}` : null;
   useEffect(() => {
-    if (scopeKey == null || historySeededRef.current) return;
+    if (scopeKey == null) {
+      setHistorySettled(true);
+      return;
+    }
+    if (historySeededRef.current) return;
     historySeededRef.current = true;
     const historyUrl =
       intakeSessionId != null
@@ -251,7 +288,8 @@ export default function AgentChat({ tripId, intakeSessionId, agentId, initialMes
       })
       .catch(() => {
         // History is a nice-to-have: an empty chat still works.
-      });
+      })
+      .finally(() => setHistorySettled(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeKey]);
 
@@ -342,28 +380,41 @@ export default function AgentChat({ tripId, intakeSessionId, agentId, initialMes
       )}
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
-        {messages.length === 0 && (
+        {messages.length === 0 && !openingMessage && (
           <p className="text-sm text-muted-foreground">
             {intakeSessionId != null
               ? "Tell Marco where you'd like to go — he'll ask a few questions and build the trip with you."
               : "Ask about your trip — schedule changes, what's next, or help re-planning a day."}
           </p>
         )}
-        {messages.map((m, i) =>
-          m.role === "user" ? (
+        {/* Marco speaks first (Decision 2): the opening prologue, shown
+            only while the conversation is genuinely empty and history
+            has settled. Not part of `messages` — see the prop docs. */}
+        {messages.length === 0 && historySettled && openingMessage && (
+          <AssistantMessage name={agentName}>
+            <AssistantBubble content={openingMessage} />
+          </AssistantMessage>
+        )}
+        {messages.map((m, i) => {
+          // The reserved streaming bubble is still empty — the progress
+          // indicator below stands in for it until the first token lands.
+          if (m.role === "assistant" && m.content === "" && i === streamingId) return null;
+          return m.role === "user" ? (
             <div key={i} className="ml-auto max-w-[80%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
               {m.content}
             </div>
           ) : (
-            <div key={i} className="mr-auto max-w-[80%] rounded-lg bg-muted px-3 py-2">
+            <AssistantMessage key={i} name={agentName}>
               <AssistantBubble content={m.content} />
-            </div>
-          ),
-        )}
+            </AssistantMessage>
+          );
+        })}
         {showProgress && (
-          <div className="mr-auto rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-            {statusText ?? `${agentName} is thinking…`}
-          </div>
+          <AssistantMessage name={agentName}>
+            <p className="text-sm text-muted-foreground">
+              {statusText ?? `${agentName} is thinking…`}
+            </p>
+          </AssistantMessage>
         )}
         {error && (
           <div className="rounded-lg border border-destructive/50 px-3 py-2 text-sm text-destructive">

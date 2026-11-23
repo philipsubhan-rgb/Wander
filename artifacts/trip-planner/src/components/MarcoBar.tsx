@@ -14,7 +14,7 @@ import { Send, ChevronDown, ChevronUp } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import AgentChat from "@/components/AgentChat";
-import { AGENT_OPTIONS } from "@/components/AgentPicker";
+import { AGENT_OPTIONS, MARCO_AGENT_ID } from "@/components/AgentPicker";
 
 const MARCO_ICON = "/marco-icon.webp";
 
@@ -31,9 +31,11 @@ interface MarcoBarProps {
   defaultOpen?: boolean;
   /** Forwarded to AgentChat — fires after each completed turn. */
   onTurnComplete?: () => void;
+  /** Forwarded to AgentChat — Marco's opening line (Decision 2). */
+  openingMessage?: string | null;
 }
 
-export default function MarcoBar({ tripId, intakeSessionId, defaultOpen, onTurnComplete }: MarcoBarProps) {
+export default function MarcoBar({ tripId, intakeSessionId, defaultOpen, onTurnComplete, openingMessage }: MarcoBarProps) {
   const [open, setOpen] = useState(defaultOpen ?? false);
   const [hasOpened, setHasOpened] = useState(defaultOpen ?? false);
   const [seed, setSeed] = useState<string | null>(null);
@@ -41,9 +43,9 @@ export default function MarcoBar({ tripId, intakeSessionId, defaultOpen, onTurnC
   // Compact panel while the conversation is empty; full height once it isn't.
   const [chatEmpty, setChatEmpty] = useState(true);
 
-  // MarcoBar is Marco's dedicated surface: always the muse-spark agent,
-  // never the legacy mock-only "wander" assistant.
-  const agentId = "muse-spark";
+  // MarcoBar is Marco's dedicated surface: always Marco, never the
+  // legacy mock-only "wander" assistant (Decision 7 fence).
+  const agentId = MARCO_AGENT_ID;
   const agentName =
     AGENT_OPTIONS.find((o) => o.id === agentId)?.name ?? "Marco";
 
@@ -141,6 +143,7 @@ export default function MarcoBar({ tripId, intakeSessionId, defaultOpen, onTurnC
               onInitialMessageConsumed={() => setSeed(null)}
               onEmptyChange={setChatEmpty}
               onTurnComplete={onTurnComplete}
+              openingMessage={openingMessage}
             />
           </div>
         </div>
