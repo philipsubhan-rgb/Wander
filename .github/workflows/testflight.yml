@@ -33,7 +33,13 @@ jobs:
           cache: pnpm
 
       - name: Install workspace deps
-        run: pnpm install --frozen-lockfile
+        # NOT --frozen-lockfile: the committed lockfile is generated on Linux
+        # and lacks the darwin-arm64 optional native binaries (rollup,
+        # esbuild), so a frozen install on this runner produces a tree whose
+        # vite build dies with "Cannot find module @rollup/rollup-darwin-arm64"
+        # (first TestFlight run, 2026-11-23). Let pnpm resolve platform
+        # optionals for the runner's OS/arch.
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build web frontend
         env:
