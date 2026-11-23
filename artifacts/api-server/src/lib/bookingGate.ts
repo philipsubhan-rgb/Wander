@@ -55,6 +55,7 @@ import {
   rankingInputsHash,
   type ConfirmationPolicy,
   type CoverageEntry,
+  type PolicyDecision,
 } from "./bookingGateLogic";
 import {
   DuffelError,
@@ -1662,6 +1663,24 @@ export class BookingGate {
     const attempt = await this.loadAttempt(attemptId);
     await this.assertTripAccess(actor.userId, actor.role, attempt.tripId);
     return { attempt, coverage: await this.loadCoverage(attemptId) };
+  }
+
+  /**
+   * The ConfirmationPolicy's verdict for one viewer, read-only — the
+   * review surface (§5.2) uses it to know whether THIS traveler may
+   * complete the confirmation, and to show the policy's own reason
+   * when they may not. Evaluates the same injected policy instance
+   * confirmAttempt consults, so the surface can never disagree with
+   * the gate about who can confirm. Records nothing.
+   */
+  policyDecisionFor(
+    coverage: BookingAttemptTraveler[],
+    confirmerUserId: number,
+  ): PolicyDecision {
+    return this.policy.evaluateConfirm({
+      coverage: coverage.map(toCoverageEntry),
+      confirmerUserId,
+    });
   }
 
   // ── Passengers from the vault ─────────────────────────────────────────────
