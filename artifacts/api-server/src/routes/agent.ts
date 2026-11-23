@@ -63,6 +63,7 @@ import { CALL_TOOLS, getCallToolDefinition } from "../lib/agentCallTools";
 import {
   assertIntakeAccess,
   createIntakeSession,
+  listResumableIntakeSessions,
   loadIntakeSession,
   markIntakeIntent,
   recordIntakeTurnAsk,
@@ -1067,6 +1068,29 @@ router.get("/agent/history", requireAuth, async (req: Request, res: Response) =>
   } catch (err) {
     logger.error({ tripId, userId, err }, "[Agent] history fetch failed");
     res.status(500).json({ error: "Failed to load conversation history" });
+  }
+});
+
+/**
+ * GET /agent/intake-sessions — the caller's own resumable intakes
+ * (design Decision 2: the dashboard's "Continue planning" cards).
+ * Owner-scoped by construction — the service query filters on the
+ * authenticated user id; there is no way to name another traveler's
+ * sessions. Registered before /agent/intake-sessions/:id for clarity
+ * (the paths are distinct shapes, so order is not load-bearing).
+ */
+router.get("/agent/intake-sessions", requireAuth, async (req: Request, res: Response) => {
+  const userId = getAuthUserId(req, res);
+  if (!userId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  try {
+    const sessions = await listResumableIntakeSessions(userId);
+    res.json({ sessions });
+  } catch (err) {
+    logger.error({ userId, err }, "[Agent] intake session list failed");
+    res.status(500).json({ error: "Failed to list intake sessions" });
   }
 });
 

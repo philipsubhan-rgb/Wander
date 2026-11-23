@@ -10,7 +10,7 @@
  * per-trip Marco conversation.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import {
   db,
   intakeSessionsTable,
@@ -169,6 +169,37 @@ export async function assertIntakeAccess(
     throw new IntakeAccessDenied(`Not your intake session ${sessionId}.`);
   }
   return rowToView(row);
+}
+
+export interface IntakeSessionListItem extends IntakeSessionView {
+  /** ISO timestamp of the session's last write — the resume card's "last touched". */
+  updatedAt: string;
+}
+
+/**
+ * The caller's own resumable intakes (design Decision 2 — the dashboard's
+ * "Continue planning" cards). A session is resumable when the traveler
+ * actually started it (intent captured, so the machine has left OPENING)
+ * and it has not materialized into a trip. Sessions a page mount created
+ * but nobody ever spoke to are not drafts worth resuming and never
+ * appear. Owner isolation is by construction: the query filters on the
+ * authenticated caller's id and takes no parameter that could name
+ * another traveler.
+ */
+export async function listResumableIntakeSessions(
+  userId: number,
+  limit = 10,
+): Promise<IntakeSessionListItem[]> {
+  const rows = await db
+    .select()
+    .from(intakeSessionsTable)
+    .where(eq(intakeSessionsTable.userId, userId))
+    .orderBy(desc(intakeSessionsTable.updatedAt))
+    .limit(25);
+  return rows
+    .map((row) => ({ ...rowToView(row), updatedAt: row.updatedAt.toISOString() }))
+    .filter((item) => item.draftTripId === null && item.state !== "OPENING")
+    .slice(0, limit);
 }
 
 // ─── Writes ──────────────────────────────────────────────────────────────────
