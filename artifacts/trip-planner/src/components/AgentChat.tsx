@@ -15,11 +15,13 @@
  * (mount inside a trip detail page or a global chat drawer).
  */
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AGENT_OPTIONS, getSelectedAgentId } from "./AgentPicker";
 import MarcoAvatar from "./MarcoAvatar";
+import BookingReviewCard from "./BookingReviewCard";
+import { extractReviewAttemptIds } from "@/lib/booking-review";
 
 interface Message {
   role: "user" | "assistant";
@@ -399,14 +401,32 @@ export default function AgentChat({ tripId, intakeSessionId, agentId, initialMes
           // The reserved streaming bubble is still empty — the progress
           // indicator below stands in for it until the first token lands.
           if (m.role === "assistant" && m.content === "" && i === streamingId) return null;
-          return m.role === "user" ? (
-            <div key={i} className="ml-auto max-w-[80%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
-              {m.content}
-            </div>
-          ) : (
-            <AssistantMessage key={i} name={agentName}>
-              <AssistantBubble content={m.content} />
-            </AssistantMessage>
+          if (m.role === "user") {
+            return (
+              <div key={i} className="ml-auto max-w-[80%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+                {m.content}
+              </div>
+            );
+          }
+          // A booking_review tool result in the text is the trigger
+          // for the on-screen confirmation card (decision 6): chat
+          // messages carry text only, so the attempt id in the
+          // review text is the minimal reliable hook. Trip scope
+          // only — attempts belong to trips.
+          const numericTripId =
+            tripId != null && Number.isFinite(Number(tripId)) ? Number(tripId) : null;
+          const reviewAttemptIds =
+            numericTripId != null ? extractReviewAttemptIds(m.content) : [];
+          return (
+            <Fragment key={i}>
+              <AssistantMessage name={agentName}>
+                <AssistantBubble content={m.content} />
+              </AssistantMessage>
+              {numericTripId != null &&
+                reviewAttemptIds.map((attemptId) => (
+                  <BookingReviewCard key={attemptId} tripId={numericTripId} attemptId={attemptId} />
+                ))}
+            </Fragment>
           );
         })}
         {showProgress && (

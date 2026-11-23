@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+import TripPendingConfirmations from '@/components/trip/TripPendingConfirmations';
 import { TripOverview } from '@/components/trip/TripOverview';
 import { TripFlights } from '@/components/trip/TripFlights';
 import { TripAccommodations } from '@/components/trip/TripAccommodations';
@@ -251,6 +252,7 @@ export default function TripDetail({ editMode = false }: { editMode?: boolean })
         <div className="mb-6">
           <MarcoBar tripId={tripId} />
         </div>
+        <TripPendingConfirmations tripId={tripId} />
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           {/* Desktop tab rail — unchanged */}
           <div className="hidden md:block overflow-x-auto pb-2 scrollbar-hide">
