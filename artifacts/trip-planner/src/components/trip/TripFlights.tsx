@@ -16,8 +16,9 @@ import { toast } from 'sonner';
 import { Plane, PlaneTakeoff, Plus, Trash2, Pencil, Loader2 } from 'lucide-react';
 import {
   formatFlightTime24, formatFlightFullDate, toDatetimeLocalValue,
-  airportTimeZone, formatMoney,
+  airportTimeZone,
 } from '@workspace/flight-time';
+import { FlightPricingBlock } from './TripPricing';
 import { Checkbox } from '@/components/ui/checkbox';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -309,7 +310,7 @@ export function TripFlights({ tripId, editMode, tripStartDate, tripEndDate }: { 
         <div className="flex justify-end">
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4 mr-2" /> Add Flight</Button>
+              <Button className="min-h-[44px]"><Plus className="h-4 w-4 mr-2" /> Add Flight</Button>
             </DialogTrigger>
             <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
               <DialogHeader><DialogTitle>Add Flight</DialogTitle></DialogHeader>
@@ -382,7 +383,7 @@ function FlightCard({ tripId, flight, editMode, tripStartDate }: { tripId: numbe
   };
 
   return (
-    <div className="bg-card border rounded-xl p-6 shadow-sm relative overflow-hidden group">
+    <div className="bg-card border rounded-xl p-4 sm:p-6 shadow-sm relative overflow-hidden group">
       <div className="absolute top-0 right-0 p-4 flex gap-2">
         {(
           <>
@@ -417,25 +418,6 @@ function FlightCard({ tripId, flight, editMode, tripStartDate }: { tripId: numbe
                   <><span>•</span><span className="font-mono">{flight.confirmationCode}</span></>
                 )}
               </p>
-              {(() => {
-                const price = formatMoney(flight.totalPrice, flight.currency);
-                const fareBits = [
-                  flight.passengerCount ? `${flight.passengerCount} ${flight.passengerCount === 1 ? 'passenger' : 'passengers'}` : null,
-                  flight.fareBrand || null,
-                  flight.refundable === true ? 'Refundable' : flight.refundable === false ? 'Non-refundable' : null,
-                  flight.changeable === true ? 'Changeable' : flight.changeable === false ? 'Non-changeable' : null,
-                  flight.checkedBags || null,
-                ].filter(Boolean);
-                if (!price && fareBits.length === 0) return null;
-                return (
-                  <p className="text-sm text-muted-foreground flex gap-2 flex-wrap mt-1">
-                    {price && <span className="font-semibold text-foreground">{price}</span>}
-                    {fareBits.map((b, i) => (
-                      <span key={i} className="flex gap-2"><span>•</span><span>{b}</span></span>
-                    ))}
-                  </p>
-                );
-              })()}
             </div>
           </div>
 
@@ -463,6 +445,8 @@ function FlightCard({ tripId, flight, editMode, tripStartDate }: { tripId: numbe
           </div>
         </div>
       </div>
+
+      <FlightPricingBlock flight={flight} />
     </div>
   );
 }

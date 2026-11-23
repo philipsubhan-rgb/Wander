@@ -12,10 +12,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Home, MapPin, Calendar, Plus, Trash2, Pencil, Camera, Phone, DollarSign } from 'lucide-react';
+import { Home, MapPin, Calendar, Plus, Trash2, Pencil, Camera, Phone } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { formatMoney } from '@workspace/flight-time';
 import { MiniMap } from './MiniMap';
+import { StayPricingBlock } from './TripPricing';
 import { useAuth } from '@/hooks/use-auth';
 import { fetchWikiImage } from '@/lib/wiki-image';
 
@@ -155,7 +155,7 @@ export function TripAccommodations({ tripId, editMode, tripStartDate, tripEndDat
         <div className="flex justify-end">
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4 mr-2" /> Add Stay</Button>
+              <Button className="min-h-[44px]"><Plus className="h-4 w-4 mr-2" /> Add Stay</Button>
             </DialogTrigger>
             <DialogContent className="max-h-[90vh] overflow-y-auto">
               <DialogHeader><DialogTitle>Add Accommodation</DialogTitle></DialogHeader>
@@ -295,22 +295,9 @@ function AccommCard({ tripId, stay, editMode, tripStartDate, tripEndDate }: { tr
               Code: {stay.confirmationCode}
             </div>
           )}
-          {(() => {
-            const nightly = formatMoney(stay.nightlyRate, stay.currency);
-            const total = formatMoney(stay.totalPrice, stay.currency);
-            if (!nightly && !total) return null;
-            return (
-              <div className="flex items-center gap-2">
-                <DollarSign className="h-4 w-4 shrink-0" />
-                <span>
-                  {nightly && <span>{nightly} / night</span>}
-                  {nightly && total && <span className="text-muted-foreground"> · </span>}
-                  {total && <span className={nightly ? '' : 'font-semibold text-foreground'}>{total} total</span>}
-                </span>
-              </div>
-            );
-          })()}
         </div>
+
+        <StayPricingBlock stay={stay} />
       </div>
 
       {/* ── Mini map ── */}
